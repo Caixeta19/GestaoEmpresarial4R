@@ -144,6 +144,12 @@
 			<artifactId>postgresql</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- Faltava: usado pelo RabbitMQContainer em TestcontainersConfiguration.java -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>rabbitmq</artifactId>
+			<scope>test</scope>
+		</dependency>
 
 		<!-- ============================================= -->
 		<!-- Adicionadas manualmente (fora do Initializr)    -->
