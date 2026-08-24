@@ -1,3 +1,38 @@
 spring:
   application:
     name: syscor
+
+  profiles:
+    default: dev
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # schema é sempre gerido pelo Flyway, nunca pelo Hibernate
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: America/Sao_Paulo
+        globally_quoted_identifiers: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+app:
+  jwt:
+    expiration: 60m
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized

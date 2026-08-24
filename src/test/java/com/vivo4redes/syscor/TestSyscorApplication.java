@@ -1,5 +1,4 @@
 package com.vivo4redes.syscor;
-
 import org.springframework.boot.SpringApplication;
 
 public class TestSyscorApplication {

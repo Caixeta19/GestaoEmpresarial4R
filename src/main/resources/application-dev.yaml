@@ -1,0 +1,24 @@
+app:
+  jwt:
+    secret: "dev-only-secret-nao-usar-em-producao-troque-isso-1234567890"
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/syscor
+    username: syscor
+    password: syscor
+
+  jpa:
+    show-sql: true
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+logging:
+  level:
+    com.vivo4redes.syscor: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE

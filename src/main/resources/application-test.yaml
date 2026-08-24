@@ -1,0 +1,20 @@
+# Datasource e RabbitMQ deste profile são resolvidos automaticamente pelo
+# TestcontainersConfiguration (@ServiceConnection) quando os testes sobem o
+# contexto Spring. As variáveis SPRING_DATASOURCE_* setadas no CI.yml servem
+# apenas de fallback e não têm efeito quando o ServiceConnection está ativo.
+
+app:
+  jwt:
+    secret: "test-only-secret-fixo-para-os-testes-automatizados-abc123"
+
+spring:
+  jpa:
+    show-sql: false
+
+  flyway:
+    clean-disabled: false   # nos testes é seguro limpar o schema entre execuções
+
+logging:
+  level:
+    com.vivo4redes.syscor: DEBUG
+    org.testcontainers: INFO
