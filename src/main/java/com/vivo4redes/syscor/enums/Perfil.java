@@ -2,7 +2,13 @@ package com.vivo4redes.syscor.enums;
 
 public enum Perfil {
     ADMIN,
-    GERENTE,
-    VENDEDOR,
-
-}
+    GERENTE_DE_VENDA_JUNIOR,
+    GERENTE_DE_VENDA_PLENO,
+    GERENTE_DE_VENDA_SENIOR,
+    AUXILIAR_AUDITORIA,
+    ASSISTENTE_DE_DADOS,
+    ANALISTA_DE_DADOS,
+    CONSULTOR_DE_VENDAS_1,
+    AUXILIAR_BKO,
+    SUPERVISOR
+    }
