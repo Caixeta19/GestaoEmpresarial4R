@@ -1,0 +1,65 @@
+services:
+
+  syscor-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syscor-app
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://syscor-db:5432/syscor
+      SPRING_DATASOURCE_USERNAME: syscor
+      SPRING_DATASOURCE_PASSWORD: syscor
+      SPRING_RABBITMQ_HOST: syscor-rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+    depends_on:
+      syscor-db:
+        condition: service_healthy
+      syscor-rabbitmq:
+        condition: service_healthy
+    networks:
+      - syscor-net
+
+  syscor-db:
+    image: postgres:16-alpine
+    container_name: syscor-db
+    environment:
+      POSTGRES_DB: syscor
+      POSTGRES_USER: syscor
+      POSTGRES_PASSWORD: syscor
+    ports:
+      - "5432:5432"
+    volumes:
+      - syscor-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syscor -d syscor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syscor-net
+
+  syscor-rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: syscor-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # painel de gerenciamento
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syscor-net
+
+networks:
+  syscor-net:
+    driver: bridge
+
+volumes:
+  syscor-db-data:

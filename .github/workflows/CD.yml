@@ -1,0 +1,107 @@
+name: CD
+
+on:
+  push:
+    branches: [develop, main]
+
+permissions:
+  id-token: write   # necessario para OIDC com AWS (sem access key fixa)
+  contents: read
+
+env:
+  AWS_REGION: sa-east-1
+  ECR_REPOSITORY: syscor
+
+jobs:
+  # ============================================================
+  # Build da imagem Docker + push para o Amazon ECR
+  # Roda em qualquer push nas branches develop ou main
+  # ============================================================
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.image-tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Definir tag da imagem
+        id: meta
+        run: echo "image-tag=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar credenciais AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e push da imagem
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ steps.meta.outputs.image-tag }}
+        run: |
+          docker build -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$REGISTRY/$ECR_REPOSITORY:latest" .
+          docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+
+  # ============================================================
+  # Deploy automatico em staging
+  # Disparado por push na branch develop
+  # ============================================================
+  deploy-staging:
+    if: github.ref == 'refs/heads/develop'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.dominio.com.br
+    steps:
+      - name: Configurar credenciais AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Atualizar servico no App Runner (staging)
+        run: |
+          aws apprunner start-deployment \
+            --service-arn "${{ secrets.APP_RUNNER_SERVICE_ARN_STAGING }}"
+
+      - name: Aguardar deploy concluir
+        run: |
+          aws apprunner wait service-updated \
+            --service-arn "${{ secrets.APP_RUNNER_SERVICE_ARN_STAGING }}" || true
+
+  # ============================================================
+  # Deploy em producao
+  # Disparado por push/merge na branch main
+  # Exige aprovacao manual via protecao do environment "production"
+  # (configurar em Settings > Environments > production > Required reviewers)
+  # ============================================================
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://dominio.com.br
+    steps:
+      - name: Configurar credenciais AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Atualizar servico no App Runner (producao)
+        run: |
+          aws apprunner start-deployment \
+            --service-arn "${{ secrets.APP_RUNNER_SERVICE_ARN_PRODUCTION }}"
+
+      - name: Aguardar deploy concluir
+        run: |
+          aws apprunner wait service-updated \
+            --service-arn "${{ secrets.APP_RUNNER_SERVICE_ARN_PRODUCTION }}" || true
