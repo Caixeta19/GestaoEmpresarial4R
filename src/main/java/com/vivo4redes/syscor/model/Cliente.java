@@ -45,7 +45,7 @@ public class Cliente {
     private UUID id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "cliente", nullable = false, length = 10)
+    @Column(name = "tipo_pessoa", nullable = false, length = 10)
     private TipoPessoa tipoPessoa;
 
     @Column(name = "nome", nullable = false, length = 150)
