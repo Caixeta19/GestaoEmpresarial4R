@@ -5,6 +5,10 @@ spring:
   profiles:
     default: dev
 
+  docker:
+    compose:
+      enabled: false
+
   jpa:
     open-in-view: false
     hibernate:

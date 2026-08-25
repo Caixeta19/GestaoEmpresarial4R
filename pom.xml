@@ -19,8 +19,10 @@
 
 	<properties>
 		<java.version>21</java.version>
+		<lombok.version>1.18.34</lombok.version>
 		<jjwt.version>0.12.6</jjwt.version>
 		<mapstruct.version>1.6.0</mapstruct.version>
+		<mapstruct-binding.version>0.2.0</mapstruct-binding.version>
 		<awssdk.version>2.28.0</awssdk.version>
 		<poi.version>5.3.0</poi.version>
 		<openhtmltopdf.version>1.0.10</openhtmltopdf.version>
@@ -101,7 +103,7 @@
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
-			<optional>true</optional>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -110,7 +112,7 @@
 			<optional>true</optional>
 		</dependency>
 
-		<!-- Docker Compose (sobe docker-compose.yml automaticamente ao rodar local - perfil dev) -->
+		<!-- Docker Compose -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-docker-compose</artifactId>
@@ -144,7 +146,6 @@
 			<artifactId>postgresql</artifactId>
 			<scope>test</scope>
 		</dependency>
-		<!-- Faltava: usado pelo RabbitMQContainer em TestcontainersConfiguration.java -->
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>rabbitmq</artifactId>
@@ -162,7 +163,7 @@
 			<version>${springdoc.version}</version>
 		</dependency>
 
-		<!-- JWT (US-001: autenticação com token + refresh) -->
+		<!-- JWT -->
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
 			<artifactId>jjwt-api</artifactId>
@@ -181,20 +182,20 @@
 			<scope>runtime</scope>
 		</dependency>
 
-		<!-- Auditoria de entidades (US-003: log_auditoria com payload antes/depois) -->
+		<!-- Auditoria de entidades -->
 		<dependency>
 			<groupId>org.hibernate.orm</groupId>
 			<artifactId>hibernate-envers</artifactId>
 		</dependency>
 
-		<!-- Storage de documentos em bucket S3-compatível (Épico 4) -->
+		<!-- Storage S3 -->
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>s3</artifactId>
 			<version>${awssdk.version}</version>
 		</dependency>
 
-		<!-- Exportação Excel/CSV (US-104, US-106, Épico 7) -->
+		<!-- Exportação Excel/CSV -->
 		<dependency>
 			<groupId>org.apache.poi</groupId>
 			<artifactId>poi</artifactId>
@@ -206,21 +207,21 @@
 			<version>${poi.version}</version>
 		</dependency>
 
-		<!-- Geração de PDF (fatura - US-103, DANFE - US-601) -->
+		<!-- Geração de PDF -->
 		<dependency>
 			<groupId>com.openhtmltopdf</groupId>
 			<artifactId>openhtmltopdf-pdfbox</artifactId>
 			<version>${openhtmltopdf.version}</version>
 		</dependency>
 
-		<!-- Validação de CPF/CNPJ (US-301) -->
+		<!-- Validação de CPF/CNPJ -->
 		<dependency>
 			<groupId>br.com.caelum.stella</groupId>
 			<artifactId>caelum-stella-core</artifactId>
 			<version>${caelumstella.version}</version>
 		</dependency>
 
-		<!-- Retry com backoff exponencial (US-505: falhas de webhook) -->
+		<!-- Retry -->
 		<dependency>
 			<groupId>org.springframework.retry</groupId>
 			<artifactId>spring-retry</artifactId>
@@ -254,7 +255,7 @@
 				</configuration>
 			</plugin>
 
-			<!-- Lombok + MapStruct juntos exigem o annotation processor path explícito -->
+			<!-- Lombok + MapStruct Annotation Processors -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
@@ -263,6 +264,7 @@
 						<path>
 							<groupId>org.projectlombok</groupId>
 							<artifactId>lombok</artifactId>
+							<version>${lombok.version}</version>
 						</path>
 						<path>
 							<groupId>org.mapstruct</groupId>
@@ -272,7 +274,7 @@
 						<path>
 							<groupId>org.projectlombok</groupId>
 							<artifactId>lombok-mapstruct-binding</artifactId>
-							<version>0.2.0</version>
+							<version>${mapstruct-binding.version}</version>
 						</path>
 					</annotationProcessorPaths>
 				</configuration>
