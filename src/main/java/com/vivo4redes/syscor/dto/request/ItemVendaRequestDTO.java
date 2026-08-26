@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.dto.request;
 
+import com.vivo4redes.syscor.enums.CategoriaItemVenda;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -7,6 +8,9 @@ import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 
 public record ItemVendaRequestDTO(
+
+        @NotNull(message = "categoria é obrigatória (PRODUTO_VIVO, SERVICO_VIVO ou RECARGA)")
+        CategoriaItemVenda categoria,
 
         @NotNull(message = "produtoId é obrigatório")
         Long produtoId,

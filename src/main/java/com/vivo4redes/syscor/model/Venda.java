@@ -1,5 +1,7 @@
 package com.vivo4redes.syscor.model;
+
 import com.vivo4redes.syscor.enums.StatusAvaliacaoProcedencia;
+import com.vivo4redes.syscor.enums.StatusScoreCliente;
 import com.vivo4redes.syscor.enums.StatusVenda;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -32,6 +34,32 @@ public class Venda {
     @JoinColumn(name = "cliente_id", nullable = false)
     private Cliente cliente;
 
+    /** Filial/loja onde a venda foi registrada (tela "Início"). */
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "filial_id", nullable = false)
+    private Filial filial;
+
+    /** Vendedor autenticado que abriu/está operando a venda (tela "Início"). */
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "vendedor_id", nullable = false)
+    private Vendedor vendedor;
+
+    /** Dropdown "Venda Estoque Avançado?" da tela Início. */
+    @Column(name = "estoque_avancado", nullable = false)
+    @Builder.Default
+    private boolean estoqueAvancado = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_score_cliente", nullable = false, length = 20)
+    @Builder.Default
+    private StatusScoreCliente statusScoreCliente = StatusScoreCliente.NAO_REALIZADA;
+
+    @Column(name = "numero_serie_nota", length = 10)
+    private String numeroSerieNota;
+
+    @Column(name = "numero_nota", length = 20)
+    private String numeroNota;
+
     @OneToMany(mappedBy = "venda", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<ItemVenda> itens = new ArrayList<>();
@@ -44,7 +72,7 @@ public class Venda {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
-    private StatusVenda status = StatusVenda.PENDENTE;
+    private StatusVenda status = StatusVenda.ABERTA;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "avaliacao_procedencia", length = 20)
@@ -71,5 +99,13 @@ public class Venda {
         this.valorTotal = itens.stream()
                 .map(ItemVenda::getValorTotalItem)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public void removerItem(Long itemId) {
+        this.itens.removeIf(i -> i.getId().equals(itemId));
+    }
+
+    public long contarItensPorCategoria(com.vivo4redes.syscor.enums.CategoriaItemVenda categoria) {
+        return itens.stream().filter(i -> i.getCategoria() == categoria).count();
     }
 }

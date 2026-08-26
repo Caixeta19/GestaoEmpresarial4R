@@ -1,4 +1,5 @@
 package com.vivo4redes.syscor.dto.response;
+import com.vivo4redes.syscor.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.enums.StatusVenda;
 import com.vivo4redes.syscor.model.ItemVenda;
@@ -18,11 +19,11 @@ public record VendaResponseDTO(
         StatusAvaliacaoProcedencia avaliacaoProcedencia,
         Instant criadoEm
 ) {
-    public record ItemDTO(Long produtoId, String descricaoProduto, BigDecimal quantidade,
-                          BigDecimal valorUnitario, BigDecimal valorTotalItem) {
+    public record ItemDTO(Long id, CategoriaItemVenda categoria, Long produtoId, String descricaoProduto,
+                          BigDecimal quantidade, BigDecimal valorUnitario, BigDecimal valorTotalItem) {
         static ItemDTO from(ItemVenda i) {
-            return new ItemDTO(i.getProdutoId(), i.getDescricaoProduto(), i.getQuantidade(),
-                    i.getValorUnitario(), i.getValorTotalItem());
+            return new ItemDTO(i.getId(), i.getCategoria(), i.getProdutoId(), i.getDescricaoProduto(),
+                    i.getQuantidade(), i.getValorUnitario(), i.getValorTotalItem());
         }
     }
 

@@ -1,10 +1,13 @@
 package com.vivo4redes.syscor.model;
+
+import com.vivo4redes.syscor.enums.CategoriaItemVenda;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
 import java.math.BigDecimal;
 
 /**
@@ -30,7 +33,12 @@ public class ItemVenda {
     @JoinColumn(name = "venda_id", nullable = false)
     private Venda venda;
 
-    /** Referência lógica ao futuro Produto do módulo de Estoque (sem FK física ainda). */
+    /** Categoria da aba de origem na UI (Produto Vivo / Serviço Vivo / Recarga). */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private CategoriaItemVenda categoria;
+
+    /** Referência lógica ao futuro Produto/Serviço do módulo de Estoque (sem FK física ainda). */
     @Column(name = "produto_id", nullable = false)
     private Long produtoId;
 

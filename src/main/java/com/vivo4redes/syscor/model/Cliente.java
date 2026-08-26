@@ -41,17 +41,6 @@ public class Cliente {
     @Builder.Default
     private boolean ativo = true;
 
-    // --- LGPD / consentimento (US-301) ---
-    @Column(name = "consentimento_marketing", nullable = false)
-    @Builder.Default
-    private boolean consentimentoMarketing = false;
-
-    @Column(name = "consentimento_data_hora")
-    private LocalDateTime consentimentoDataHora;
-
-    @Column(name = "consentimento_versao_termo", length = 20)
-    private String consentimentoVersaoTermo;
-
     @CreationTimestamp
     @Column(name = "criado_em", nullable = false, updatable = false)
     private Instant criadoEm;
