@@ -8,4 +8,6 @@ import java.util.Optional;
 public interface VendedorRepository extends JpaRepository<Vendedor, Long> {
 
     Optional<Vendedor> findByEmailIgnoreCaseAndAtivoTrue(String email);
+
+    boolean existsByEmailIgnoreCase(String email);
 }

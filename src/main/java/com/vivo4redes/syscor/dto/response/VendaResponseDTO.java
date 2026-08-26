@@ -1,6 +1,8 @@
 package com.vivo4redes.syscor.dto.response;
+
 import com.vivo4redes.syscor.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.enums.StatusAvaliacaoProcedencia;
+import com.vivo4redes.syscor.enums.StatusScoreCliente;
 import com.vivo4redes.syscor.enums.StatusVenda;
 import com.vivo4redes.syscor.model.ItemVenda;
 import com.vivo4redes.syscor.model.Venda;
@@ -13,6 +15,13 @@ public record VendaResponseDTO(
         Long id,
         Long clienteId,
         String clienteNome,
+        Long filialId,
+        String filialNome,
+        String vendedorNome,
+        boolean estoqueAvancado,
+        StatusScoreCliente statusScoreCliente,
+        String numeroSerieNota,
+        String numeroNota,
         List<ItemDTO> itens,
         BigDecimal valorTotal,
         StatusVenda status,
@@ -32,6 +41,13 @@ public record VendaResponseDTO(
                 v.getId(),
                 v.getCliente().getId(),
                 v.getCliente().getNome(),
+                v.getFilial().getId(),
+                v.getFilial().getNome(),
+                v.getVendedor().getNome(),
+                v.isEstoqueAvancado(),
+                v.getStatusScoreCliente(),
+                v.getNumeroSerieNota(),
+                v.getNumeroNota(),
                 v.getItens().stream().map(ItemDTO::from).toList(),
                 v.getValorTotal(),
                 v.getStatus(),
