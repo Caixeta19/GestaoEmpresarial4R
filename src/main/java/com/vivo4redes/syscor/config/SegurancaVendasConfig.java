@@ -2,17 +2,29 @@ package com.vivo4redes.syscor.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
 
-/**
- * Expõe apenas o utilitário de hash (BCrypt) usado na reautenticação do
- * vendedor (US-302). Depende só de spring-security-crypto no pom — NÃO é
- * spring-boot-starter-security, então não ativa filtro de autenticação,
- * JWT ou RBAC. Isso continua adiado para o Épico 0, por decisão do cliente.
- */
 @Configuration
+@EnableWebSecurity
 public class SegurancaVendasConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .authorizeHttpRequests(auth -> auth
+                        .anyRequest().permitAll()
+                )
+                .formLogin(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable);
+
+        return http.build();
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {

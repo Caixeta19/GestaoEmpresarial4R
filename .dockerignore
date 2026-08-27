@@ -7,6 +7,6 @@ target/
 *.log
 .env
 Dockerfile
-docker-compose.yml
+Docker-compose.yml
 .dockerignore
 README.md

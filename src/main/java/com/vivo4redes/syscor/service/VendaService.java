@@ -1,5 +1,4 @@
 package com.vivo4redes.syscor.service;
-
 import com.vivo4redes.syscor.dto.AutenticacaoVendedorDTO;
 import com.vivo4redes.syscor.dto.ResumoCarrinhoDTO;
 import com.vivo4redes.syscor.dto.request.DadosIniciaisVendaRequestDTO;

@@ -2,14 +2,16 @@ package com.vivo4redes.syscor;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
 
-@SpringBootApplication
-@ConfigurationPropertiesScan
+@SpringBootApplication(exclude = {
+		SecurityAutoConfiguration.class,
+		UserDetailsServiceAutoConfiguration.class
+})
 public class SyscorApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(SyscorApplication.class, args);
 	}
-
 }
