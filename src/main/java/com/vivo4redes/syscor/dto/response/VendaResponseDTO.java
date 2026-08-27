@@ -13,6 +13,7 @@ import java.util.List;
 
 public record VendaResponseDTO(
         Long id,
+        Long numeroVenda,
         Long clienteId,
         String clienteNome,
         Long filialId,
@@ -39,6 +40,7 @@ public record VendaResponseDTO(
     public static VendaResponseDTO from(Venda v) {
         return new VendaResponseDTO(
                 v.getId(),
+                v.getNumeroVenda(),
                 v.getCliente().getId(),
                 v.getCliente().getNome(),
                 v.getFilial().getId(),

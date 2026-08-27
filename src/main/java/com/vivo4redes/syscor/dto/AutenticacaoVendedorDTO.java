@@ -1,4 +1,12 @@
 package com.vivo4redes.syscor.dto;
+import jakarta.validation.constraints.NotBlank;
 
-public class AutenticacaoVendedorDTO {
+public record AutenticacaoVendedorDTO(
+
+        @NotBlank(message = "email é obrigatório")
+        String email,
+
+        @NotBlank(message = "senha é obrigatória")
+        String senha
+) {
 }

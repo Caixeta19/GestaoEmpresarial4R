@@ -1,5 +1,4 @@
 package com.vivo4redes.syscor.model;
-
 import com.vivo4redes.syscor.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.enums.StatusScoreCliente;
 import com.vivo4redes.syscor.enums.StatusVenda;
@@ -29,6 +28,10 @@ public class Venda {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /** Número público de 7 dígitos (ex: 1000000), gerado ao abrir a venda. Ver NumeroVendaGenerator. */
+    @Column(name = "numero_venda", nullable = false, updatable = false, unique = true)
+    private Long numeroVenda;
 
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "cliente_id", nullable = false)

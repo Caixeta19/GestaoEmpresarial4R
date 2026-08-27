@@ -1,7 +1,12 @@
 package com.vivo4redes.syscor.service;
 
-import com.vivo4redes.syscor.dto.request.ItemVendaRequestDTO;
+import com.vivo4redes.syscor.dto.AutenticacaoVendedorDTO;
 import com.vivo4redes.syscor.dto.ResumoCarrinhoDTO;
+import com.vivo4redes.syscor.dto.request.DadosIniciaisVendaRequestDTO;
+import com.vivo4redes.syscor.dto.request.FinalizarVendaRequestDTO;
+import com.vivo4redes.syscor.dto.request.ItemVendaRequestDTO;
+import com.vivo4redes.syscor.dto.request.StatusVendaRequestDTO;
+import com.vivo4redes.syscor.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.enums.StatusVenda;
@@ -31,23 +36,38 @@ public class VendaService {
 
     private final VendaRepository vendaRepository;
     private final ClienteService clienteService;
+    private final FilialService filialService;
+    private final VendedorService vendedorService;
+    private final NumeroVendaGenerator numeroVendaGenerator;
 
-    public VendaService(VendaRepository vendaRepository, ClienteService clienteService) {
+    public VendaService(VendaRepository vendaRepository, ClienteService clienteService,
+                        FilialService filialService, VendedorService vendedorService,
+                        NumeroVendaGenerator numeroVendaGenerator) {
         this.vendaRepository = vendaRepository;
         this.clienteService = clienteService;
+        this.filialService = filialService;
+        this.vendedorService = vendedorService;
+        this.numeroVendaGenerator = numeroVendaGenerator;
     }
 
     @Transactional
-    public Venda abrirCarrinho(Long clienteId) {
-        Cliente cliente = clienteService.buscarPorId(clienteId);
+    public Venda abrirCarrinho(VendaRequestDTO dto) {
+        Cliente cliente = clienteService.buscarPorId(dto.clienteId());
+        var filial = filialService.buscarPorId(dto.filialId());
+        var vendedor = vendedorService.autenticar(dto.autenticacaoVendedor());
 
         Venda venda = Venda.builder()
+                .numeroVenda(numeroVendaGenerator.gerar())
                 .cliente(cliente)
+                .filial(filial)
+                .vendedor(vendedor)
+                .estoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()))
                 .status(StatusVenda.ABERTA)
                 .build();
 
         return vendaRepository.save(venda);
     }
+
     @Transactional
     public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
@@ -88,10 +108,33 @@ public class VendaService {
         );
     }
 
+    /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */
+    @Transactional
+    public Venda atualizarDadosIniciais(Long vendaId, DadosIniciaisVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoVendedor());
+
+        Cliente cliente = clienteService.buscarPorId(dto.clienteId());
+        var filial = filialService.buscarPorId(dto.filialId());
+
+        venda.setCliente(cliente);
+        venda.setFilial(filial);
+        venda.setEstoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()));
+        if (dto.statusScoreCliente() != null) {
+            venda.setStatusScoreCliente(dto.statusScoreCliente());
+        }
+        venda.setNumeroSerieNota(dto.numeroSerieNota());
+        venda.setNumeroNota(dto.numeroNota());
+
+        return vendaRepository.save(venda);
+    }
+
     /** US-302: encerra a etapa de carrinho — a partir daqui os itens não podem mais ser alterados. */
     @Transactional
-    public Venda finalizar(Long vendaId) {
+    public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoVendedor());
+
         if (venda.getItens().isEmpty()) {
             throw new VendaSemItemException();
         }
@@ -100,9 +143,11 @@ public class VendaService {
     }
 
     @Transactional
-    public Venda avancarStatus(Long vendaId, StatusVenda novoStatus) {
+    public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
-        transicionar(venda, novoStatus);
+        exigirVendedorAutenticado(dto.autenticacaoVendedor());
+
+        transicionar(venda, dto.novoStatus());
         return vendaRepository.save(venda);
     }
 
@@ -129,6 +174,11 @@ public class VendaService {
         if (venda.getStatus() != StatusVenda.ABERTA) {
             throw new CarrinhoNaoEditavelException(venda.getId());
         }
+    }
+
+    /** US-302: reautenticação obrigatória a cada salvar/alterar a venda (tela Início). */
+    private void exigirVendedorAutenticado(AutenticacaoVendedorDTO autenticacao) {
+        vendedorService.autenticar(autenticacao);
     }
 
     private void transicionar(Venda venda, StatusVenda novoStatus) {
