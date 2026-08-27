@@ -7,11 +7,14 @@ import com.vivo4redes.syscor.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.dto.response.VendaResponseDTO;
+import com.vivo4redes.syscor.enums.StatusVenda;
 import com.vivo4redes.syscor.service.VendaService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * Endpoints pensados para a tela de registro de venda com abas por
@@ -36,9 +39,18 @@ public class VendaController {
         return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
     }
 
+    /** Lista todas as vendas, opcionalmente filtradas por cliente ou status. */
+    @GetMapping
+    public ResponseEntity<List<VendaResponseDTO>> listar(
+            @RequestParam(required = false) Long clienteId,
+            @RequestParam(required = false) StatusVenda status) {
+        var vendas = vendaService.listar(clienteId, status);
+        return ResponseEntity.ok(vendas.stream().map(VendaResponseDTO::from).toList());
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<VendaResponseDTO> buscarPorId(@PathVariable Long id) {
-        return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarPorId(id)));
+        return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarParaExibicao(id)));
     }
 
     /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */

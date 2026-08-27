@@ -20,6 +20,8 @@ import com.vivo4redes.syscor.repository.VendaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 /**
  * US-302/US-303: ciclo de vida da venda como carrinho.
  * Fluxo esperado pela UI (abas Produto Vivo / Serviço Vivo / Recarga):
@@ -69,7 +71,7 @@ public class VendaService {
 
     @Transactional
     public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaExibicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         ItemVenda item = ItemVenda.builder()
@@ -87,7 +89,7 @@ public class VendaService {
 
     @Transactional
     public Venda removerItem(Long vendaId, Long itemId) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaExibicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         venda.removerItem(itemId);
@@ -110,7 +112,7 @@ public class VendaService {
     /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */
     @Transactional
     public Venda atualizarDadosIniciais(Long vendaId, DadosIniciaisVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaExibicao(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         Cliente cliente = clienteService.buscarPorId(dto.clienteId());
@@ -131,7 +133,7 @@ public class VendaService {
     /** US-302: encerra a etapa de carrinho — a partir daqui os itens não podem mais ser alterados. */
     @Transactional
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaExibicao(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         transicionar(venda, StatusVenda.PENDENTE);
@@ -145,7 +147,7 @@ public class VendaService {
 
     @Transactional
     public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaExibicao(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         StatusVenda novoStatus = dto.novoStatus();
@@ -160,7 +162,7 @@ public class VendaService {
     /** US-303: venda improcedente é automaticamente cancelada e sai do cálculo de comissão (US-106). */
     @Transactional
     public Venda avaliarProcedencia(Long vendaId, StatusAvaliacaoProcedencia resultado) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaExibicao(vendaId);
         venda.setAvaliacaoProcedencia(resultado);
 
         if (resultado == StatusAvaliacaoProcedencia.Improcedente
@@ -170,9 +172,28 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
+    /** Lista vendas com filtros opcionais de clienteId e/ou status, prontas para exibição. */
+    @Transactional(readOnly = true)
+    public List<Venda> listar(Long clienteId, StatusVenda status) {
+        return vendaRepository.listarComRelacionamentos(clienteId, status);
+    }
+
     @Transactional(readOnly = true)
     public Venda buscarPorId(Long id) {
         return vendaRepository.findById(id)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda", id));
+    }
+
+    /**
+     * Mesma busca de {@link #buscarPorId}, mas com cliente/filial/vendedor/itens
+     * já inicializados via JOIN FETCH. Use esta variante sempre que o resultado
+     * for mapeado para VendaResponseDTO fora desta transação (ex.: no controller),
+     * já que spring.jpa.open-in-view está desabilitado e os proxies LAZY não
+     * podem mais ser acessados depois que este método retorna.
+     */
+    @Transactional(readOnly = true)
+    public Venda buscarParaExibicao(Long id) {
+        return vendaRepository.buscarComRelacionamentosPorId(id)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Venda", id));
     }
 
