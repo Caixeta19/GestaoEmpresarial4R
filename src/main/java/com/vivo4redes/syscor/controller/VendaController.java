@@ -1,6 +1,8 @@
 package com.vivo4redes.syscor.controller;
 import com.vivo4redes.syscor.dto.*;
 import com.vivo4redes.syscor.dto.request.AvaliacaoProcedenciaRequestDTO;
+import com.vivo4redes.syscor.dto.request.DadosIniciaisVendaRequestDTO;
+import com.vivo4redes.syscor.dto.request.FinalizarVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.VendaRequestDTO;
@@ -30,13 +32,21 @@ public class VendaController {
     /** Abre um novo carrinho (status ABERTA) para o cliente informado. */
     @PostMapping
     public ResponseEntity<VendaResponseDTO> abrirCarrinho(@Valid @RequestBody VendaRequestDTO dto) {
-        var venda = vendaService.abrirCarrinho(dto.clienteId());
+        var venda = vendaService.abrirCarrinho(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<VendaResponseDTO> buscarPorId(@PathVariable Long id) {
         return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarPorId(id)));
+    }
+
+    /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */
+    @PutMapping("/{id}")
+    public ResponseEntity<VendaResponseDTO> atualizarDadosIniciais(
+            @PathVariable Long id, @Valid @RequestBody DadosIniciaisVendaRequestDTO dto) {
+        var venda = vendaService.atualizarDadosIniciais(id, dto);
+        return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 
     /** Adiciona um item em uma das três abas (categoria vem no corpo). */
@@ -59,10 +69,11 @@ public class VendaController {
         return ResponseEntity.ok(vendaService.obterResumo(id));
     }
 
-    /** Encerra o carrinho: ABERTA -> PENDENTE. Exige ao menos 1 item. */
+    /** Encerra o carrinho: ABERTA -> PENDENTE. Exige ao menos 1 item e reautenticação do vendedor. */
     @PatchMapping("/{id}/finalizar")
-    public ResponseEntity<VendaResponseDTO> finalizar(@PathVariable Long id) {
-        var venda = vendaService.finalizar(id);
+    public ResponseEntity<VendaResponseDTO> finalizar(
+            @PathVariable Long id, @Valid @RequestBody FinalizarVendaRequestDTO dto) {
+        var venda = vendaService.finalizar(id, dto);
         return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 
@@ -70,7 +81,7 @@ public class VendaController {
     @PatchMapping("/{id}/status")
     public ResponseEntity<VendaResponseDTO> avancarStatus(
             @PathVariable Long id, @Valid @RequestBody StatusVendaRequestDTO dto) {
-        var venda = vendaService.avancarStatus(id, dto.novoStatus());
+        var venda = vendaService.avancarStatus(id, dto);
         return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 

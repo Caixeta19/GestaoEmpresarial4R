@@ -1,6 +1,6 @@
 package com.vivo4redes.syscor.service;
 
-import com.vivo4redes.syscor.dto.FilialRequestDTO;
+import com.vivo4redes.syscor.dto.request.FilialRequestDTO;
 import com.vivo4redes.syscor.exception.BusinessException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.model.Filial;

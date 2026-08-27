@@ -135,10 +135,12 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
+        transicionar(venda, StatusVenda.PENDENTE);
+
         if (venda.getItens().isEmpty()) {
             throw new VendaSemItemException();
         }
-        transicionar(venda, StatusVenda.PENDENTE);
+
         return vendaRepository.save(venda);
     }
 
@@ -147,7 +149,12 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
-        transicionar(venda, dto.novoStatus());
+        StatusVenda novoStatus = dto.novoStatus();
+        if (novoStatus == null) {
+            throw new IllegalArgumentException("O novo status da venda é obrigatório.");
+        }
+
+        transicionar(venda, novoStatus);
         return vendaRepository.save(venda);
     }
 
@@ -176,8 +183,17 @@ public class VendaService {
         }
     }
 
-    /** US-302: reautenticação obrigatória a cada salvar/alterar a venda (tela Início). */
+    /**
+     * US-302: reautenticação obrigatória a cada salvar/alterar a venda (tela Início).
+     * Sem @Valid/@NotNull aqui de propósito — método privado, chamado internamente
+     * (self-invocation), o Spring não aplica validação via proxy AOP nesse caso.
+     * A checagem de nulidade é feita manualmente; a validação real do DTO acontece
+     * em vendedorService.autenticar (ou via @Valid no controller/DTO externo).
+     */
     private void exigirVendedorAutenticado(AutenticacaoVendedorDTO autenticacao) {
+        if (autenticacao == null) {
+            throw new IllegalArgumentException("Dados de autenticação do vendedor são obrigatórios.");
+        }
         vendedorService.autenticar(autenticacao);
     }
 

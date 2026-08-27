@@ -1,4 +1,5 @@
 package com.vivo4redes.syscor.dto.request;
+import com.vivo4redes.syscor.dto.AutenticacaoVendedorDTO;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
