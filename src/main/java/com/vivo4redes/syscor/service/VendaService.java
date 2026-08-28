@@ -1,5 +1,5 @@
 package com.vivo4redes.syscor.service;
-import com.vivo4redes.syscor.dto.AutenticacaoVendedorDTO;
+import com.vivo4redes.syscor.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.dto.ResumoCarrinhoDTO;
 import com.vivo4redes.syscor.dto.request.DadosIniciaisVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.FinalizarVendaRequestDTO;
@@ -20,8 +20,6 @@ import com.vivo4redes.syscor.repository.VendaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-
 /**
  * US-302/US-303: ciclo de vida da venda como carrinho.
  * Fluxo esperado pela UI (abas Produto Vivo / Serviço Vivo / Recarga):
@@ -38,16 +36,16 @@ public class VendaService {
     private final VendaRepository vendaRepository;
     private final ClienteService clienteService;
     private final FilialService filialService;
-    private final VendedorService vendedorService;
+    private final UsuarioService usuarioService;
     private final NumeroVendaGenerator numeroVendaGenerator;
 
     public VendaService(VendaRepository vendaRepository, ClienteService clienteService,
-                        FilialService filialService, VendedorService vendedorService,
+                        FilialService filialService, UsuarioService usuarioService,
                         NumeroVendaGenerator numeroVendaGenerator) {
         this.vendaRepository = vendaRepository;
         this.clienteService = clienteService;
         this.filialService = filialService;
-        this.vendedorService = vendedorService;
+        this.usuarioService = usuarioService;
         this.numeroVendaGenerator = numeroVendaGenerator;
     }
 
@@ -55,13 +53,13 @@ public class VendaService {
     public Venda abrirCarrinho(VendaRequestDTO dto) {
         Cliente cliente = clienteService.buscarPorId(dto.clienteId());
         var filial = filialService.buscarPorId(dto.filialId());
-        var vendedor = vendedorService.autenticar(dto.autenticacaoVendedor());
+        var usuario = usuarioService.autenticar(dto.autenticacaoVendedor());
 
         Venda venda = Venda.builder()
                 .numeroVenda(numeroVendaGenerator.gerar())
                 .cliente(cliente)
                 .filial(filial)
-                .vendedor(vendedor)
+                .vendedor(usuario)
                 .estoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()))
                 .status(StatusVenda.ABERTA)
                 .build();
@@ -71,7 +69,7 @@ public class VendaService {
 
     @Transactional
     public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
-        Venda venda = buscarParaExibicao(vendaId);
+        Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
         ItemVenda item = ItemVenda.builder()
@@ -89,7 +87,7 @@ public class VendaService {
 
     @Transactional
     public Venda removerItem(Long vendaId, Long itemId) {
-        Venda venda = buscarParaExibicao(vendaId);
+        Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
         venda.removerItem(itemId);
@@ -112,8 +110,8 @@ public class VendaService {
     /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */
     @Transactional
     public Venda atualizarDadosIniciais(Long vendaId, DadosIniciaisVendaRequestDTO dto) {
-        Venda venda = buscarParaExibicao(vendaId);
-        exigirVendedorAutenticado(dto.autenticacaoVendedor());
+        Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoUsuario());
 
         Cliente cliente = clienteService.buscarPorId(dto.clienteId());
         var filial = filialService.buscarPorId(dto.filialId());
@@ -133,7 +131,7 @@ public class VendaService {
     /** US-302: encerra a etapa de carrinho — a partir daqui os itens não podem mais ser alterados. */
     @Transactional
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
-        Venda venda = buscarParaExibicao(vendaId);
+        Venda venda = buscarPorId(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         transicionar(venda, StatusVenda.PENDENTE);
@@ -147,7 +145,7 @@ public class VendaService {
 
     @Transactional
     public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
-        Venda venda = buscarParaExibicao(vendaId);
+        Venda venda = buscarPorId(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         StatusVenda novoStatus = dto.novoStatus();
@@ -162,7 +160,7 @@ public class VendaService {
     /** US-303: venda improcedente é automaticamente cancelada e sai do cálculo de comissão (US-106). */
     @Transactional
     public Venda avaliarProcedencia(Long vendaId, StatusAvaliacaoProcedencia resultado) {
-        Venda venda = buscarParaExibicao(vendaId);
+        Venda venda = buscarPorId(vendaId);
         venda.setAvaliacaoProcedencia(resultado);
 
         if (resultado == StatusAvaliacaoProcedencia.Improcedente
@@ -172,29 +170,16 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
-    /** Lista vendas com filtros opcionais de clienteId e/ou status, prontas para exibição. */
-    @Transactional(readOnly = true)
-    public List<Venda> listar(Long clienteId, StatusVenda status) {
-        return vendaRepository.listarComRelacionamentos(clienteId, status);
-    }
-
     @Transactional(readOnly = true)
     public Venda buscarPorId(Long id) {
-        return vendaRepository.findById(id)
+        return vendaRepository.buscarComDetalhesPorId(id)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Venda", id));
     }
 
-    /**
-     * Mesma busca de {@link #buscarPorId}, mas com cliente/filial/vendedor/itens
-     * já inicializados via JOIN FETCH. Use esta variante sempre que o resultado
-     * for mapeado para VendaResponseDTO fora desta transação (ex.: no controller),
-     * já que spring.jpa.open-in-view está desabilitado e os proxies LAZY não
-     * podem mais ser acessados depois que este método retorna.
-     */
+    /** Listagem geral — mesma estratégia de fetch eager do buscarPorId, evita N+1/Lazy fora da transação. */
     @Transactional(readOnly = true)
-    public Venda buscarParaExibicao(Long id) {
-        return vendaRepository.buscarComRelacionamentosPorId(id)
-                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda", id));
+    public java.util.List<Venda> listarTodas() {
+        return vendaRepository.listarComDetalhes();
     }
 
     private void exigirCarrinhoEditavel(Venda venda) {
@@ -210,11 +195,11 @@ public class VendaService {
      * A checagem de nulidade é feita manualmente; a validação real do DTO acontece
      * em vendedorService.autenticar (ou via @Valid no controller/DTO externo).
      */
-    private void exigirVendedorAutenticado(AutenticacaoVendedorDTO autenticacao) {
+    private void exigirVendedorAutenticado(AutenticacaoUsuarioDTO autenticacao) {
         if (autenticacao == null) {
             throw new IllegalArgumentException("Dados de autenticação do vendedor são obrigatórios.");
         }
-        vendedorService.autenticar(autenticacao);
+        usuarioService.autenticar(autenticacao);
     }
 
     private void transicionar(Venda venda, StatusVenda novoStatus) {

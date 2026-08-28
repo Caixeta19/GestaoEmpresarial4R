@@ -45,7 +45,7 @@ public class Venda {
     /** Vendedor autenticado que abriu/está operando a venda (tela "Início"). */
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "vendedor_id", nullable = false)
-    private Vendedor vendedor;
+    private Usuario vendedor;
 
     /** Dropdown "Venda Estoque Avançado?" da tela Início. */
     @Column(name = "estoque_avancado", nullable = false)

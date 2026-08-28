@@ -1,12 +1,12 @@
 package com.vivo4redes.syscor.service;
 
-import com.vivo4redes.syscor.dto.AutenticacaoVendedorDTO;
-import com.vivo4redes.syscor.dto.request.VendedorRequestDTO;
+import com.vivo4redes.syscor.dto.AutenticacaoUsuarioDTO;
+import com.vivo4redes.syscor.dto.request.UsuarioRequestDTO;
 import com.vivo4redes.syscor.exception.AutenticacaoInvalidaException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.exception.VendedorDuplicadoException;
-import com.vivo4redes.syscor.model.Vendedor;
-import com.vivo4redes.syscor.repository.VendedorRepository;
+import com.vivo4redes.syscor.model.Usuario;
+import com.vivo4redes.syscor.repository.UsuarioRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,33 +17,34 @@ import org.springframework.transaction.annotation.Transactional;
  * Épico 0, que continua adiado.
  */
 @Service
-public class VendedorService {
+public class UsuarioService {
 
-    private final VendedorRepository vendedorRepository;
+    private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public VendedorService(VendedorRepository vendedorRepository, PasswordEncoder passwordEncoder) {
-        this.vendedorRepository = vendedorRepository;
+    public UsuarioService(UsuarioRepository usuarioRepository, PasswordEncoder passwordEncoder) {
+        this.usuarioRepository = usuarioRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
-    public Vendedor cadastrar(VendedorRequestDTO dto) {
-        if (vendedorRepository.existsByEmailIgnoreCase(dto.email())) {
+    public Usuario cadastrar(UsuarioRequestDTO dto) {
+        if (usuarioRepository.existsByEmailIgnoreCase(dto.email())) {
             throw new VendedorDuplicadoException(dto.email());
         }
-        Vendedor vendedor = Vendedor.builder()
+        Usuario usuario = Usuario.builder()
                 .nome(dto.nome())
+                .login(dto.login())
                 .email(dto.email())
                 .senhaHash(passwordEncoder.encode(dto.senha()))
                 .ativo(true)
                 .build();
-        return vendedorRepository.save(vendedor);
+        return usuarioRepository.save(usuario);
     }
 
     @Transactional(readOnly = true)
-    public Vendedor buscarPorId(Long id) {
-        return vendedorRepository.findById(id)
+    public Usuario buscarPorId(Long id) {
+        return usuarioRepository.findById(id)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Vendedor", id));
     }
 
@@ -52,13 +53,13 @@ public class VendedorService {
      * Mensagem de erro deliberadamente genérica (não revela se o e-mail existe).
      */
     @Transactional(readOnly = true)
-    public Vendedor autenticar(AutenticacaoVendedorDTO dto) {
-        Vendedor vendedor = vendedorRepository.findByEmailIgnoreCaseAndAtivoTrue(dto.email())
+    public Usuario autenticar(AutenticacaoUsuarioDTO dto) {
+        Usuario usuario = usuarioRepository.findByEmailIgnoreCaseAndAtivoTrue(dto.email())
                 .orElseThrow(AutenticacaoInvalidaException::new);
 
-        if (!passwordEncoder.matches(dto.senha(), vendedor.getSenhaHash())) {
+        if (!passwordEncoder.matches(dto.senha(), usuario.getSenhaHash())) {
             throw new AutenticacaoInvalidaException();
         }
-        return vendedor;
+        return usuario;
     }
 }

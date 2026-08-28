@@ -16,13 +16,13 @@ import lombok.Setter;
  * (email + hash de senha), sem papéis/permissões.
  */
 @Entity
-@Table(name = "vendedores", uniqueConstraints = @UniqueConstraint(name = "uk_vendedor_email", columnNames = "email"))
+@Table(name = "usuarios", uniqueConstraints = @UniqueConstraint(name = "uk_usuario_email", columnNames = "email"))
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Vendedor {
+public class Usuario {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,6 +30,9 @@ public class Vendedor {
 
     @Column(nullable = false, length = 150)
     private String nome;
+
+    @Column(nullable = false, length = 150)
+    private String login;
 
     @Column(nullable = false, length = 150)
     private String email;
@@ -41,4 +44,11 @@ public class Vendedor {
     @Column(nullable = false)
     @Builder.Default
     private boolean ativo = true;
+
+    @Column(nullable = false)
+    private String cargo;
+
+    @Column(nullable = false)
+    private String filial;
+
 }

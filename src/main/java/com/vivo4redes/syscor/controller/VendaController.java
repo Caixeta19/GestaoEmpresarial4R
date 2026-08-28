@@ -7,7 +7,6 @@ import com.vivo4redes.syscor.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.dto.response.VendaResponseDTO;
-import com.vivo4redes.syscor.enums.StatusVenda;
 import com.vivo4redes.syscor.service.VendaService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -23,7 +22,7 @@ import java.util.List;
  * badges de contagem das abas, sem recarregar a venda inteira.
  */
 @RestController
-@RequestMapping("/api/vendas")
+@RequestMapping("/vendas")
 public class VendaController {
 
     private final VendaService vendaService;
@@ -39,18 +38,16 @@ public class VendaController {
         return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
     }
 
-    /** Lista todas as vendas, opcionalmente filtradas por cliente ou status. */
-    @GetMapping
-    public ResponseEntity<List<VendaResponseDTO>> listar(
-            @RequestParam(required = false) Long clienteId,
-            @RequestParam(required = false) StatusVenda status) {
-        var vendas = vendaService.listar(clienteId, status);
-        return ResponseEntity.ok(vendas.stream().map(VendaResponseDTO::from).toList());
-    }
-
     @GetMapping("/{id}")
     public ResponseEntity<VendaResponseDTO> buscarPorId(@PathVariable Long id) {
-        return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarParaExibicao(id)));
+        return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarPorId(id)));
+    }
+
+    /** Listagem geral de vendas (mais recentes primeiro). */
+    @GetMapping
+    public ResponseEntity<List<VendaResponseDTO>> listar() {
+        var vendas = vendaService.listarTodas().stream().map(VendaResponseDTO::from).toList();
+        return ResponseEntity.ok(vendas);
     }
 
     /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */

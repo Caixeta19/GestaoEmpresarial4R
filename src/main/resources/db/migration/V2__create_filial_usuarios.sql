@@ -10,13 +10,17 @@ CREATE TABLE filiais (
                          CONSTRAINT uk_filial_codigo UNIQUE (codigo)
 );
 
-CREATE TABLE vendedores (
+CREATE TABLE usuarios (
                             id          BIGSERIAL PRIMARY KEY,
                             nome        VARCHAR(150) NOT NULL,
+                            login       VARCHAR(150) NOT NULL,
                             email       VARCHAR(150) NOT NULL,
                             senha_hash  VARCHAR(100) NOT NULL,
                             ativo       BOOLEAN      NOT NULL DEFAULT TRUE,
-                            CONSTRAINT uk_vendedor_email UNIQUE (email)
+                            filial      VARCHAR(100) NOT NULL,
+                            cargo       VARCHAR(100) NOT NULL,
+                            CONSTRAINT uk_usuario_email UNIQUE (email)
+
 );
 
 -- Colunas novas em vendas. Adicionadas como NULLABLE primeiro para não
@@ -24,7 +28,7 @@ CREATE TABLE vendedores (
 -- ambiente, os NOT NULL abaixo já podem ser aplicados diretamente.
 ALTER TABLE vendas
     ADD COLUMN filial_id                     BIGINT,
-    ADD COLUMN vendedor_id                   BIGINT,
+    ADD COLUMN usuario_id                   BIGINT,
     ADD COLUMN estoque_avancado              BOOLEAN     NOT NULL DEFAULT FALSE,
     ADD COLUMN status_score_cliente          VARCHAR(20) NOT NULL DEFAULT 'NAO_REALIZADA',
     ADD COLUMN numero_serie_nota             VARCHAR(10),
@@ -32,7 +36,7 @@ ALTER TABLE vendas
 
 ALTER TABLE vendas
     ADD CONSTRAINT fk_vendas_filial FOREIGN KEY (filial_id) REFERENCES filiais (id),
-    ADD CONSTRAINT fk_vendas_vendedor FOREIGN KEY (vendedor_id) REFERENCES vendedores (id),
+    ADD CONSTRAINT fk_vendas_usuarios FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
     ADD CONSTRAINT chk_vendas_status_score_cliente
         CHECK (status_score_cliente IN ('NAO_REALIZADA', 'CONSULTANDO', 'APROVADO', 'REPROVADO'));
 
@@ -40,7 +44,7 @@ ALTER TABLE vendas
 -- Torna-se NOT NULL aqui, depois de garantir que não há linha órfã (base nova/testcontainers = vazia).
 ALTER TABLE vendas
     ALTER COLUMN filial_id SET NOT NULL,
-ALTER COLUMN vendedor_id SET NOT NULL;
+ALTER COLUMN usuario_id SET NOT NULL;
 
 CREATE INDEX idx_vendas_filial_id ON vendas (filial_id);
-CREATE INDEX idx_vendas_vendedor_id ON vendas (vendedor_id);
+CREATE INDEX idx_vendas_usuario_id ON vendas (usuario_id);
