@@ -12,6 +12,7 @@ public record StatusVendaRequestDTO(
 
         @Valid
         @NotNull(message = "autenticacaoVendedor é obrigatória")
-        AutenticacaoUsuarioDTO autenticacaoVendedor
+        AutenticacaoUsuarioDTO autenticacaoUsuario
 ) {
+
 }
