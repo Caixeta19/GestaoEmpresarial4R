@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.controller;
-import com.vivo4redes.syscor.dto.*;
+
+import com.vivo4redes.syscor.dto.ResumoCarrinhoDTO;
 import com.vivo4redes.syscor.dto.request.AvaliacaoProcedenciaRequestDTO;
 import com.vivo4redes.syscor.dto.request.DadosIniciaisVendaRequestDTO;
 import com.vivo4redes.syscor.dto.request.FinalizarVendaRequestDTO;
@@ -16,10 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * Endpoints pensados para a tela de registro de venda com abas por
- * categoria (Produto Vivo / Serviço Vivo / Recarga). O front chama
- * GET /{id}/resumo após cada adição/remoção de item para atualizar os
- * badges de contagem das abas, sem recarregar a venda inteira.
+ * Endpoints para o fluxo de venda e controle de abas de itens.
  */
 @RestController
 @RequestMapping("/vendas")
@@ -38,12 +36,13 @@ public class VendaController {
         return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
     }
 
+    /** Consulta detalhes completos da venda por ID. */
     @GetMapping("/{id}")
     public ResponseEntity<VendaResponseDTO> buscarPorId(@PathVariable Long id) {
         return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarPorId(id)));
     }
 
-    /** Listagem geral de vendas (mais recentes primeiro). */
+    /** Listagem geral de vendas. */
     @GetMapping
     public ResponseEntity<List<VendaResponseDTO>> listar() {
         var vendas = vendaService.listarTodas().stream().map(VendaResponseDTO::from).toList();
@@ -58,7 +57,7 @@ public class VendaController {
         return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 
-    /** Adiciona um item em uma das três abas (categoria vem no corpo). */
+    /** Adiciona um item (Produto Vivo / Serviço Vivo / Recarga). */
     @PostMapping("/{id}/itens")
     public ResponseEntity<VendaResponseDTO> adicionarItem(
             @PathVariable Long id, @Valid @RequestBody ItemVendaRequestDTO dto) {
@@ -66,19 +65,20 @@ public class VendaController {
         return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
     }
 
+    /** Remove um item da venda e recalcula os totais. */
     @DeleteMapping("/{id}/itens/{itemId}")
     public ResponseEntity<VendaResponseDTO> removerItem(@PathVariable Long id, @PathVariable Long itemId) {
         var venda = vendaService.removerItem(id, itemId);
         return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 
-    /** Alimenta os badges "Produto Vivo (3)", "Serviço Vivo (0)", "Recarga (0)". */
+    /** Alimenta os badges de contagem de cada aba e totalizador do carrinho. */
     @GetMapping("/{id}/resumo")
     public ResponseEntity<ResumoCarrinhoDTO> obterResumo(@PathVariable Long id) {
         return ResponseEntity.ok(vendaService.obterResumo(id));
     }
 
-    /** Encerra o carrinho: ABERTA -> PENDENTE. Exige ao menos 1 item e reautenticação do vendedor. */
+    /** Encerra o carrinho: ABERTA -> PENDENTE. */
     @PatchMapping("/{id}/finalizar")
     public ResponseEntity<VendaResponseDTO> finalizar(
             @PathVariable Long id, @Valid @RequestBody FinalizarVendaRequestDTO dto) {
@@ -86,7 +86,7 @@ public class VendaController {
         return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 
-    /** PENDENTE -> APROVADA -> CONCLUIDA, ou -> CANCELADA a partir de qualquer estado não-terminal. */
+    /** Transição de status da venda. */
     @PatchMapping("/{id}/status")
     public ResponseEntity<VendaResponseDTO> avancarStatus(
             @PathVariable Long id, @Valid @RequestBody StatusVendaRequestDTO dto) {
@@ -94,7 +94,7 @@ public class VendaController {
         return ResponseEntity.ok(VendaResponseDTO.from(venda));
     }
 
-    /** US-303: avaliação de procedência — improcedente cancela a venda automaticamente. */
+    /** Avaliação de procedência (US-303). */
     @PatchMapping("/{id}/avaliacao-procedencia")
     public ResponseEntity<VendaResponseDTO> avaliarProcedencia(
             @PathVariable Long id, @Valid @RequestBody AvaliacaoProcedenciaRequestDTO dto) {

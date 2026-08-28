@@ -37,6 +37,8 @@ public class UsuarioService {
                 .login(dto.login())
                 .email(dto.email())
                 .senhaHash(passwordEncoder.encode(dto.senha()))
+                .filial(dto.filial())
+                .cargo(dto.cargo())
                 .ativo(true)
                 .build();
         return usuarioRepository.save(usuario);
