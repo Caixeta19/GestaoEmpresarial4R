@@ -45,7 +45,7 @@ public record VendaResponseDTO(
                 v.getCliente().getNome(),
                 v.getFilial().getId(),
                 v.getFilial().getNome(),
-                v.getVendedor().getNome(),
+                v.getUsuario().getNome(),
                 v.isEstoqueAvancado(),
                 v.getStatusScoreCliente(),
                 v.getNumeroSerieNota(),

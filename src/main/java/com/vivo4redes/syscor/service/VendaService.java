@@ -59,7 +59,7 @@ public class VendaService {
                 .numeroVenda(numeroVendaGenerator.gerar())
                 .cliente(cliente)
                 .filial(filial)
-                .vendedor(usuario)
+                .usuario(usuario)
                 .estoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()))
                 .status(StatusVenda.ABERTA)
                 .build();
