@@ -1,6 +1,5 @@
--- V2__add_filial_vendedor_dados_iniciais_venda.sql
--- Suporte à tela "Início" da venda: filial, vendedor (com reautenticação),
--- flag de estoque avançado, score do cliente e numeração do comprovante.
+-- Suporte à tela "Início" da venda: filial, usuário/vendedor (com reautenticação),
+-- flag de estoque avançado, score do cliente e numeração da nota/comprovante.
 
 CREATE TABLE filiais (
                          id      BIGSERIAL PRIMARY KEY,
@@ -11,24 +10,22 @@ CREATE TABLE filiais (
 );
 
 CREATE TABLE usuarios (
-                            id          BIGSERIAL PRIMARY KEY,
-                            nome        VARCHAR(150) NOT NULL,
-                            login       VARCHAR(150) NOT NULL,
-                            email       VARCHAR(150) NOT NULL,
-                            senha_hash  VARCHAR(100) NOT NULL,
-                            ativo       BOOLEAN      NOT NULL DEFAULT TRUE,
-                            filial      VARCHAR(100) NOT NULL,
-                            cargo       VARCHAR(100) NOT NULL,
-                            CONSTRAINT uk_usuario_email UNIQUE (email)
-
+                          id          BIGSERIAL PRIMARY KEY,
+                          nome        VARCHAR(150) NOT NULL,
+                          login       VARCHAR(150) NOT NULL,
+                          email       VARCHAR(150) NOT NULL,
+                          senha_hash  VARCHAR(100) NOT NULL,
+                          filial      VARCHAR(100) NOT NULL,
+                          cargo       VARCHAR(100) NOT NULL,
+                          ativo       BOOLEAN      NOT NULL DEFAULT TRUE,
+                          CONSTRAINT uk_usuario_email UNIQUE (email),
+                          CONSTRAINT uk_usuario_login UNIQUE (login)
 );
 
--- Colunas novas em vendas. Adicionadas como NULLABLE primeiro para não
--- quebrar em bases já existentes; se a tabela ainda estiver vazia neste
--- ambiente, os NOT NULL abaixo já podem ser aplicados diretamente.
+-- Colunas complementares em vendas
 ALTER TABLE vendas
     ADD COLUMN filial_id                     BIGINT,
-    ADD COLUMN usuario_id                   BIGINT,
+    ADD COLUMN usuario_id                    BIGINT,
     ADD COLUMN estoque_avancado              BOOLEAN     NOT NULL DEFAULT FALSE,
     ADD COLUMN status_score_cliente          VARCHAR(20) NOT NULL DEFAULT 'NAO_REALIZADA',
     ADD COLUMN numero_serie_nota             VARCHAR(10),
@@ -36,12 +33,11 @@ ALTER TABLE vendas
 
 ALTER TABLE vendas
     ADD CONSTRAINT fk_vendas_filial FOREIGN KEY (filial_id) REFERENCES filiais (id),
-    ADD CONSTRAINT fk_vendas_usuarios FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
+    ADD CONSTRAINT fk_vendas_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
     ADD CONSTRAINT chk_vendas_status_score_cliente
         CHECK (status_score_cliente IN ('NAO_REALIZADA', 'CONSULTANDO', 'APROVADO', 'REPROVADO'));
 
--- A entidade Java mapeia filial/vendedor como obrigatórios (optional = false).
--- Torna-se NOT NULL aqui, depois de garantir que não há linha órfã (base nova/testcontainers = vazia).
+-- Torna as chaves estrangeiras obrigatórias
 ALTER TABLE vendas
     ALTER COLUMN filial_id SET NOT NULL,
 ALTER COLUMN usuario_id SET NOT NULL;
