@@ -146,7 +146,7 @@ public class VendaService {
     @Transactional
     public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
-        exigirVendedorAutenticado(dto.autenticacaoVendedor());
+        exigirVendedorAutenticado(dto.autenticacaoUsuario());
 
         StatusVenda novoStatus = dto.novoStatus();
         if (novoStatus == null) {
