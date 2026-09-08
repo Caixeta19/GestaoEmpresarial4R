@@ -24,6 +24,8 @@ public record ItemVendaRequestDTO(
 
         @NotNull(message = "valorUnitario é obrigatório")
         @DecimalMin(value = "0.01", message = "valorUnitario deve ser maior que zero")
-        BigDecimal valorUnitario
+        BigDecimal valorUnitario,
+
+        String imeiOuSerial
 ) {
 }

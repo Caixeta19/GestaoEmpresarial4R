@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.venda.model;
 
+import com.vivo4redes.syscor.estoque.model.ItemEstoque;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -11,10 +12,8 @@ import lombok.Setter;
 import java.math.BigDecimal;
 
 /**
- * Item de venda. O módulo de Estoque ainda não existe, então guardamos
- * apenas a referência (produtoId) e um snapshot de descrição/preço — quando
- * o módulo de Estoque nascer, plugamos a baixa automática (US-203) via um
- * EstoquePort, sem alterar esta entidade.
+ * Item de venda. Integra opcionalmente com o módulo de Estoque via ItemEstoque
+ * quando o item exige baixa de um serial/IMEI (US-203).
  */
 @Entity
 @Table(name = "itens_venda")
@@ -50,6 +49,15 @@ public class ItemVenda {
 
     @Column(name = "valor_unitario", nullable = false, precision = 12, scale = 2)
     private BigDecimal valorUnitario;
+
+    /** Serial/IMEI baixado no Estoque para este item, quando aplicável. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "item_estoque_id")
+    private ItemEstoque itemEstoque;
+
+    /** Snapshot do serial/IMEI informado ou baixado, para exibição mesmo se o vínculo com estoque mudar. */
+    @Column(name = "serial_imei", length = 50)
+    private String serialImei;
 
     public BigDecimal getValorTotalItem() {
         return valorUnitario.multiply(quantidade);
