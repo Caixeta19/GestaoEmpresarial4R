@@ -17,6 +17,7 @@ import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.VendaSemItemException;
 import com.vivo4redes.syscor.venda.model.Cliente;
 import com.vivo4redes.syscor.estoque.model.ItemEstoque;
+import com.vivo4redes.syscor.estoque.model.Produto;
 import com.vivo4redes.syscor.estoque.service.EstoqueService;
 import com.vivo4redes.syscor.estoque.enums.StatusSerial;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
@@ -82,14 +83,22 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
+        // O produto precisa existir no catálogo — todo item de venda (produto,
+        // serviço ou recarga) é rastreável a um SKU cadastrado no Estoque.
+        Produto produto = estoqueService.buscarProdutoPorId(dto.produtoId());
+
         ItemEstoque itemEstoqueBaixado = null;
         String serialInformado = dto.imeiOuSerial();
+        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("—");
 
-        // Regra de integracao: se informou IMEI/serial ou a categoria for PRODUTO_VIVO, exige baixa no estoque
-        if (serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("—")) {
+        // Regra de integracao com o Estoque: quem decide se a baixa exige
+        // IMEI/serial é o cadastro do produto (produto.requerSerial) — não a
+        // categoria do item, que é só a aba da UI (Produto Vivo/Serviço/Recarga)
+        // e pode não refletir a real necessidade de rastreio serializado.
+        if (informouSerial) {
             itemEstoqueBaixado = estoqueService.baixarSerialNaVenda(serialInformado.trim());
-        } else if (dto.categoria() == CategoriaItemVenda.PRODUTO_VIVO) {
-            throw new NegocioException("O item '" + dto.descricaoProduto() + "' pertence à categoria Produto Vivo e exige a leitura de um IMEI/Serial.");
+        } else if (Boolean.TRUE.equals(produto.getRequerSerial())) {
+            throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado à venda.");
         }
 
         ItemVenda item = ItemVenda.builder()

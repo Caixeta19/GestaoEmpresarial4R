@@ -23,6 +23,12 @@ public class EstoqueController {
         return ResponseEntity.ok(estoqueService.listarEstoqueConsolidado());
     }
 
+    /** US-204: itens no nível mínimo ou em ruptura — alimenta o painel de alertas. */
+    @GetMapping("/alertas")
+    public ResponseEntity<List<EstoqueConsolidadoResponseDTO>> listarAlertas() {
+        return ResponseEntity.ok(estoqueService.listarAlertasEstoqueBaixo());
+    }
+
     @PostMapping("/entrada-seriais")
     public ResponseEntity<Void> registrarEntradaSeriais(@RequestBody @Valid EntradaSeriaisRequestDTO request) {
         estoqueService.registrarEntradaSeriais(request);
