@@ -17,6 +17,8 @@ public interface ItemEstoqueRepository extends JpaRepository<ItemEstoque, Long> 
 
     List<ItemEstoque> findByProdutoIdAndStatus(Long produtoId, StatusSerial status);
 
+    List<ItemEstoque> findByStatus(StatusSerial status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM ItemEstoque i WHERE i.serialImei = :serial AND i.status = :status")
     Optional<ItemEstoque> findBySerialImeiAndStatusForUpdate(
@@ -25,6 +27,8 @@ public interface ItemEstoqueRepository extends JpaRepository<ItemEstoque, Long> 
     );
 
     boolean existsBySerialImei(String serialImei);
+
+    java.util.Optional<ItemEstoque> findBySerialImei(String serialImei);
 
     long countByProdutoIdAndStatus(Long produtoId, StatusSerial status);
 }

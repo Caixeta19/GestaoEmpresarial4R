@@ -1,6 +1,6 @@
 package com.vivo4redes.syscor.exception;
 
-public class NegocioException extends RuntimeException {
+public class NegocioException extends BusinessException {
 
     public NegocioException(String message) {
         super(message);
