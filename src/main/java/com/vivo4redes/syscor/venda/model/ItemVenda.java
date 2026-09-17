@@ -59,7 +59,96 @@ public class ItemVenda {
     @Column(name = "serial_imei", length = 50)
     private String serialImei;
 
+    // ---------------------------------------------------------------
+    // Campos específicos de Produto Vivo / Serviço Vivo (telecom).
+    // Todos opcionais — a aplicabilidade depende da categoria do item;
+    // ver Venda.jsx (formProdutoVivo / servicoForm) no frontend.
+    // ---------------------------------------------------------------
+
+    @Column(name = "tabela_preco", length = 50)
+    private String tabelaPreco;
+
+    @Column(name = "sva")
+    private Boolean sva;
+
+    @Column(name = "seguro")
+    private Boolean seguro;
+
+    @Column(name = "segmento", length = 50)
+    private String segmento;
+
+    /** Tipo de operação: Troca de Aparelho, Alta, Migração, Reativação, Troca de Simcard, Troca de titularidade... */
+    @Column(name = "tipo_servico", length = 50)
+    private String tipoServico;
+
+    @Column(name = "ddd", length = 2)
+    private String ddd;
+
+    /** Só usado em Troca de Plano — o plano que o cliente tinha antes da operação. */
+    @Column(name = "plano_antigo", length = 60)
+    private String planoAntigo;
+
+    /** Plano ativo/contratado após a operação (formProdutoVivo.planoAtivo / servicoForm.planoNovo). */
+    @Column(name = "plano", length = 60)
+    private String plano;
+
+    @Column(name = "debito_automatico")
+    private Boolean debitoAutomatico;
+
+    @Column(name = "valor_adicional", precision = 12, scale = 2)
+    private BigDecimal valorAdicional;
+
+    @Column(name = "valor_acrescimo", precision = 12, scale = 2)
+    private BigDecimal valorAcrescimo;
+
+    @Column(name = "desconto", precision = 12, scale = 2)
+    private BigDecimal desconto;
+
+    @Column(name = "cupom")
+    private Boolean cupom;
+
+    /** Dia do vencimento da fatura, ex.: "10". */
+    @Column(name = "vencimento_fatura", length = 2)
+    private String vencimentoFatura;
+
+    /** MSISDN — número da linha ativada/portada/alterada neste item. */
+    @Column(name = "numero_acesso", length = 20)
+    private String numeroAcesso;
+
+    /** Sistema de origem do lançamento: VIVO+, NEXT ou GED. */
+    @Column(name = "sistema_origem", length = 10)
+    private String sistemaOrigem;
+
+    @Column(name = "num_ordem_next", length = 30)
+    private String numOrdemNext;
+
+    @Column(name = "num_solicitacao_ged", length = 30)
+    private String numSolicitacaoGed;
+
+    /** ICCID do chip 3G, quando aplicável (troca de simcard). */
+    @Column(name = "simcard_3g", length = 30)
+    private String simcard3g;
+
+    /** ICCID do chip 4G, quando aplicável (troca de simcard). */
+    @Column(name = "simcard_4g", length = 30)
+    private String simcard4g;
+
+    @Column(name = "cliente_possui_simcard")
+    private Boolean clientePossuiSimcard;
+
+    @Column(name = "simcard_doado")
+    private Boolean simcardDoado;
+
+    @Column(name = "desconto_chip", precision = 12, scale = 2)
+    private BigDecimal descontoChip;
+
+    @Column(name = "valor_chip", precision = 12, scale = 2)
+    private BigDecimal valorChip;
+
+    @Column(name = "serial_confirmado")
+    private Boolean serialConfirmado;
+
     public BigDecimal getValorTotalItem() {
-        return valorUnitario.multiply(quantidade);
+        return valorUnitario.multiply(quantidade).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 }

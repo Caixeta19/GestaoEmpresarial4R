@@ -8,5 +8,6 @@ package com.vivo4redes.syscor.venda.enums;
 public enum CategoriaItemVenda {
     PRODUTO_VIVO,
     SERVICO_VIVO,
+    ACESSORIO,
     RECARGA
 }

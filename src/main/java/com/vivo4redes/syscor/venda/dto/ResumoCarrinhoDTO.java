@@ -11,9 +11,8 @@ public record ResumoCarrinhoDTO(
         Long vendaId,
         long qtdProdutoVivo,
         long qtdServicoVivo,
+        long qtdAcessorio,
         long qtdRecarga,
         BigDecimal valorTotal
 ) {
 }
-
-

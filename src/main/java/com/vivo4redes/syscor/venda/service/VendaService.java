@@ -5,6 +5,7 @@ import com.vivo4redes.syscor.venda.dto.ResumoCarrinhoDTO;
 import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
@@ -21,10 +22,15 @@ import com.vivo4redes.syscor.estoque.model.Produto;
 import com.vivo4redes.syscor.estoque.service.EstoqueService;
 import com.vivo4redes.syscor.estoque.enums.StatusSerial;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
+import com.vivo4redes.syscor.venda.model.PagamentoVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
+import com.vivo4redes.syscor.venda.repository.PagamentoVendaRepository;
 import com.vivo4redes.syscor.venda.repository.VendaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * US-302/US-303: ciclo de vida da venda como carrinho e integracao com estoque serializado.
@@ -45,19 +51,22 @@ public class VendaService {
     private final UsuarioService usuarioService;
     private final NumeroVendaGenerator numeroVendaGenerator;
     private final EstoqueService estoqueService;
+    private final PagamentoVendaRepository pagamentoVendaRepository;
 
     public VendaService(VendaRepository vendaRepository,
                         ClienteService clienteService,
                         FilialService filialService,
                         UsuarioService usuarioService,
                         NumeroVendaGenerator numeroVendaGenerator,
-                        EstoqueService estoqueService) {
+                        EstoqueService estoqueService,
+                        PagamentoVendaRepository pagamentoVendaRepository) {
         this.vendaRepository = vendaRepository;
         this.clienteService = clienteService;
         this.filialService = filialService;
         this.usuarioService = usuarioService;
         this.numeroVendaGenerator = numeroVendaGenerator;
         this.estoqueService = estoqueService;
+        this.pagamentoVendaRepository = pagamentoVendaRepository;
     }
 
     @Transactional
@@ -73,6 +82,8 @@ public class VendaService {
                 .usuario(usuario)
                 .estoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()))
                 .status(StatusVenda.ABERTA)
+                // Snapshot de auditoria (US-301): registra o consentimento do cliente
+                // no instante da venda, mesmo que ele mude depois — não trava a venda
                 .build();
 
         return vendaRepository.save(venda);
@@ -109,6 +120,31 @@ public class VendaService {
                 .valorUnitario(dto.valorUnitario())
                 .itemEstoque(itemEstoqueBaixado)
                 .serialImei(itemEstoqueBaixado != null ? itemEstoqueBaixado.getSerialImei() : serialInformado)
+                .tabelaPreco(dto.tabelaPreco())
+                .sva(dto.sva())
+                .seguro(dto.seguro())
+                .segmento(dto.segmento())
+                .tipoServico(dto.tipoServico())
+                .ddd(dto.ddd())
+                .planoAntigo(dto.planoAntigo())
+                .plano(dto.plano())
+                .debitoAutomatico(dto.debitoAutomatico())
+                .valorAdicional(dto.valorAdicional())
+                .valorAcrescimo(dto.valorAcrescimo())
+                .desconto(dto.desconto())
+                .cupom(dto.cupom())
+                .vencimentoFatura(dto.vencimentoFatura())
+                .numeroAcesso(dto.numeroAcesso())
+                .sistemaOrigem(dto.sistemaOrigem())
+                .numOrdemNext(dto.numOrdemNext())
+                .numSolicitacaoGed(dto.numSolicitacaoGed())
+                .simcard3g(dto.simcard3g())
+                .simcard4g(dto.simcard4g())
+                .clientePossuiSimcard(dto.clientePossuiSimcard())
+                .simcardDoado(dto.simcardDoado())
+                .descontoChip(dto.descontoChip())
+                .valorChip(dto.valorChip())
+                .serialConfirmado(dto.serialConfirmado())
                 .build();
 
         venda.adicionarItem(item);
@@ -145,6 +181,7 @@ public class VendaService {
                 venda.getId(),
                 venda.contarItensPorCategoria(CategoriaItemVenda.PRODUTO_VIVO),
                 venda.contarItensPorCategoria(CategoriaItemVenda.SERVICO_VIVO),
+                venda.contarItensPorCategoria(CategoriaItemVenda.ACESSORIO),
                 venda.contarItensPorCategoria(CategoriaItemVenda.RECARGA),
                 venda.getValorTotal()
         );
@@ -181,8 +218,57 @@ public class VendaService {
             throw new VendaSemItemException();
         }
 
+        BigDecimal totalPago = somarPagamentos(vendaId);
+        if (totalPago.compareTo(venda.getValorTotal()) != 0) {
+            throw new NegocioException("A soma dos pagamentos (" + totalPago
+                    + ") não bate com o valor total da venda (" + venda.getValorTotal() + ").");
+        }
+
         transicionar(venda, StatusVenda.PENDENTE);
         return vendaRepository.save(venda);
+    }
+
+    /** Adiciona uma forma de pagamento — uma venda pode ter várias (ex.: parte cartão, parte PIX). */
+    @Transactional
+    public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        PagamentoVenda pagamento = PagamentoVenda.builder()
+                .venda(venda)
+                .forma(dto.forma())
+                .valor(dto.valor())
+                .parcelas(dto.parcelas() == null ? 1 : dto.parcelas())
+                .build();
+        pagamentoVendaRepository.save(pagamento);
+
+        return buscarPorId(vendaId);
+    }
+
+    @Transactional
+    public Venda removerPagamento(Long vendaId, Long pagamentoId) {
+        Venda venda = buscarPorId(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        PagamentoVenda pagamento = pagamentoVendaRepository.findById(pagamentoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Pagamento"));
+        if (!pagamento.getVenda().getId().equals(vendaId)) {
+            throw new NegocioException("Esse pagamento não pertence a essa venda.");
+        }
+        pagamentoVendaRepository.delete(pagamento);
+
+        return buscarPorId(vendaId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PagamentoVenda> listarPagamentos(Long vendaId) {
+        return pagamentoVendaRepository.findByVendaIdOrderByIdAsc(vendaId);
+    }
+
+    private BigDecimal somarPagamentos(Long vendaId) {
+        return listarPagamentos(vendaId).stream()
+                .map(PagamentoVenda::getValor)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     @Transactional

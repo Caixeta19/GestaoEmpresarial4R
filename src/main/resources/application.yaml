@@ -33,9 +33,17 @@ spring:
 app:
   jwt:
     expiration: 60m
+  whatsapp:
+    api-base-url: https://graph.facebook.com/v20.0
+    phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
+    access-token: ${WHATSAPP_ACCESS_TOKEN:}
+    waba-id: ${WHATSAPP_WABA_ID:}
+    rate-limit-ms: 1000
 
 server:
   port: 8080
+  servlet:
+    context-path: /api/v1
 
 management:
   endpoints:

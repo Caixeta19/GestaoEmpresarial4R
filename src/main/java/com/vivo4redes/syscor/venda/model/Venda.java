@@ -92,6 +92,7 @@ public class Venda {
 
     @UpdateTimestamp
     @Column(name = "atualizado_em", nullable = false)
+
     private Instant atualizadoEm;
 
     public void adicionarItem(ItemVenda item) {
