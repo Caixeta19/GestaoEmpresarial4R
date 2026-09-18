@@ -16,6 +16,9 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: guest
       SPRING_RABBITMQ_PASSWORD: guest
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN}
+      WHATSAPP_WABA_ID: ${WHATSAPP_WABA_ID}
     depends_on:
       syscor-db:
         condition: service_healthy
@@ -57,27 +60,9 @@ services:
     networks:
       - syscor-net
 
-  syscor-pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: syscor-pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@syscor.com
-      PGADMIN_DEFAULT_PASSWORD: syscor
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-    ports:
-      - "5050:80"
-    depends_on:
-      syscor-db:
-        condition: service_healthy
-    volumes:
-      - syscor-pgadmin-data:/var/lib/pgadmin
-    networks:
-      - syscor-net
-
 networks:
   syscor-net:
     driver: bridge
 
 volumes:
   syscor-db-data:
-  syscor-pgadmin-data:
