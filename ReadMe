@@ -1,0 +1,653 @@
+# SYSCOR — Sistema de Gestão (ERP)
+
+Backend do ERP interno da 4R Redes: registro de vendas de produtos e serviços Vivo,
+controle de estoque serializado (IMEI), conciliação de inventário contra relatórios SAP,
+protocolo documental pós-venda e disparo de campanhas de mailing via WhatsApp.
+
+---
+
+## Índice
+
+1. [Conceito](#1-conceito)
+2. [Escopo](#2-escopo)
+3. [Regras de negócio](#3-regras-de-negócio)
+4. [Decisões de arquitetura](#4-decisões-de-arquitetura)
+5. [Stack](#5-stack)
+6. [Arquitetura](#6-arquitetura)
+7. [Estrutura de pastas](#7-estrutura-de-pastas)
+8. [Modelo de dados](#8-modelo-de-dados)
+9. [API](#9-api)
+10. [Segurança](#10-segurança)
+11. [Estado atual — módulo a módulo](#11-estado-atual--módulo-a-módulo)
+12. [Como rodar](#12-como-rodar)
+13. [Backlog / pendências conhecidas](#13-backlog--pendências-conhecidas)
+
+---
+
+## 1. Conceito
+
+O problema: a operação de venda de uma filial passa por várias etapas que hoje vivem
+espalhadas — carrinho de venda, baixa de serial no estoque, conferência de inventário
+contra o relatório do SAP, protocolo documental pós-venda e campanhas de relacionamento
+por WhatsApp. Sem um sistema único, cada etapa é uma planilha ou um controle manual
+diferente, e nada conversa entre si.
+
+A solução: um ERP modular onde a venda é o centro. Um vendedor abre um carrinho
+(`ABERTA`), adiciona itens de categorias diferentes (produto físico, serviço Vivo,
+acessório, recarga), registra pagamentos e finaliza. A finalização baixa o serial do
+estoque, e a partir daí a venda alimenta o protocolo documental e os KPIs do painel
+executivo.
+
+O modelo mental inteiro cabe em duas frases:
+
+> **A venda é a entidade central — tudo (estoque, documental, dashboard) deriva dela.**
+> **Cada módulo é dono do seu próprio ciclo de vida e nunca decide por outro.**
+
+Uma venda passa por uma máquina de estados própria: `ABERTA` (carrinho em montagem) →
+`PENDENTE` → `APROVADA` → `CONCLUIDA`, com `CANCELADA` acessível a partir de qualquer
+estado não-terminal. Só é possível adicionar ou remover item enquanto a venda está
+`ABERTA`.
+
+---
+
+## 2. Escopo
+
+### Faz (estado atual)
+
+- Carrinho de venda multi-categoria (Produto Vivo, Serviço Vivo, Acessório, Recarga) com
+  cálculo automático de valor total a partir dos itens
+- Cadastro de cliente (PF/PJ) com validação de CPF/CNPJ e e-mail/telefone
+- Cadastro de filial e de usuário/vendedor (com reautenticação por senha na venda)
+- Registro de pagamentos por venda, com múltiplas formas (cartão, PIX, dinheiro, boleto)
+- Transição de status da venda com validação de máquina de estados
+- Avaliação de procedência da venda (BKO) pós-conclusão
+- Controle de estoque serializado por IMEI/serial, com status `DISPONIVEL` /
+  `RESERVADO` / `VENDIDO`
+- Alertas de estoque crítico (saldo disponível ≤ estoque mínimo do produto)
+- Importação de relatório de inventário do SAP (IQ09) com conciliação automática
+  (`CORRETO` / `DIVERGENCIA` / `PENDENTE`)
+- Importação de tabela de preços da Telefônica (planilha multi-aba) com resolução de SKU
+- Protocolo documental vinculado 1:1 à venda (GED, digitalização, remuneração, vencimento)
+- Campanhas de mailing via WhatsApp Business API: criação, importação de planilha de
+  destinatários, disparo assíncrono via fila (RabbitMQ)
+- Painel executivo (dashboard) com faturamento do mês, meta, ticket médio, SKUs
+  críticos, evolução de vendas dos últimos 6 meses e atividades recentes
+
+### Não faz (ainda)
+
+- Autenticação/autorização real (JWT e Spring Security já estão no `pom.xml`, mas o
+  filtro de segurança libera todas as rotas — ver [Segurança](#10-segurança))
+- Filtro de regional/filial/período/categoria no dashboard (o front já tem os campos na
+  tela, mas não manda nada no `fetch`, e o backend ignora regional/período/categoria)
+- Persistência de auditoria (Hibernate Envers está no `pom.xml`, sem uso identificado)
+- Geração de fatura/DANFE em PDF, exportação para Excel/CSV (openhtmltopdf e Apache POI
+  estão no `pom.xml`, sem controller que os exponha)
+- Reprocessamento/retry configurado para falha de webhook (spring-retry no `pom.xml`, sem
+  uso identificado)
+- Notificação de devolução, painel de estatísticas de estoque, app mobile
+
+Isso tudo está listado como dependência presente mas não conectada — não é invenção,
+é o que o `pom.xml` já declara. Antes de qualquer uma dessas linhas virar funcionalidade,
+vale confirmar se a dependência ainda é necessária ou se pode sair.
+
+---
+
+## 3. Regras de negócio
+
+### Cliente
+
+- CPF/CNPJ é único (`uk_cliente_cpf_cnpj`) e imutável após o cadastro (`updatable = false`).
+- Documento validado por `ValidadorCpfCnpj` (Caelum Stella) — documento inválido lança
+  `DocumentoInvalidoException`.
+- Documento duplicado lança `ClienteDuplicadoException`.
+
+### Venda
+
+- Só é possível adicionar/remover item enquanto `status == ABERTA`. Fora disso,
+  `CarrinhoNaoEditavelException`.
+- `valorTotal` nunca é setado diretamente pela API — é sempre recalculado a partir da
+  soma dos itens (`Venda.recalcularValorTotal()`).
+- Toda venda precisa de ao menos um item para ser finalizada — senão,
+  `VendaSemItemException`.
+- Transições de status permitidas, validadas por `StatusVenda.podeTransicionarPara()`:
+
+```
+ABERTA    → PENDENTE, CANCELADA
+PENDENTE  → APROVADA, CANCELADA
+APROVADA  → CONCLUIDA, CANCELADA
+CONCLUIDA → CANCELADA   (somente via avaliação de procedência improcedente)
+CANCELADA → (terminal, sem saída)
+```
+
+  Transição fora dessa tabela lança `TransicaoStatusInvalidaException`.
+- `numeroVenda` é um número público de 7 dígitos gerado por sequence de banco na
+  abertura do carrinho — nunca calculado no front.
+
+### Estoque
+
+- Todo item de estoque nasce com status `DISPONIVEL` e depósito `DP01` (`@PrePersist`).
+- Cada serial/IMEI é único no sistema (`idx_serial_unico`).
+- `ItemEstoque` usa `@Version` (lock otimista) — duas baixas concorrentes no mesmo
+  serial não silenciam uma a outra.
+- Produto é considerado crítico quando `saldo disponível ≤ estoqueMinimo` (padrão: 2,
+  se não informado).
+
+### Inventário (conciliação SAP)
+
+- Cada upload do relatório IQ09 gera uma `InventarioExecucao` com os totalizadores.
+- Cada linha do relatório vira um `InventarioItem` com um resultado:
+  - `CORRETO` — serial existe no nosso estoque como `DISPONIVEL`, bate com o SAP.
+  - `DIVERGENCIA` — existe nos dois lados mas com estado inconsistente (ex.: já vendido
+    aqui, ainda em depósito no SAP), ou existe aqui como `DISPONIVEL` sem aparecer no SAP.
+  - `PENDENTE` — aparece no SAP mas nunca foi cadastrado no nosso sistema.
+
+### Tabela de preços
+
+- Cada importação da planilha da Telefônica vira uma `TabelaPrecoExecucao` (cabeçalho +
+  totalizadores) e uma linha `ProdutoPrecoPlano` por combinação produto × oferta.
+- Quando o "Nome Comercial" da planilha não resolve para nenhum SKU do catálogo,
+  `produto` fica `null` e `encontrado = false` — a linha não é descartada, fica marcada.
+
+### Protocolo documental
+
+- Vínculo 1:1 com a venda (`uk` em `venda_id`) — uma venda tem no máximo um protocolo.
+- `situacaoServico` (`CONFIRMADO`/`CANCELADO`) e `gerarComissao` (default `true`) ficam
+  registrados por venda, independente do status da venda em si.
+
+### Mailing (WhatsApp)
+
+- Campanha nasce `RASCUNHO`, muda pra `ENVIANDO` ao disparar, e fecha em `CONCLUIDA` ou
+  `FALHOU` conforme o resultado dos envios.
+- Cada destinatário é processado de forma assíncrona por um listener RabbitMQ
+  (`MailingWhatsAppListener`) — o disparo da campanha só enfileira, quem efetivamente
+  chama a API do WhatsApp é o listener, um destinatário por vez.
+- Envio sem `WHATSAPP_PHONE_NUMBER_ID`/`WHATSAPP_ACCESS_TOKEN` configurados lança
+  `NegocioException` antes de tentar a chamada HTTP.
+
+### Dashboard
+
+- Faturamento e volume de vendas do mês consideram apenas vendas `CONCLUIDA`.
+- Meta da operação é **fixa em R$ 85.000,00** no código — não vem de configuração nem de
+  tabela (ver [Backlog](#13-backlog--pendências-conhecidas)).
+- Evolução de vendas cobre sempre os últimos 6 meses corridos a partir do mês atual,
+  arredondado em milhares (`"48k"`).
+- Atividades recentes são as 5 últimas vendas (qualquer status), mais recente primeiro.
+
+---
+
+## 4. Decisões de arquitetura
+
+**ADR-01 — Módulo por domínio, não por camada técnica global**
+
+O código é organizado por módulo de negócio (`venda`, `estoque`, `gestao`, `mailing`,
+`dashboard`), e dentro de cada módulo por camada técnica (`controller` / `service` /
+`repository` / `model` / `dto` / `enums`). Isso evita um pacote `controller` gigante com
+40 classes sem relação entre si, e deixa claro qual módulo é dono de qual regra.
+
+**ADR-02 — Entity separada de DTO, mapeamento manual**
+
+`Entity` é o espelho do banco (JPA). `DTO` é o contrato da API. Misturar os dois vaza
+campos sensíveis (ex.: `senhaHash` de `Usuario`) e quebra com `LazyInitializationException`
+em coleções `@OneToMany` fora de transação. O mapeamento é feito via método estático
+`from()` dentro do próprio `ResponseDTO` (ex.: `VendaResponseDTO.from(venda, pagamentos)`)
+— sem MapStruct nos DTOs de resposta, para manter o mapeamento explícito e fácil de
+depurar quando um campo não bate com o front.
+
+**ADR-03 — Máquina de estados explícita no enum, não em `if/else` no Service**
+
+`StatusVenda` sabe suas próprias transições permitidas (`transicoesPermitidas()`). O
+`Service` só pergunta `podeTransicionarPara()` — a regra de workflow fica em um único
+lugar, testável isoladamente, em vez de espalhada em vários métodos de serviço.
+
+**ADR-04 — Erros de domínio como exceções próprias + `@RestControllerAdvice`**
+
+Cada situação de erro tem uma exceção própria (`VendaSemItemException`,
+`CarrinhoNaoEditavelException`, `ProdutoDuplicadoException` etc.), a maioria estendendo
+`BusinessException`. O `GlobalExceptionHandler` traduz `BusinessException` para 422 e
+`RecursoNaoEncontradoException` para 404, sem stack trace vazando pro cliente.
+
+> Atenção ao usar este padrão: `ClienteDuplicadoException`, `DocumentoInvalidoException`
+> e `TransicaoStatusInvalidaException` hoje estendem `RuntimeException` diretamente, não
+> `BusinessException` — não são capturadas por nenhum handler específico e caem no 500
+> padrão do Spring em vez de um 422/409 com corpo padronizado. Ver
+> [Backlog](#13-backlog--pendências-conhecidas).
+
+**ADR-05 — Importação assíncrona/desacoplada via mensageria (mailing)**
+
+O disparo de uma campanha não chama a API do WhatsApp de forma síncrona no request HTTP
+— ele publica uma mensagem por destinatário na fila e devolve. Um listener processa um
+de cada vez. Isso evita que uma campanha de 5 mil destinatários trave a thread HTTP ou
+estoure o rate limit da API do WhatsApp (`rate-limit-ms` configurado).
+
+**ADR-06 — `context-path` único para versionamento de API**
+
+O prefixo de rota (`/api`) fica centralizado em `server.servlet.context-path`
+(`application.yaml`), não repetido em cada `@RequestMapping`. Trocar ou remover a versão
+da API é uma linha de configuração, não uma varredura em N controllers.
+
+**ADR-07 — `@Version` (lock otimista) em recursos de alta concorrência**
+
+`ItemEstoque` é o recurso mais disputado do sistema — várias vendas podem tentar baixar
+o mesmo serial ao mesmo tempo. Lock otimista via `@Version` garante que a segunda
+tentativa concorrente falhe em vez de silenciosamente sobrescrever a primeira.
+
+---
+
+## 5. Stack
+
+| Camada | Escolha | Observação |
+|---|---|---|
+| Linguagem | Java 21 | LTS atual |
+| Framework | Spring Boot 3.3.4 | Base do projeto (artifact `syscor`) |
+| Banco | PostgreSQL | Via `spring-boot-starter-data-jpa` + driver `postgresql` |
+| Migração de schema | Flyway | `db/migration`, `ddl-auto: validate` — schema é sempre do Flyway, nunca do Hibernate |
+| Mensageria | RabbitMQ (`spring-boot-starter-amqp`) | Fila de disparo de mailing WhatsApp |
+| Jobs | Quartz (`spring-boot-starter-quartz`) | Dependência presente |
+| Segurança | Spring Security + JWT (`jjwt`) | Dependências presentes, filtro ainda libera tudo — ver [Segurança](#10-segurança) |
+| HTTP reativo | WebFlux (`WebClient`) | Usado no `WhatsAppApiClient` para chamar a Graph API |
+| Auditoria | Hibernate Envers | Dependência presente, sem uso identificado |
+| Armazenamento de arquivo | AWS S3 SDK | Dependência presente, sem uso identificado |
+| Excel/CSV | Apache POI | Dependência presente, sem controller identificado |
+| PDF | openhtmltopdf | Dependência presente, sem controller identificado |
+| Validação de documento | Caelum Stella | CPF/CNPJ (`ValidadorCpfCnpj`) |
+| Retry | Spring Retry | Dependência presente, sem uso identificado |
+| Mapeamento | MapStruct + Lombok | Lombok em todas as entidades; mapeamento de resposta é manual (ADR-02) |
+| Documentação | springdoc-openapi | Swagger UI automático |
+| Build | Maven (wrapper `mvnw`) | — |
+| Testes | JUnit 5 + Mockito + Testcontainers (PostgreSQL, RabbitMQ) | — |
+| Containers | Docker + Docker Compose | `syscor-app` + `syscor-db` + `syscor-rabbitmq` |
+
+---
+
+## 6. Arquitetura
+
+### Camadas (dentro de cada módulo)
+
+```
+Controller  ──►  Service  ──►  Repository  ──►  PostgreSQL
+  (HTTP)         (regra)          (SQL)
+```
+
+Regra de dependência: a seta só aponta pra direita. O `Service` não conhece
+`HttpServletRequest`. O `Repository` não conhece regra de negócio. O `Controller` não
+toma decisão — só traduz HTTP para chamada de Service e vice-versa. Toda exceção de
+domínio nasce no `Service` e é traduzida pelo `GlobalExceptionHandler`.
+
+### Fluxo de venda → estoque → documental
+
+```
+Front (syscor-frontend)         API Spring Boot                       Banco
+      |                               |                                  |
+      |-- POST /api/vendas ---------->|                                  |
+      |   (abre carrinho ABERTA)      |-- INSERT vendas ---------------->|
+      |<-- 201 VendaResponseDTO ------|                                  |
+      |                               |                                  |
+      |-- POST /api/vendas/{id}/itens>|-- valida status == ABERTA        |
+      |   (repetido por item)         |-- INSERT itens_venda ----------->|
+      |                               |-- recalcula valorTotal           |
+      |                               |                                  |
+      |-- PATCH .../finalizar ------->|-- valida ≥1 item                 |
+      |                               |-- valida transição de status     |
+      |                               |-- (baixa serial no estoque)      |
+      |                               |-- UPDATE status = CONCLUIDA ---->|
+      |                               |                                  |
+      |-- PUT /api/documental/        |                                  |
+      |   protocolos/{vendaId} ------>|-- INSERT tb_protocolo_documental->|
+      |                               |                                  |
+      |-- GET /api/dashboard/         |-- soma vendas CONCLUIDA no mês   |
+      |   executivo ----------------->|-- conta SKUs críticos ---------->|
+      |<-- DashboardExecutivoDTO -----|                                  |
+```
+
+### Fluxo de mailing (assíncrono)
+
+```
+Front                    API Spring Boot            RabbitMQ           WhatsApp Graph API
+  |                            |                        |                     |
+  |-- POST .../disparar ------>|                        |                     |
+  |                            |-- status = ENVIANDO     |                    |
+  |                            |-- 1 msg por destinatário|                    |
+  |                            |   PUBLISH -------------->|                   |
+  |<-- 200 CampanhaResponseDTO-|                        |                     |
+  |                            |                        |-- CONSUME ----------|
+  |                            |                        |   (1 por vez)       |
+  |                            |                        |-- enviarTemplate -->|
+  |                            |<-- status por destinatário (ENVIADO/FALHA) --|
+```
+
+---
+
+## 7. Estrutura de pastas
+
+```
+GestaoEmpresarial4R/
+├── src/
+│   ├── main/
+│   │   ├── java/com/vivo4redes/syscor/
+│   │   │   ├── config/
+│   │   │   │   └── SegurancaVendasConfig.java     # Spring Security — hoje permitAll()
+│   │   │   ├── dashboard/
+│   │   │   │   ├── controller/DashboardController.java
+│   │   │   │   ├── dto/                            # DashboardExecutivoDTO, EvolucaoMensalDTO, AtividadeRecenteDTO
+│   │   │   │   └── service/DashboardService.java
+│   │   │   ├── estoque/
+│   │   │   │   ├── controller/                     # EstoqueController, InventarioController, ProdutoController, TabelaPrecoController
+│   │   │   │   ├── dto/{request,response}/
+│   │   │   │   ├── enums/                          # StatusSerial, ResultadoConciliacaoInventario
+│   │   │   │   ├── model/                           # Produto, ItemEstoque, InventarioExecucao, InventarioItem, TabelaPrecoExecucao, ProdutoPrecoPlano
+│   │   │   │   ├── repository/
+│   │   │   │   └── service/
+│   │   │   ├── gestao/
+│   │   │   │   ├── controller/ProtocoloDocumentalController.java
+│   │   │   │   ├── dto/{request,response}/
+│   │   │   │   ├── enums/SituacaoServico.java
+│   │   │   │   ├── model/ProtocoloDocumental.java
+│   │   │   │   ├── repository/
+│   │   │   │   └── service/
+│   │   │   ├── mailing/
+│   │   │   │   ├── client/WhatsAppApiClient.java   # WebClient para a Graph API
+│   │   │   │   ├── config/                          # fila RabbitMQ, propriedades do WhatsApp
+│   │   │   │   ├── controller/CampanhaMailingController.java
+│   │   │   │   ├── dto/{request,response}/
+│   │   │   │   ├── enums/                            # StatusCampanha, StatusEnvio
+│   │   │   │   ├── listener/MailingWhatsAppListener.java
+│   │   │   │   ├── model/                            # CampanhaMailing, DestinatarioMailing
+│   │   │   │   ├── repository/
+│   │   │   │   └── service/
+│   │   │   ├── venda/
+│   │   │   │   ├── controller/                       # VendaController, ClienteController, FilialController, UsuarioController
+│   │   │   │   ├── dto/{request,response}/
+│   │   │   │   ├── enums/                             # StatusVenda, CategoriaItemVenda, FormaPagamento, StatusScoreCliente, StatusAvaliacaoProcedencia, TipoPessoa
+│   │   │   │   ├── model/                              # Venda, ItemVenda, PagamentoVenda, Cliente, Filial, Usuario
+│   │   │   │   ├── repository/
+│   │   │   │   └── service/
+│   │   │   ├── exception/                              # exceções de domínio + GlobalExceptionHandler
+│   │   │   └── util/ValidadorCpfCnpj.java
+│   │   └── resources/
+│   │       ├── application.yaml            # perfil default, context-path, Flyway, JPA
+│   │       ├── application-dev.yaml        # datasource local, RabbitMQ local
+│   │       ├── application-test.yaml       # perfil de teste (Testcontainers)
+│   │       └── db/migration/               # V1..V9, um arquivo por schema/evolução
+│   └── test/java/com/vivo4redes/syscor/    # testes unitários e de integração
+├── Dockerfile                              # build multi-stage (Maven → JRE Alpine)
+├── Docker-compose.yml                      # syscor-app + syscor-db + syscor-rabbitmq
+└── pom.xml
+```
+
+---
+
+## 8. Modelo de dados
+
+Resumo das tabelas centrais (schema completo em `db/migration/V1..V9`):
+
+```sql
+-- V1: núcleo de venda
+CREATE TABLE clientes (
+    id             BIGSERIAL PRIMARY KEY,
+    tipo_pessoa    VARCHAR(20)  NOT NULL,
+    nome           VARCHAR(150) NOT NULL,
+    cpf_cnpj       VARCHAR(14)  NOT NULL UNIQUE,
+    email          VARCHAR(150),
+    telefone       VARCHAR(20),
+    ativo          BOOLEAN      NOT NULL DEFAULT TRUE,
+    criado_em      TIMESTAMP    NOT NULL DEFAULT now(),
+    atualizado_em  TIMESTAMP    NOT NULL DEFAULT now()
+);
+
+CREATE TABLE vendas (
+    id                                    BIGSERIAL PRIMARY KEY,
+    numero_venda                          BIGINT UNIQUE,              -- via sequence, V3
+    cliente_id                            BIGINT NOT NULL REFERENCES clientes (id),
+    filial_id                             BIGINT NOT NULL REFERENCES filiais (id),     -- V2
+    usuario_id                            BIGINT NOT NULL REFERENCES usuarios (id),    -- V2
+    valor_total                           NUMERIC(12,2) NOT NULL DEFAULT 0,
+    status                                VARCHAR(20) NOT NULL DEFAULT 'ABERTA'
+        CHECK (status IN ('ABERTA','PENDENTE','APROVADA','CONCLUIDA','CANCELADA')),
+    avaliacao_procedencia                 VARCHAR(20),
+    estoque_avancado                      BOOLEAN NOT NULL DEFAULT FALSE,              -- V2
+    status_score_cliente                  VARCHAR(20) NOT NULL DEFAULT 'NAO_REALIZADA',-- V2
+    criado_em                             TIMESTAMP NOT NULL DEFAULT now(),
+    atualizado_em                         TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE TABLE itens_venda (
+    id                 BIGSERIAL PRIMARY KEY,
+    venda_id           BIGINT NOT NULL REFERENCES vendas (id) ON DELETE CASCADE,
+    categoria          VARCHAR(20) NOT NULL
+        CHECK (categoria IN ('PRODUTO_VIVO','SERVICO_VIVO','RECARGA')),  -- ver nota abaixo
+    produto_id         BIGINT NOT NULL,
+    descricao_produto  VARCHAR(150) NOT NULL,
+    quantidade         NUMERIC(12,3) NOT NULL CHECK (quantidade > 0),
+    valor_unitario     NUMERIC(12,2) NOT NULL CHECK (valor_unitario > 0),
+    item_estoque_id    BIGINT REFERENCES tb_item_estoque (id),          -- V4
+    serial_imei        VARCHAR(50)                                      -- V4
+);
+
+-- V4: estoque serializado
+CREATE TABLE tb_produto (
+    id              BIGSERIAL PRIMARY KEY,
+    sku             VARCHAR(50) NOT NULL UNIQUE,
+    descricao       VARCHAR(150) NOT NULL,
+    categoria       VARCHAR(30) NOT NULL,
+    estoque_minimo  INTEGER NOT NULL DEFAULT 2,
+    preco_base      NUMERIC(12,2) NOT NULL,
+    requer_serial   BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE tb_item_estoque (
+    id            BIGSERIAL PRIMARY KEY,
+    produto_id    BIGINT NOT NULL REFERENCES tb_produto (id),
+    serial_imei   VARCHAR(50) NOT NULL UNIQUE,
+    status        VARCHAR(20) NOT NULL DEFAULT 'DISPONIVEL'
+        CHECK (status IN ('DISPONIVEL','RESERVADO','VENDIDO')),
+    deposito_sap  VARCHAR(10) DEFAULT 'DP01',
+    version       BIGINT NOT NULL DEFAULT 0      -- lock otimista (ADR-07)
+);
+
+-- demais tabelas: filiais/usuarios (V2), inventário SAP (V5), tabela de preço (V6),
+-- mailing WhatsApp (V7), campos telecom de item_venda/pagamentos (V8),
+-- protocolo documental (V9)
+```
+
+**Notas de projeto:**
+
+- `TIMESTAMP` sem timezone nas tabelas de V1 a V4 — diferente da recomendação de usar
+  `TIMESTAMPTZ`, aqui o projeto optou por `TIMESTAMP WITHOUT TIME ZONE` + `time_zone:
+  America/Sao_Paulo` fixado no `application.yaml` (`hibernate.jdbc.time_zone`). Funciona
+  enquanto a aplicação rodar num único fuso — vale reavaliar se houver operação
+  multi-região.
+- **Divergência encontrada:** o `CHECK` de `itens_venda.categoria` (V1) não inclui
+  `'ACESSORIO'`, mas o enum `CategoriaItemVenda` no código tem `PRODUTO_VIVO`,
+  `SERVICO_VIVO`, `ACESSORIO`, `RECARGA`. Inserir um item `ACESSORIO` hoje quebra a
+  constraint no banco, mesmo sendo um valor válido no enum Java.
+- **Divergência encontrada:** o `CHECK` de `vendas.avaliacao_procedencia` (V1) aceita
+  `'EM_AVALIACAO'`, `'PROCEDENTE'`, `'IMPROCEDENTE'`, mas o enum
+  `StatusAvaliacaoProcedencia` usa `Em_avaliacao_pelo_BKO`, `Procedente`, `Improcedente`,
+  `Nao_avaliado` — os literais não coincidem letra por letra (case e nome). Gravar o
+  enum via JPA vai falhar contra essa constraint.
+- `serial_imei` é `UNIQUE` em `tb_item_estoque` — a busca por serial precisa ser O(1).
+- Índices parciais/compostos (`idx_tb_item_estoque_status` em `produto_id, status`)
+  aceleram exatamente a query de "saldo disponível por produto" usada no cálculo de
+  SKU crítico do dashboard.
+
+---
+
+## 9. API
+
+Todas as rotas abaixo são relativas ao `context-path` configurado em
+`application.yaml` (`/api`). Exemplo: `GET /dashboard/executivo` é servido em
+`http://localhost:8080/api/dashboard/executivo`.
+
+### Endpoints
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/dashboard/executivo` | Painel executivo (faturamento, meta, ticket médio, SKUs críticos, evolução 6M, atividades recentes) |
+| POST | `/vendas` | Abrir carrinho de venda (`ABERTA`) |
+| GET | `/vendas` | Listar todas as vendas |
+| GET | `/vendas/{id}` | Buscar venda por id |
+| PUT | `/vendas/{id}` | Atualizar dados iniciais (filial, vendedor, score, etc.) |
+| POST | `/vendas/{id}/itens` | Adicionar item ao carrinho |
+| DELETE | `/vendas/{id}/itens/{itemId}` | Remover item do carrinho |
+| POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
+| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |
+| GET | `/vendas/{id}/resumo` | Resumo do carrinho (totais, saldo) |
+| PATCH | `/vendas/{id}/finalizar` | Finalizar venda |
+| PATCH | `/vendas/{id}/status` | Avançar status da venda |
+| PATCH | `/vendas/{id}/avaliacao-procedencia` | Registrar avaliação de procedência (BKO) |
+| POST | `/clientes` | Cadastrar cliente |
+| GET | `/clientes/{id}` | Buscar cliente |
+| POST | `/filiais` | Cadastrar filial |
+| GET | `/filiais/{id}` | Buscar filial |
+| POST | `/usuarios` | Cadastrar usuário/vendedor |
+| GET | `/usuarios/{id}` | Buscar usuário |
+| GET | `/estoque/consolidado` | Estoque consolidado por produto |
+| GET | `/estoque/alertas` | Produtos em nível crítico de estoque |
+| POST | `/estoque/entrada-seriais` | Dar entrada em seriais/IMEIs |
+| POST | `/estoque/inventario/importar-sap` | Importar relatório IQ09 (multipart) e conciliar |
+| GET | `/estoque/inventario/{execucaoId}` | Buscar resumo de uma execução de inventário |
+| POST | `/produtos` | Cadastrar produto |
+| GET | `/produtos/{id}` | Buscar produto |
+| GET | `/produtos` | Listar produtos |
+| POST | `/produtos/precos/importar-telefonica` | Importar tabela de preços da Telefônica (multipart) |
+| GET | `/produtos/precos/execucoes/{execucaoId}` | Buscar resumo de uma importação de preços |
+| GET | `/produtos/precos/produtos/{produtoId}` | Listar preços de um produto |
+| GET | `/produtos/precos/ofertas` | Listar ofertas de comunicação disponíveis |
+| GET | `/produtos/precos` | Listar produtos por oferta (`?oferta=`) |
+| PUT | `/documental/protocolos/{vendaId}` | Salvar/atualizar protocolo documental da venda |
+| GET | `/documental/protocolos/{vendaId}` | Buscar protocolo por venda |
+| GET | `/documental/protocolos` | Buscar por número de protocolo GED |
+| POST | `/mailing/campanhas` | Criar campanha |
+| GET | `/mailing/campanhas/modelo-planilha` | Baixar modelo de planilha de destinatários |
+| POST | `/mailing/campanhas/importar-planilha` | Importar destinatários (multipart) |
+| POST | `/mailing/campanhas/{id}/disparar` | Disparar campanha (assíncrono via fila) |
+| GET | `/mailing/campanhas/{id}` | Buscar campanha |
+| GET | `/mailing/campanhas` | Listar campanhas |
+
+### Códigos de resposta
+
+| Status | Quando |
+|---|---|
+| 200 | Consulta bem-sucedida |
+| 201 | Recurso criado com sucesso |
+| 400 | Corpo inválido (`@Valid`/`ConstraintViolationException`) |
+| 404 | Recurso não encontrado (`RecursoNaoEncontradoException`) |
+| 422 | Violação de regra de negócio (`BusinessException` e subclasses) |
+| 500 | Erro não tratado — inclui hoje as 3 exceções que não estendem `BusinessException` (ver [Backlog](#13-backlog--pendências-conhecidas)) |
+
+### Formato de erro padronizado
+
+```json
+{
+  "timestamp": "2026-09-21T18:30:00Z",
+  "status": 422,
+  "erro": "Unprocessable Entity",
+  "mensagem": "Não é possível registrar uma venda sem itens",
+  "campos": { "opcional": "presente apenas em erro de validação (400)" }
+}
+```
+
+---
+
+## 10. Segurança
+
+| Item | Situação hoje |
+|---|---|
+| Autenticação JWT | Dependências (`jjwt-api`, `-impl`, `-jackson`) presentes no `pom.xml`, sem `JwtFilter`/`JwtUtil` implementados |
+| Autorização por rota | `SegurancaVendasConfig` define `.anyRequest().permitAll()` — **toda rota está aberta**, sem exceção |
+| Senha de usuário | `Usuario.senhaHash` é sempre BCrypt (`PasswordEncoder` já configurado como bean), nunca texto puro |
+| Senha de venda | Reautenticação do vendedor ao salvar/alterar venda é regra de produto, mas ainda não há endpoint de login que valide isso contra o hash |
+| SQL Injection | Spring Data JPA com queries parametrizadas — nenhuma concatenação de string identificada |
+| Exposição de campo sensível | `VendaResponseDTO`/`UsuarioResponseDTO` não devolvem `senhaHash` — mapeamento manual evita vazamento (ADR-02) |
+| CORS | Liberado (`@CrossOrigin(origins = "*")`) no `DashboardController` — só nesse controller, não é global |
+
+Ou seja: hoje qualquer cliente HTTP acessa qualquer rota sem token. Antes de expor esse
+backend fora de uma rede confiável, ativar de fato o `JwtFilter` no
+`SecurityFilterChain` é pré-requisito, não um "nice to have".
+
+---
+
+## 11. Estado atual — módulo a módulo
+
+| Módulo | Controllers | Regra de negócio | Persistência (Flyway) | Observação |
+|---|---|---|---|---|
+| `venda` | ✅ completo (carrinho, itens, pagamentos, status, avaliação) | ✅ máquina de estados, validação de carrinho | ✅ V1, V2, V8 | Núcleo do sistema — mais maduro |
+| `estoque` | ✅ produto, entrada de serial, alertas, inventário SAP, tabela de preços | ✅ status de serial, conciliação, resolução de SKU | ✅ V4, V5, V6 | — |
+| `gestao` (documental) | ✅ salvar/buscar protocolo | ✅ vínculo 1:1 com venda | ✅ V9 | — |
+| `mailing` | ✅ criar, importar, disparar, listar campanha | ✅ fila + listener assíncrono | ✅ V7 | Depende de credenciais WhatsApp via env vars |
+| `dashboard` | ✅ 1 endpoint (`/dashboard/executivo`) | ✅ implementado, meta fixa no código | — (lê de `venda`/`estoque`) | Ver limitação de filtros abaixo |
+
+---
+
+## 12. Como rodar
+
+### Localmente (sem Docker)
+
+```bash
+# 1. Pré-requisitos: Java 21, Maven (ou use ./mvnw), PostgreSQL e RabbitMQ rodando
+
+# 2. Banco de dados
+createdb syscor
+
+# 3. Configuração
+# edite src/main/resources/application-dev.yaml com seu datasource/RabbitMQ locais,
+# ou exporte as variáveis de ambiente equivalentes
+
+# 4. Rodar
+./mvnw spring-boot:run
+
+# 5. Testar
+curl http://localhost:8080/api/dashboard/executivo
+```
+
+### Com Docker
+
+```bash
+docker compose -f Docker-compose.yml up --build
+# sobe syscor-app (8080), syscor-db (5432) e syscor-rabbitmq (5672/15672)
+```
+
+### Variáveis de ambiente (perfil `dev`/Docker)
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `SPRING_DATASOURCE_URL` | Sim (Docker) | JDBC URL do PostgreSQL |
+| `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` | Sim (Docker) | Credenciais do banco |
+| `SPRING_RABBITMQ_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` | Sim (Docker) | Conexão com RabbitMQ |
+| `WHATSAPP_PHONE_NUMBER_ID` | Sim, para disparar mailing | ID do número na Graph API |
+| `WHATSAPP_ACCESS_TOKEN` | Sim, para disparar mailing | Token de acesso da Graph API |
+| `WHATSAPP_WABA_ID` | Sim, para disparar mailing | ID da WhatsApp Business Account |
+
+Sem as três variáveis do WhatsApp, a aplicação sobe normalmente — o disparo de
+campanha que falha com `NegocioException` no momento do envio, não no boot.
+
+---
+
+## 13. Backlog / pendências conhecidas
+
+Em ordem de risco (o que mais provavelmente causa um bug em produção primeiro):
+
+- [ ] **Segurança:** ativar `JwtFilter` de fato — hoje `SegurancaVendasConfig` libera
+      todas as rotas (`permitAll()`), apesar das dependências JWT já estarem no projeto
+- [ ] **Constraint de banco divergente do enum:** `itens_venda.categoria` não aceita
+      `'ACESSORIO'` no `CHECK` da V1, mas o enum Java tem essa categoria — inserir um
+      item `ACESSORIO` quebra em runtime
+- [ ] **Constraint de banco divergente do enum:** `vendas.avaliacao_procedencia` (V1)
+      usa literais (`EM_AVALIACAO`, `PROCEDENTE`, `IMPROCEDENTE`) diferentes dos valores
+      do enum `StatusAvaliacaoProcedencia` (`Em_avaliacao_pelo_BKO`, `Procedente`,
+      `Improcedente`, `Nao_avaliado`) — gravar via JPA falha contra a constraint
+- [ ] **Exceções não capturadas pelo handler específico:** `ClienteDuplicadoException`,
+      `DocumentoInvalidoException` e `TransicaoStatusInvalidaException` estendem
+      `RuntimeException` direto, não `BusinessException` — caem no 500 genérico do
+      Spring em vez de um 400/409/422 com corpo padronizado
+- [ ] **Meta do dashboard hardcoded:** `R$ 85.000,00` fixo no `DashboardService` —
+      precisa virar configuração ou tabela quando houver mais de uma meta por período/filial
+- [ ] **Filtros do dashboard incompletos:** o front (`Dashboard.jsx`) tem campos de
+      regional/filial/período/categoria na tela, mas não os envia no `fetch`; o backend
+      só aceita `filialId` como query param e ignora os demais
+- [ ] Dependências presentes sem uso identificado — confirmar se ainda são necessárias
+      ou remover do `pom.xml`: Hibernate Envers (auditoria), AWS S3 SDK, Apache POI,
+      openhtmltopdf, Spring Retry, Quartz
+- [ ] Rate limiting em endpoints de importação (`/estoque/inventario/importar-sap`,
+      `/produtos/precos/importar-telefonica`, `/mailing/campanhas/importar-planilha`) —
+      todos aceitam upload multipart sem limite de frequência
