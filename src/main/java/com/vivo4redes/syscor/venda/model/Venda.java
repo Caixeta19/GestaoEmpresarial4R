@@ -103,7 +103,8 @@ public class Venda {
     public void recalcularValorTotal() {
         this.valorTotal = itens.stream()
                 .map(ItemVenda::getValorTotalItem)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     public void removerItem(Long itemId) {

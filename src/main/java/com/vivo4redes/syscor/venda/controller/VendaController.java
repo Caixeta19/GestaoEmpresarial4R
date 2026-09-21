@@ -5,9 +5,11 @@ import com.vivo4redes.syscor.venda.dto.request.AvaliacaoProcedenciaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.response.VendaResponseDTO;
+import com.vivo4redes.syscor.venda.model.Venda;
 import com.vivo4redes.syscor.venda.service.VendaService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -16,9 +18,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * Endpoints para o fluxo de venda e controle de abas de itens.
- */
 @RestController
 @RequestMapping("/vendas")
 public class VendaController {
@@ -29,76 +28,84 @@ public class VendaController {
         this.vendaService = vendaService;
     }
 
-    /** Abre um novo carrinho (status ABERTA) para o cliente informado. */
     @PostMapping
     public ResponseEntity<VendaResponseDTO> abrirCarrinho(@Valid @RequestBody VendaRequestDTO dto) {
         var venda = vendaService.abrirCarrinho(dto);
-        return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
+        return ResponseEntity.status(HttpStatus.CREATED).body(responder(venda));
     }
 
-    /** Consulta detalhes completos da venda por ID. */
     @GetMapping("/{id}")
     public ResponseEntity<VendaResponseDTO> buscarPorId(@PathVariable Long id) {
-        return ResponseEntity.ok(VendaResponseDTO.from(vendaService.buscarPorId(id)));
+        return ResponseEntity.ok(responder(vendaService.buscarPorId(id)));
     }
 
-    /** Listagem geral de vendas. */
     @GetMapping
     public ResponseEntity<List<VendaResponseDTO>> listar() {
-        var vendas = vendaService.listarTodas().stream().map(VendaResponseDTO::from).toList();
+        var vendas = vendaService.listarTodas().stream().map(this::responder).toList();
         return ResponseEntity.ok(vendas);
     }
 
-    /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */
     @PutMapping("/{id}")
     public ResponseEntity<VendaResponseDTO> atualizarDadosIniciais(
             @PathVariable Long id, @Valid @RequestBody DadosIniciaisVendaRequestDTO dto) {
         var venda = vendaService.atualizarDadosIniciais(id, dto);
-        return ResponseEntity.ok(VendaResponseDTO.from(venda));
+        return ResponseEntity.ok(responder(venda));
     }
 
-    /** Adiciona um item (Produto Vivo / Serviço Vivo / Recarga). */
     @PostMapping("/{id}/itens")
     public ResponseEntity<VendaResponseDTO> adicionarItem(
             @PathVariable Long id, @Valid @RequestBody ItemVendaRequestDTO dto) {
         var venda = vendaService.adicionarItem(id, dto);
-        return ResponseEntity.status(HttpStatus.CREATED).body(VendaResponseDTO.from(venda));
+        return ResponseEntity.status(HttpStatus.CREATED).body(responder(venda));
     }
 
-    /** Remove um item da venda e recalcula os totais. */
     @DeleteMapping("/{id}/itens/{itemId}")
     public ResponseEntity<VendaResponseDTO> removerItem(@PathVariable Long id, @PathVariable Long itemId) {
         var venda = vendaService.removerItem(id, itemId);
-        return ResponseEntity.ok(VendaResponseDTO.from(venda));
+        return ResponseEntity.ok(responder(venda));
     }
 
-    /** Alimenta os badges de contagem de cada aba e totalizador do carrinho. */
+    @PostMapping("/{id}/pagamentos")
+    public ResponseEntity<VendaResponseDTO> adicionarPagamento(
+            @PathVariable Long id, @Valid @RequestBody PagamentoVendaRequestDTO dto) {
+        var venda = vendaService.adicionarPagamento(id, dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(responder(venda));
+    }
+
+    @DeleteMapping("/{id}/pagamentos/{pagamentoId}")
+    public ResponseEntity<VendaResponseDTO> removerPagamento(
+            @PathVariable Long id, @PathVariable Long pagamentoId) {
+        var venda = vendaService.removerPagamento(id, pagamentoId);
+        return ResponseEntity.ok(responder(venda));
+    }
+
     @GetMapping("/{id}/resumo")
     public ResponseEntity<ResumoCarrinhoDTO> obterResumo(@PathVariable Long id) {
         return ResponseEntity.ok(vendaService.obterResumo(id));
     }
 
-    /** Encerra o carrinho: ABERTA -> PENDENTE. */
     @PatchMapping("/{id}/finalizar")
     public ResponseEntity<VendaResponseDTO> finalizar(
             @PathVariable Long id, @Valid @RequestBody FinalizarVendaRequestDTO dto) {
         var venda = vendaService.finalizar(id, dto);
-        return ResponseEntity.ok(VendaResponseDTO.from(venda));
+        return ResponseEntity.ok(responder(venda));
     }
 
-    /** Transição de status da venda. */
     @PatchMapping("/{id}/status")
     public ResponseEntity<VendaResponseDTO> avancarStatus(
             @PathVariable Long id, @Valid @RequestBody StatusVendaRequestDTO dto) {
         var venda = vendaService.avancarStatus(id, dto);
-        return ResponseEntity.ok(VendaResponseDTO.from(venda));
+        return ResponseEntity.ok(responder(venda));
     }
 
-    /** Avaliação de procedência (US-303). */
     @PatchMapping("/{id}/avaliacao-procedencia")
     public ResponseEntity<VendaResponseDTO> avaliarProcedencia(
             @PathVariable Long id, @Valid @RequestBody AvaliacaoProcedenciaRequestDTO dto) {
         var venda = vendaService.avaliarProcedencia(id, dto.resultado());
-        return ResponseEntity.ok(VendaResponseDTO.from(venda));
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    private VendaResponseDTO responder(Venda venda) {
+        return VendaResponseDTO.from(venda, vendaService.listarPagamentos(venda.getId()));
     }
 }

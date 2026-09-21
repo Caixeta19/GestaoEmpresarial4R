@@ -7,10 +7,6 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-/**
- * Uma venda pode ter múltiplas formas de pagamento somando o valor total
- * (ex.: parte no cartão, parte no PIX) — ver aba "Pagamento" em Venda.jsx.
- */
 @Entity
 @Table(name = "pagamentos_venda")
 @Getter

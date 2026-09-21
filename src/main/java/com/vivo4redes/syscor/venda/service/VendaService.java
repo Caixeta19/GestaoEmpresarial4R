@@ -32,16 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
 
-/**
- * US-302/US-303: ciclo de vida da venda como carrinho e integracao com estoque serializado.
- * Fluxo esperado pela UI (abas Produto Vivo / Servico Vivo / Recarga):
- *   1. abrirCarrinho          -> Venda nasce em status ABERTA
- *   2. adicionarItem          -> Valida e baixa o serial atomico no Estoque (ItemEstoque)
- *   3. removerItem            -> Estorna o serial para DISPONIVEL e recalcula
- *   4. obterResumo            -> alimenta os badges "(3)", "(0)", "(0)" das abas
- *   5. finalizar              -> ABERTA -> PENDENTE (exige ao menos 1 item)
- *   6. avancarStatus          -> PENDENTE -> APROVADA -> CONCLUIDA (ou CANCELADA com estorno)
- */
 @Service
 public class VendaService {
 
@@ -82,8 +72,6 @@ public class VendaService {
                 .usuario(usuario)
                 .estoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()))
                 .status(StatusVenda.ABERTA)
-                // Snapshot de auditoria (US-301): registra o consentimento do cliente
-                // no instante da venda, mesmo que ele mude depois — não trava a venda
                 .build();
 
         return vendaRepository.save(venda);
@@ -94,22 +82,16 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
-        // O produto precisa existir no catálogo — todo item de venda (produto,
-        // serviço ou recarga) é rastreável a um SKU cadastrado no Estoque.
         Produto produto = estoqueService.buscarProdutoPorId(dto.produtoId());
 
         ItemEstoque itemEstoqueBaixado = null;
         String serialInformado = dto.imeiOuSerial();
-        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("—");
+        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
 
-        // Regra de integracao com o Estoque: quem decide se a baixa exige
-        // IMEI/serial é o cadastro do produto (produto.requerSerial) — não a
-        // categoria do item, que é só a aba da UI (Produto Vivo/Serviço/Recarga)
-        // e pode não refletir a real necessidade de rastreio serializado.
         if (informouSerial) {
             itemEstoqueBaixado = estoqueService.baixarSerialNaVenda(serialInformado.trim());
         } else if (Boolean.TRUE.equals(produto.getRequerSerial())) {
-            throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado à venda.");
+            throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
         }
 
         ItemVenda item = ItemVenda.builder()
@@ -157,7 +139,6 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
-        // Localiza o item antes da remocao para estornar o serial
         venda.getItens().stream()
                 .filter(i -> i.getId().equals(itemId))
                 .findFirst()
@@ -187,7 +168,6 @@ public class VendaService {
         );
     }
 
-    /** Edita os campos da tela "Início" de uma venda já aberta — exige reautenticação. */
     @Transactional
     public Venda atualizarDadosIniciais(Long vendaId, DadosIniciaisVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
@@ -208,7 +188,6 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
-    /** US-302: encerra a etapa de carrinho — a partir daqui os itens não podem mais ser alterados. */
     @Transactional
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
@@ -221,14 +200,55 @@ public class VendaService {
         BigDecimal totalPago = somarPagamentos(vendaId);
         if (totalPago.compareTo(venda.getValorTotal()) != 0) {
             throw new NegocioException("A soma dos pagamentos (" + totalPago
-                    + ") não bate com o valor total da venda (" + venda.getValorTotal() + ").");
+                    + ") nao bate com o valor total da venda (" + venda.getValorTotal() + ").");
         }
 
         transicionar(venda, StatusVenda.PENDENTE);
         return vendaRepository.save(venda);
     }
 
-    /** Adiciona uma forma de pagamento — uma venda pode ter várias (ex.: parte cartão, parte PIX). */
+    @Transactional
+    public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoUsuario());
+
+        StatusVenda novoStatus = dto.novoStatus();
+        if (novoStatus == null) {
+            throw new IllegalArgumentException("O novo status da venda e obrigatorio.");
+        }
+
+        if (novoStatus == StatusVenda.CANCELADA) {
+            estornarSeriaisDaVenda(venda);
+        }
+
+        transicionar(venda, novoStatus);
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional
+    public Venda avaliarProcedencia(Long vendaId, StatusAvaliacaoProcedencia resultado) {
+        Venda venda = buscarPorId(vendaId);
+        venda.setAvaliacaoProcedencia(resultado);
+
+        if (resultado == StatusAvaliacaoProcedencia.Improcedente
+                && venda.getStatus() != StatusVenda.CANCELADA) {
+            estornarSeriaisDaVenda(venda);
+            transicionar(venda, StatusVenda.CANCELADA);
+        }
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional(readOnly = true)
+    public Venda buscarPorId(Long id) {
+        return vendaRepository.buscarComDetalhesPorId(id)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Venda> listarTodas() {
+        return vendaRepository.listarComDetalhes();
+    }
+
     @Transactional
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
@@ -253,7 +273,7 @@ public class VendaService {
         PagamentoVenda pagamento = pagamentoVendaRepository.findById(pagamentoId)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Pagamento"));
         if (!pagamento.getVenda().getId().equals(vendaId)) {
-            throw new NegocioException("Esse pagamento não pertence a essa venda.");
+            throw new NegocioException("Esse pagamento nao pertence a essa venda.");
         }
         pagamentoVendaRepository.delete(pagamento);
 
@@ -269,51 +289,6 @@ public class VendaService {
         return listarPagamentos(vendaId).stream()
                 .map(PagamentoVenda::getValor)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    @Transactional
-    public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
-        exigirVendedorAutenticado(dto.autenticacaoUsuario());
-
-        StatusVenda novoStatus = dto.novoStatus();
-        if (novoStatus == null) {
-            throw new IllegalArgumentException("O novo status da venda é obrigatório.");
-        }
-
-        // Se for transicao para CANCELADA, estorna todos os seriais associados
-        if (novoStatus == StatusVenda.CANCELADA) {
-            estornarSeriaisDaVenda(venda);
-        }
-
-        transicionar(venda, novoStatus);
-        return vendaRepository.save(venda);
-    }
-
-    /** US-303: venda improcedente é automaticamente cancelada e sai do cálculo de comissão (US-106). */
-    @Transactional
-    public Venda avaliarProcedencia(Long vendaId, StatusAvaliacaoProcedencia resultado) {
-        Venda venda = buscarPorId(vendaId);
-        venda.setAvaliacaoProcedencia(resultado);
-
-        if (resultado == StatusAvaliacaoProcedencia.Improcedente
-                && venda.getStatus() != StatusVenda.CANCELADA) {
-            estornarSeriaisDaVenda(venda);
-            transicionar(venda, StatusVenda.CANCELADA);
-        }
-        return vendaRepository.save(venda);
-    }
-
-    @Transactional(readOnly = true)
-    public Venda buscarPorId(Long id) {
-        return vendaRepository.buscarComDetalhesPorId(id)
-                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda"));
-    }
-
-    /** Listagem geral — mesma estratégia de fetch eager do buscarPorId, evita N+1/Lazy fora da transação. */
-    @Transactional(readOnly = true)
-    public java.util.List<Venda> listarTodas() {
-        return vendaRepository.listarComDetalhes();
     }
 
     private void exigirCarrinhoEditavel(Venda venda) {
@@ -334,7 +309,7 @@ public class VendaService {
 
     private void exigirVendedorAutenticado(AutenticacaoUsuarioDTO autenticacao) {
         if (autenticacao == null) {
-            throw new IllegalArgumentException("Dados de autenticação do vendedor são obrigatórios.");
+            throw new IllegalArgumentException("Dados de autenticacao do vendedor sao obrigatorios.");
         }
         usuarioService.autenticar(autenticacao);
     }

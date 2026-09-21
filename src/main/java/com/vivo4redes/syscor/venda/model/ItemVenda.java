@@ -3,18 +3,10 @@ package com.vivo4redes.syscor.venda.model;
 import com.vivo4redes.syscor.estoque.model.ItemEstoque;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.math.BigDecimal;
 
-/**
- * Item de venda. Integra opcionalmente com o módulo de Estoque via ItemEstoque
- * quando o item exige baixa de um serial/IMEI (US-203).
- */
 @Entity
 @Table(name = "itens_venda")
 @Getter
@@ -28,20 +20,18 @@ public class ItemVenda {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "venda_id", nullable = false)
     private Venda venda;
 
-    /** Categoria da aba de origem na UI (Produto Vivo / Serviço Vivo / Recarga). */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CategoriaItemVenda categoria;
 
-    /** Referência lógica ao futuro Produto/Serviço do módulo de Estoque (sem FK física ainda). */
     @Column(name = "produto_id", nullable = false)
     private Long produtoId;
 
-    @Column(name = "descricao_produto", nullable = false, length = 150)
+    @Column(name = "descricao_produto", nullable = false, length = 200)
     private String descricaoProduto;
 
     @Column(nullable = false, precision = 12, scale = 3)
@@ -50,20 +40,12 @@ public class ItemVenda {
     @Column(name = "valor_unitario", nullable = false, precision = 12, scale = 2)
     private BigDecimal valorUnitario;
 
-    /** Serial/IMEI baixado no Estoque para este item, quando aplicável. */
-    @ManyToOne(fetch = FetchType.LAZY)
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_estoque_id")
     private ItemEstoque itemEstoque;
 
-    /** Snapshot do serial/IMEI informado ou baixado, para exibição mesmo se o vínculo com estoque mudar. */
     @Column(name = "serial_imei", length = 50)
     private String serialImei;
-
-    // ---------------------------------------------------------------
-    // Campos específicos de Produto Vivo / Serviço Vivo (telecom).
-    // Todos opcionais — a aplicabilidade depende da categoria do item;
-    // ver Venda.jsx (formProdutoVivo / servicoForm) no frontend.
-    // ---------------------------------------------------------------
 
     @Column(name = "tabela_preco", length = 50)
     private String tabelaPreco;
@@ -77,18 +59,15 @@ public class ItemVenda {
     @Column(name = "segmento", length = 50)
     private String segmento;
 
-    /** Tipo de operação: Troca de Aparelho, Alta, Migração, Reativação, Troca de Simcard, Troca de titularidade... */
     @Column(name = "tipo_servico", length = 50)
     private String tipoServico;
 
     @Column(name = "ddd", length = 2)
     private String ddd;
 
-    /** Só usado em Troca de Plano — o plano que o cliente tinha antes da operação. */
     @Column(name = "plano_antigo", length = 60)
     private String planoAntigo;
 
-    /** Plano ativo/contratado após a operação (formProdutoVivo.planoAtivo / servicoForm.planoNovo). */
     @Column(name = "plano", length = 60)
     private String plano;
 
@@ -107,15 +86,12 @@ public class ItemVenda {
     @Column(name = "cupom")
     private Boolean cupom;
 
-    /** Dia do vencimento da fatura, ex.: "10". */
     @Column(name = "vencimento_fatura", length = 2)
     private String vencimentoFatura;
 
-    /** MSISDN — número da linha ativada/portada/alterada neste item. */
     @Column(name = "numero_acesso", length = 20)
     private String numeroAcesso;
 
-    /** Sistema de origem do lançamento: VIVO+, NEXT ou GED. */
     @Column(name = "sistema_origem", length = 10)
     private String sistemaOrigem;
 
@@ -125,11 +101,9 @@ public class ItemVenda {
     @Column(name = "num_solicitacao_ged", length = 30)
     private String numSolicitacaoGed;
 
-    /** ICCID do chip 3G, quando aplicável (troca de simcard). */
     @Column(name = "simcard_3g", length = 30)
     private String simcard3g;
 
-    /** ICCID do chip 4G, quando aplicável (troca de simcard). */
     @Column(name = "simcard_4g", length = 30)
     private String simcard4g;
 

@@ -9,11 +9,6 @@ import lombok.Builder;
 
 import java.math.BigDecimal;
 
-/**
- * Campos telecom (tabelaPreco em diante) são todos opcionais — a
- * aplicabilidade depende da categoria do item. Ver Venda.jsx no frontend
- * (formProdutoVivo / servicoForm) para o formulário de origem de cada campo.
- */
 @Builder
 public record ItemVendaRequestDTO(
 
@@ -37,7 +32,6 @@ public record ItemVendaRequestDTO(
 
         String imeiOuSerial,
 
-        // ---------------- Produto Vivo / Serviço Vivo (telecom) ----------------
         String tabelaPreco,
         Boolean sva,
         Boolean seguro,
