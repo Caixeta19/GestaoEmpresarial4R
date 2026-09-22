@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.venda.service;
 
+import com.vivo4redes.syscor.venda.dto.VendaFiltroDTO;
 import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.venda.dto.ResumoCarrinhoDTO;
 import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
@@ -248,6 +249,68 @@ public class VendaService {
     public List<Venda> listarTodas() {
         return vendaRepository.listarComDetalhes();
     }
+
+    @Transactional(readOnly = true)
+    public List<Venda> buscar(VendaFiltroDTO filtro) {
+        return listarTodas().stream()
+                .filter(v -> filtro.filialId() == null || filtro.filialId().equals(v.getFilial().getId()))
+                .filter(v -> filtro.vendedorId() == null || filtro.vendedorId().equals(v.getUsuario().getId()))
+                .filter(v -> filtro.numeroVenda() == null || filtro.numeroVenda().equals(v.getNumeroVenda()))
+                .filter(v -> filtro.dataInicio() == null || !dataDaVenda(v).isBefore(filtro.dataInicio()))
+                .filter(v -> filtro.dataFim() == null || !dataDaVenda(v).isAfter(filtro.dataFim()))
+                .filter(v -> vazio(filtro.cliente()) || bateCliente(v, filtro.cliente()))
+                .filter(v -> vazio(filtro.numeroAcesso()) || v.getItens().stream().anyMatch(i ->
+                        contemDigitos(i.getNumeroAcesso(), filtro.numeroAcesso())
+                                || contemDigitos(i.getSerialImei(), filtro.numeroAcesso())))
+                .filter(v -> vazio(filtro.serialProdutoVivo()) || v.getItens().stream().anyMatch(i ->
+                        i.getCategoria() == CategoriaItemVenda.PRODUTO_VIVO
+                                && contemTexto(i.getSerialImei(), filtro.serialProdutoVivo())))
+                .filter(v -> vazio(filtro.serialSimcard()) || v.getItens().stream().anyMatch(i ->
+                        i.getCategoria() == CategoriaItemVenda.SERVICO_VIVO
+                                && contemTexto(i.getSerialImei(), filtro.serialSimcard())))
+                .filter(v -> vazio(filtro.modeloAcessorio()) || v.getItens().stream().anyMatch(i ->
+                        i.getCategoria() == CategoriaItemVenda.ACESSORIO
+                                && (contemTexto(i.getDescricaoProduto(), filtro.modeloAcessorio())
+                                || contemTexto(i.getSerialImei(), filtro.modeloAcessorio()))))
+                .toList();
+    }
+
+    private java.time.LocalDate dataDaVenda(Venda v) {
+        return v.getCriadoEm().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+    }
+
+    private boolean vazio(String texto) {
+        return texto == null || texto.isBlank();
+    }
+
+    private boolean contemTexto(String campo, String termo) {
+        return campo != null && campo.toLowerCase().contains(termo.trim().toLowerCase());
+    }
+
+    private boolean bateCliente(Venda v, String termo) {
+        String termoLower = termo.trim().toLowerCase();
+        String termoDigitos = termo.replaceAll("\\D", "");
+
+        String nome = v.getCliente().getNome() == null ? "" : v.getCliente().getNome().toLowerCase();
+        String documento = v.getCliente().getCpfCnpj() == null ? "" : v.getCliente().getCpfCnpj().replaceAll("\\D", "");
+
+        boolean bateNome = nome.contains(termoLower);
+        boolean bateDocumento = termoDigitos.length() >= 2 && documento.contains(termoDigitos);
+        return bateNome || bateDocumento;
+    }
+
+    private boolean contemDigitos(String campo, String termo) {
+        if (campo == null) return false;
+        String campoDigitos = campo.replaceAll("\\D", "");
+        String termoDigitos = termo.replaceAll("\\D", "");
+        return !termoDigitos.isBlank() && campoDigitos.contains(termoDigitos);
+    }
+
+
+
+
+
+
 
     @Transactional
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {

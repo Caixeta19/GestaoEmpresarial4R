@@ -15,8 +15,10 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
+import com.vivo4redes.syscor.venda.dto.VendaFiltroDTO;
+import org.springframework.format.annotation.DateTimeFormat;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/vendas")
@@ -40,8 +42,22 @@ public class VendaController {
     }
 
     @GetMapping
-    public ResponseEntity<List<VendaResponseDTO>> listar() {
-        var vendas = vendaService.listarTodas().stream().map(this::responder).toList();
+    public ResponseEntity<List<VendaResponseDTO>> listar(
+            @RequestParam(required = false) Long filialId,
+            @RequestParam(required = false) Long vendedorId,
+            @RequestParam(required = false) Long numeroVenda,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicio,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFim,
+            @RequestParam(required = false) String cliente,
+            @RequestParam(required = false) String numeroAcesso,
+            @RequestParam(required = false) String serialProdutoVivo,
+            @RequestParam(required = false) String serialSimcard,
+            @RequestParam(required = false) String modeloAcessorio) {
+
+        var filtro = new VendaFiltroDTO(filialId, vendedorId, numeroVenda, dataInicio, dataFim,
+                cliente, numeroAcesso, serialProdutoVivo, serialSimcard, modeloAcessorio);
+
+        var vendas = vendaService.buscar(filtro).stream().map(this::responder).toList();
         return ResponseEntity.ok(vendas);
     }
 
