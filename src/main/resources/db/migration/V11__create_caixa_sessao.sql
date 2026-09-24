@@ -1,6 +1,6 @@
 CREATE TABLE tb_caixa_sessao (
                                  id             BIGSERIAL PRIMARY KEY,
-                                 filial_id      BIGINT NOT NULL REFERENCES tb_filial(id),
+                                 filial_id      BIGINT NOT NULL REFERENCES filiais(id),
                                  caixa_pdv      VARCHAR(100) NOT NULL,
                                  data_abertura  DATE NOT NULL,
                                  status         VARCHAR(10) NOT NULL,
