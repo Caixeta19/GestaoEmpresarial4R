@@ -38,24 +38,27 @@ public class CaixaSessaoService {
     public CaixaSessaoResponseDTO abrir(AbrirCaixaRequestDTO dto) {
         Filial filial = filialService.buscarPorId(dto.filialId());
 
-        CaixaSessao sessao = CaixaSessao.builder()
+        CaixaSessao novaSessao = CaixaSessao.builder()
                 .filial(filial)
                 .caixaPdv(dto.caixaPdv())
                 .dataAbertura(LocalDate.now())
                 .status(StatusCaixaSessao.ABERTO)
                 .build();
-        sessao = caixaSessaoRepository.save(sessao);
+
+        final CaixaSessao sessaoSalva = caixaSessaoRepository.save(novaSessao);
 
         List<FormaPagamentoCaixa> formas = dto.formasIniciais().stream()
                 .map(f -> FormaPagamentoCaixa.builder()
-                        .caixaSessao(sessao)
+                        .caixaSessao(sessaoSalva)
                         .forma(f.forma())
-                        .abertura(f.valorAbertura())
+                        .abertura(f.valorAbertura() != null ? f.valorAbertura() : BigDecimal.ZERO)
+                        .movimento(BigDecimal.ZERO)
+                        .saidas(BigDecimal.ZERO)
                         .build())
                 .toList();
         formaPagamentoCaixaRepository.saveAll(formas);
 
-        return montarResponse(sessao);
+        return montarResponse(sessaoSalva);
     }
 
     @Transactional(readOnly = true)
@@ -95,8 +98,12 @@ public class CaixaSessaoService {
             if (conferido == null) {
                 throw new NegocioException("Falta o valor conferido da forma " + f.getForma() + " pra fechar esse caixa.");
             }
+
+            BigDecimal abertura = safe(f.getAbertura());
+            BigDecimal movimento = safe(f.getMovimento());
+            BigDecimal saidas = safe(f.getSaidas());
             BigDecimal entradas = calcularEntradas(sessao, f.getForma());
-            BigDecimal esperado = f.getAbertura().add(f.getMovimento()).add(entradas).subtract(f.getSaidas());
+            BigDecimal esperado = abertura.add(movimento).add(entradas).subtract(saidas);
 
             f.setValorConferido(conferido);
             f.setDiferenca(conferido.subtract(esperado).setScale(2, RoundingMode.HALF_UP));
@@ -105,9 +112,9 @@ public class CaixaSessaoService {
 
         sessao.setStatus(StatusCaixaSessao.FECHADO);
         sessao.setFechadoEm(Instant.now());
-        sessao = caixaSessaoRepository.save(sessao);
+        CaixaSessao sessaoAtualizada = caixaSessaoRepository.save(sessao);
 
-        return montarResponse(sessao);
+        return montarResponse(sessaoAtualizada);
     }
 
     @Transactional
@@ -126,9 +133,9 @@ public class CaixaSessaoService {
 
         sessao.setStatus(StatusCaixaSessao.ABERTO);
         sessao.setFechadoEm(null);
-        sessao = caixaSessaoRepository.save(sessao);
+        CaixaSessao sessaoAtualizada = caixaSessaoRepository.save(sessao);
 
-        return montarResponse(sessao);
+        return montarResponse(sessaoAtualizada);
     }
 
     private BigDecimal calcularEntradas(CaixaSessao sessao, FormaPagamento forma) {
@@ -145,11 +152,16 @@ public class CaixaSessaoService {
         List<FormaPagamentoCaixa> formas = formaPagamentoCaixaRepository.findByCaixaSessaoId(sessao.getId());
 
         List<FormaPagamentoCaixaResponseDTO> formasDto = formas.stream().map(f -> {
+            BigDecimal abertura = safe(f.getAbertura());
+            BigDecimal movimento = safe(f.getMovimento());
+            BigDecimal saidas = safe(f.getSaidas());
             BigDecimal entradas = calcularEntradas(sessao, f.getForma());
-            BigDecimal esperado = f.getAbertura().add(f.getMovimento()).add(entradas).subtract(f.getSaidas())
+
+            BigDecimal esperado = abertura.add(movimento).add(entradas).subtract(saidas)
                     .setScale(2, RoundingMode.HALF_UP);
+
             return new FormaPagamentoCaixaResponseDTO(
-                    f.getId(), f.getForma(), f.getAbertura(), f.getMovimento(), entradas, f.getSaidas(),
+                    f.getId(), f.getForma(), abertura, movimento, entradas, saidas,
                     esperado, f.getValorConferido(), f.getDiferenca()
             );
         }).toList();
@@ -159,6 +171,10 @@ public class CaixaSessaoService {
                 sessao.getCaixaPdv(), sessao.getDataAbertura(), sessao.getStatus(),
                 sessao.getAbertoEm(), sessao.getFechadoEm(), formasDto
         );
+    }
+
+    private BigDecimal safe(BigDecimal valor) {
+        return valor == null ? BigDecimal.ZERO : valor;
     }
 
     private CaixaSessao buscarEntidade(Long id) {
