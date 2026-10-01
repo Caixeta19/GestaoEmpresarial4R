@@ -1,4 +1,5 @@
 package com.vivo4redes.syscor.venda.model;
+
 import com.vivo4redes.syscor.venda.enums.TipoPessoa;
 import jakarta.persistence.*;
 import lombok.*;
@@ -16,18 +17,18 @@ import java.time.Instant;
 @Builder
 public class Cliente {
 
- @Id
- @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
- @Enumerated(EnumType.STRING)
- @Column(name = "tipo_pessoa", nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tipo_pessoa", nullable = false, length = 20)
     private TipoPessoa tipoPessoa;
 
- @Column(nullable = false, length = 150)
+    @Column(nullable = false, length = 150)
     private String nome;
 
- @Column(name = "cpf_cnpj", nullable = false, length = 14,updatable = false)
+    @Column(name = "cpf_cnpj", nullable = false, length = 14, updatable = false)
     private String cpfCnpj;
 
     @Column(length = 150)
@@ -35,6 +36,17 @@ public class Cliente {
 
     @Column(length = 20)
     private String telefone;
+
+    // LGPD: opt-in de marketing, com prova de qual termo foi aceito e quando
+    @Column(name = "consentimento_marketing", nullable = false)
+    @Builder.Default
+    private boolean consentimentoMarketing = false;
+
+    @Column(name = "versao_termo_consentimento", length = 50)
+    private String versaoTermoConsentimento;
+
+    @Column(name = "data_consentimento")
+    private Instant dataConsentimento;
 
     @Column(nullable = false)
     @Builder.Default
@@ -48,4 +60,3 @@ public class Cliente {
     @Column(name = "atualizado_em", nullable = false)
     private Instant atualizadoEm;
 }
-

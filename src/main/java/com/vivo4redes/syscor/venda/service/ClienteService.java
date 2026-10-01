@@ -11,6 +11,13 @@ import com.vivo4redes.syscor.venda.repository.ClienteRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+
+/**
+ * US-301: cadastro de cliente com LGPD.
+ * A auditoria detalhada (quem acessou o quê) e o RBAC de campos sensíveis
+ * fazem parte do Épico 0, adiado.
+ */
 @Service
 public class ClienteService {
 
@@ -44,7 +51,8 @@ public class ClienteService {
                 .email(dto.email())
                 .telefone(dto.telefone())
                 .consentimentoMarketing(optIn)
-                .versaoTermoConsentimento(optIn ? dto.versaoTermoConsentimento() : null)
+                .versaoTermoConsentimento(optIn ? dto.versaoTermoConsentimento().trim() : null)
+                .dataConsentimento(optIn ? Instant.now() : null)
                 .ativo(true)
                 .build();
 
