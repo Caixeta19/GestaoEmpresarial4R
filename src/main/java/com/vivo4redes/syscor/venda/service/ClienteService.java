@@ -1,22 +1,16 @@
 package com.vivo4redes.syscor.venda.service;
 
-import com.vivo4redes.syscor.venda.dto.request.ClienteRequestDTO;
 import com.vivo4redes.syscor.exception.ClienteDuplicadoException;
+import com.vivo4redes.syscor.exception.ConsentimentoInvalidoException;
 import com.vivo4redes.syscor.exception.DocumentoInvalidoException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.util.ValidadorCpfCnpj;
+import com.vivo4redes.syscor.venda.dto.request.ClienteRequestDTO;
 import com.vivo4redes.syscor.venda.model.Cliente;
 import com.vivo4redes.syscor.venda.repository.ClienteRepository;
-import com.vivo4redes.syscor.util.ValidadorCpfCnpj;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * US-301: cadastro de cliente com LGPD.
- * Nota: a auditoria detalhada (quem acessou o quê) e o RBAC de campos
- * sensíveis fazem parte do Épico 0, adiado — aqui garantimos apenas que o
- * modelo/consentimento já nasce correto para não exigir migração de dado
- * depois que a segurança entrar.
- */
 @Service
 public class ClienteService {
 
@@ -37,6 +31,11 @@ public class ClienteService {
             throw new ClienteDuplicadoException(documentoNormalizado);
         }
 
+        boolean optIn = Boolean.TRUE.equals(dto.consentimentoMarketing());
+        if (optIn && (dto.versaoTermoConsentimento() == null
+                || dto.versaoTermoConsentimento().isBlank())) {
+            throw new ConsentimentoInvalidoException();
+        }
 
         Cliente cliente = Cliente.builder()
                 .tipoPessoa(dto.tipoPessoa())
@@ -44,7 +43,10 @@ public class ClienteService {
                 .cpfCnpj(documentoNormalizado)
                 .email(dto.email())
                 .telefone(dto.telefone())
-                .ativo(true).build();
+                .consentimentoMarketing(optIn)
+                .versaoTermoConsentimento(optIn ? dto.versaoTermoConsentimento() : null)
+                .ativo(true)
+                .build();
 
         return clienteRepository.save(cliente);
     }
@@ -55,5 +57,3 @@ public class ClienteService {
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Cliente"));
     }
 }
-
-    /** US-301: opt-in/opt-out de comunicação — pode ser revogado a qualquer momento. */
