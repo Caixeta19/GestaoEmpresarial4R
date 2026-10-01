@@ -3,7 +3,6 @@ package com.vivo4redes.syscor.estoque.service;
 import com.vivo4redes.syscor.estoque.dto.request.EntradaSeriaisRequestDTO;
 import com.vivo4redes.syscor.estoque.dto.request.ProdutoRequestDTO;
 import com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoResponseDTO;
-import com.vivo4redes.syscor.estoque.dto.response.ProdutoResponseDTO;
 import com.vivo4redes.syscor.estoque.enums.StatusSerial;
 import com.vivo4redes.syscor.estoque.model.ItemEstoque;
 import com.vivo4redes.syscor.estoque.model.Produto;
@@ -28,7 +27,6 @@ public class EstoqueService {
     private final ProdutoRepository produtoRepository;
     private final ItemEstoqueRepository itemEstoqueRepository;
 
-    /** US-201: cadastro de produto com SKU único, validado antes de salvar. */
     @Transactional
     public Produto cadastrarProduto(ProdutoRequestDTO dto) {
         if (produtoRepository.existsBySkuIgnoreCase(dto.getSku())) {
@@ -63,13 +61,7 @@ public class EstoqueService {
         List<Produto> produtos = produtoRepository.findAll();
         return produtos.stream().map(this::montarConsolidado).toList();
     }
-    /**
-     * US-204 (versão de consulta síncrona): itens em risco de ruptura —
-     * saldo físico já no nível mínimo ou abaixo dele. O job periódico
-     * assíncrono de notificação previsto no critério de aceite original
-     * fica para quando o Épico 5 (mensageria) for retomado; esta consulta
-     * já é suficiente para o painel da tela de Estoque.
-     */
+
     @Transactional(readOnly = true)
     public List<EstoqueConsolidadoResponseDTO> listarAlertasEstoqueBaixo() {
         return listarEstoqueConsolidado().stream()
@@ -104,8 +96,9 @@ public class EstoqueService {
                 .seriaisDisponiveis(disponiveis.stream().map(ItemEstoque::getSerialImei).toList())
                 .build();
     }
+
     @Transactional
-    public void registrarEntradaSeriais(com.vivo4redes.syscor.estoque.dto.request.@Valid EntradaSeriaisRequestDTO request) {
+    public void registrarEntradaSeriais(@Valid EntradaSeriaisRequestDTO request) {
         Produto produto = produtoRepository.findById(request.getProdutoId())
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Produto"));
 
@@ -134,5 +127,14 @@ public class EstoqueService {
         item.setStatus(StatusSerial.VENDIDO);
         item.setDataSaida(LocalDateTime.now());
         return itemEstoqueRepository.save(item);
+    }
+
+    @Transactional
+    public void estornarItemEstoque(ItemEstoque item) {
+        if (item != null) {
+            item.setStatus(StatusSerial.DISPONIVEL);
+            item.setDataSaida(null);
+            itemEstoqueRepository.save(item);
+        }
     }
 }
