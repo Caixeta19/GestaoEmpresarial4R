@@ -9,7 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,6 +40,7 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
 
     // =========================================================================
     // CONSULTAS ANALÍTICAS - PAINEL GERAL EXECUTIVO (DASHBOARD)
+    // Intervalo semiaberto [inicio, fim) em Instant (criadoEm é Instant).
     // =========================================================================
 
     /**
@@ -50,13 +51,13 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
         from Venda v
         where v.status = :status
           and v.criadoEm >= :inicio
-          and v.criadoEm <= :fim
+          and v.criadoEm < :fim
           and (:filialId is null or v.filial.id = :filialId)
     """)
     BigDecimal calcularFaturamentoPeriodo(
             @Param("status") StatusVenda status,
-            @Param("inicio") LocalDateTime inicio,
-            @Param("fim") LocalDateTime fim,
+            @Param("inicio") Instant inicio,
+            @Param("fim") Instant fim,
             @Param("filialId") Long filialId
     );
 
@@ -68,13 +69,13 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
         from Venda v
         where v.status = :status
           and v.criadoEm >= :inicio
-          and v.criadoEm <= :fim
+          and v.criadoEm < :fim
           and (:filialId is null or v.filial.id = :filialId)
     """)
     Long contarTransacoesPeriodo(
             @Param("status") StatusVenda status,
-            @Param("inicio") LocalDateTime inicio,
-            @Param("fim") LocalDateTime fim,
+            @Param("inicio") Instant inicio,
+            @Param("fim") Instant fim,
             @Param("filialId") Long filialId
     );
 
