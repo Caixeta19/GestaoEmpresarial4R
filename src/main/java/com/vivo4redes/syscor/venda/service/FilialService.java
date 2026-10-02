@@ -1,12 +1,14 @@
 package com.vivo4redes.syscor.venda.service;
 
-import com.vivo4redes.syscor.venda.dto.request.FilialRequestDTO;
 import com.vivo4redes.syscor.exception.BusinessException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.venda.dto.request.FilialRequestDTO;
 import com.vivo4redes.syscor.venda.model.Filial;
 import com.vivo4redes.syscor.venda.repository.FilialRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 public class FilialService {
@@ -35,5 +37,10 @@ public class FilialService {
     public Filial buscarPorId(Long id) {
         return filialRepository.findById(id)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Filial"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Filial> listarAtivas() {
+        return filialRepository.findByAtivoTrueOrderByNomeAsc();
     }
 }

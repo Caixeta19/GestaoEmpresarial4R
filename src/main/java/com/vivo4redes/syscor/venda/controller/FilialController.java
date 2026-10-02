@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/filiais")
 public class FilialController {
@@ -22,6 +24,12 @@ public class FilialController {
     public ResponseEntity<FilialResponseDTO> cadastrar(@Valid @RequestBody FilialRequestDTO dto) {
         var filial = filialService.cadastrar(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(FilialResponseDTO.from(filial));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<FilialResponseDTO>> listarAtivas() {
+        return ResponseEntity.ok(
+                filialService.listarAtivas().stream().map(FilialResponseDTO::from).toList());
     }
 
     @GetMapping("/{id}")
