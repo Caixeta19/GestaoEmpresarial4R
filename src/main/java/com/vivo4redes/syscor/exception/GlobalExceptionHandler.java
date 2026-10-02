@@ -11,6 +11,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -25,7 +26,7 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    // 422: regras de negócio (inclui VendedorDuplicadoException, ClienteDuplicadoException, etc.)
+    // 422: regras de negócio
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Map<String, Object>> handleBusiness(BusinessException ex) {
         return ResponseEntity.unprocessableEntity()
@@ -39,7 +40,7 @@ public class GlobalExceptionHandler {
                 .body(corpo(HttpStatus.NOT_FOUND, ex.getMessage()));
     }
 
-    // 400: CPF/CNPJ com formato/dígitos inválidos
+    // 400: CPF/CNPJ inválido
     @ExceptionHandler(DocumentoInvalidoException.class)
     public ResponseEntity<Map<String, Object>> handleDocumentoInvalido(DocumentoInvalidoException ex) {
         return ResponseEntity.badRequest()
@@ -58,24 +59,30 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(corpo);
     }
 
-    // 400: validações em parâmetros (@RequestParam, @PathVariable)
+    // 400: validações em parâmetros
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Map<String, Object>> handleConstraintViolation(ConstraintViolationException ex) {
         return ResponseEntity.badRequest()
                 .body(corpo(HttpStatus.BAD_REQUEST, ex.getMessage()));
     }
 
-    // 400: JSON malformado ou com tipo errado
+    // 400: JSON malformado ou com tipo/valor de enum errado
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, Object>> handleJsonInvalido(HttpMessageNotReadableException ex) {
         return ResponseEntity.badRequest()
                 .body(corpo(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido ou malformado."));
     }
 
-    // Fallback: qualquer exceção inesperada
+    // 400: parâmetro de URL com tipo errado (ex.: {{variavel}} não resolvida no Postman)
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, Object>> handleTipoArgumento(MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.badRequest().body(corpo(HttpStatus.BAD_REQUEST,
+                "Parâmetro '" + ex.getName() + "' com valor inválido: " + ex.getValue()));
+    }
+
+    // Fallback: erros do Spring MVC mantêm o status; o resto vira 500
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGenerico(Exception ex) {
-        // Erros do próprio Spring MVC (405, 404 de rota, 415, etc.) já trazem o status correto
         if (ex instanceof ErrorResponse er) {
             HttpStatus status = HttpStatus.valueOf(er.getStatusCode().value());
             return ResponseEntity.status(status).body(corpo(status, ex.getMessage()));

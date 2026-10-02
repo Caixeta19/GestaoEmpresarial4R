@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.venda.model;
-import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
+
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import jakarta.persistence.*;
@@ -78,8 +79,9 @@ public class Venda {
     @Builder.Default
     private StatusVenda status = StatusVenda.ABERTA;
 
+    // length 30: "Em_avaliacao_pelo_BKO" tem 21 caracteres e estourava o limite de 20
     @Enumerated(EnumType.STRING)
-    @Column(name = "avaliacao_procedencia", length = 20)
+    @Column(name = "avaliacao_procedencia", length = 30)
     private StatusAvaliacaoProcedencia avaliacaoProcedencia;
 
     /** Snapshot do consentimento do cliente no instante da venda — auditoria, não trava a venda. */
@@ -92,7 +94,6 @@ public class Venda {
 
     @UpdateTimestamp
     @Column(name = "atualizado_em", nullable = false)
-
     private Instant atualizadoEm;
 
     public void adicionarItem(ItemVenda item) {
