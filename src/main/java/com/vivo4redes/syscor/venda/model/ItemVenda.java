@@ -28,7 +28,7 @@ public class ItemVenda {
     @Column(nullable = false, length = 20)
     private CategoriaItemVenda categoria;
 
-    @Column(name = "produto_id", nullable = false)
+    @Column(name = "produto_id")
     private Long produtoId;
 
     @Column(name = "descricao_produto", nullable = false, length = 200)

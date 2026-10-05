@@ -5,6 +5,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Builder;
 
 import java.math.BigDecimal;
@@ -15,7 +16,7 @@ public record ItemVendaRequestDTO(
         @NotNull(message = "categoria é obrigatória (PRODUTO_VIVO, SERVICO_VIVO, ACESSORIO ou RECARGA)")
         CategoriaItemVenda categoria,
 
-        @NotNull(message = "produtoId é obrigatório")
+        /** Obrigatório, exceto em SERVICO_VIVO (validado no service). */
         Long produtoId,
 
         @NotBlank(message = "descricaoProduto é obrigatória")
@@ -25,8 +26,9 @@ public record ItemVendaRequestDTO(
         @DecimalMin(value = "0.001", message = "quantidade deve ser maior que zero")
         BigDecimal quantidade,
 
+        /** Pode ser 0 em SERVICO_VIVO (plano cobrado na fatura); fora de serviço deve ser maior que zero (validado no service). */
         @NotNull(message = "valorUnitario é obrigatório")
-        @DecimalMin(value = "0.01", message = "valorUnitario deve ser maior que zero")
+        @PositiveOrZero(message = "valorUnitario não pode ser negativo")
         @Digits(integer = 10, fraction = 2, message = "valorUnitario deve ter no máximo 2 casas decimais")
         BigDecimal valorUnitario,
 

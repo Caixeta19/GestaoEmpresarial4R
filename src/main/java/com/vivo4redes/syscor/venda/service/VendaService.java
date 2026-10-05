@@ -36,6 +36,8 @@ import java.util.List;
 @Service
 public class VendaService {
 
+    private static final java.time.ZoneId ZONA = java.time.ZoneId.of("America/Sao_Paulo");
+
     private final VendaRepository vendaRepository;
     private final ClienteService clienteService;
     private final FilialService filialService;
@@ -83,7 +85,21 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
-        Produto produto = estoqueService.buscarProdutoPorId(dto.produtoId());
+        // Serviço (plano) entra com valor 0 e sem produto: a cobrança é na fatura da operadora.
+        boolean servico = dto.categoria() == CategoriaItemVenda.SERVICO_VIVO;
+
+        if (!servico) {
+            if (dto.produtoId() == null) {
+                throw new NegocioException("produtoId é obrigatório para itens que não são serviço.");
+            }
+            if (dto.valorUnitario().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new NegocioException("valorUnitario deve ser maior que zero para itens que não são serviço.");
+            }
+        }
+
+        Produto produto = dto.produtoId() != null
+                ? estoqueService.buscarProdutoPorId(dto.produtoId())
+                : null;
 
         ItemEstoque itemEstoqueBaixado = null;
         String serialInformado = dto.imeiOuSerial();
@@ -91,7 +107,7 @@ public class VendaService {
 
         if (informouSerial) {
             itemEstoqueBaixado = estoqueService.baixarSerialNaVenda(serialInformado.trim());
-        } else if (Boolean.TRUE.equals(produto.getRequerSerial())) {
+        } else if (produto != null && Boolean.TRUE.equals(produto.getRequerSerial())) {
             throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
         }
 
@@ -276,7 +292,7 @@ public class VendaService {
     }
 
     private java.time.LocalDate dataDaVenda(Venda v) {
-        return v.getCriadoEm().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+        return v.getCriadoEm().atZone(ZONA).toLocalDate();
     }
 
     private boolean vazio(String texto) {
@@ -305,12 +321,6 @@ public class VendaService {
         String termoDigitos = termo.replaceAll("\\D", "");
         return !termoDigitos.isBlank() && campoDigitos.contains(termoDigitos);
     }
-
-
-
-
-
-
 
     @Transactional
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
