@@ -52,6 +52,8 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@syscor.com
       PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_LISTEN_PORT: 80
+      PGADMIN_DISABLE_POSTFIX: "true"
     ports:
       - "5050:80"
     depends_on:
