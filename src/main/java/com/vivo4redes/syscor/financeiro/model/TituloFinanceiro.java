@@ -7,6 +7,7 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 
 /** US-101/102/104: contas a pagar e a receber, com baixa manual. */
 @Entity
@@ -29,7 +30,9 @@ public class TituloFinanceiro {
     @Column(nullable = false, length = 200)
     private String descricao;
 
-    /** Cliente (a receber) ou fornecedor (a pagar) — texto livre, não é FK. */
+    /**
+     * Cliente (a receber) ou fornecedor (a pagar) — texto livre, não é FK.
+     */
     @Column(nullable = false, length = 150)
     private String quem;
 
@@ -47,11 +50,55 @@ public class TituloFinanceiro {
     @Column(name = "data_baixa")
     private LocalDate dataBaixa;
 
-    /** Vínculo opcional com a venda de origem (ex.: título "a receber" gerado a partir de uma venda). */
+    /**
+     * Vínculo opcional com a venda de origem (ex.: título "a receber" gerado a partir de uma venda).
+     */
     @Column(name = "venda_id")
     private Long vendaId;
 
     @Column(name = "criado_em", nullable = false, updatable = false)
     @Builder.Default
     private Instant criadoEm = Instant.now();
+    @Column(name = "identificador_pagamento", length = 100)
+    private String identificadorPagamento;   // ID de correlação enviado ao banco ao agendar o pagamento
+
+    @Column(name = "codigo_barras", length = 60)
+    private String codigoBarras;             // fallback de matching
+
+    @Column(name = "banco_pagador", length = 30)
+    private String bancoPagador;
+
+    @Column(name = "pago_em")
+    private OffsetDateTime pagoEm;
+
+    @Column(name = "valor_pago", precision = 15, scale = 2)
+    private BigDecimal valorPago;
+
+    @Column(name = "transacao_bancaria_id")
+    private Long transacaoBancariaId;
+
+    @Column(name = "comprovante_url")
+    private String comprovanteUrl;
+
+    @Version
+    private Long versao;                      // lock otimista (não duplique se já existir)
+
+    // ---- métodos novos ----
+    public boolean podeSerBaixado() {
+        return this.status != StatusTitulo.BAIXADO;
+    }
+
+    public void marcarDivergente() {
+        this.status = StatusTitulo.DIVERGENTE;
+    }
+
+    public void baixarPorConciliacao(BigDecimal valorPago, OffsetDateTime quando, String banco,
+                                     Long transacaoId, String comprovante) {
+        this.status = StatusTitulo.BAIXADO;
+        this.valorPago = valorPago;
+        this.pagoEm = quando;
+        this.bancoPagador = banco;
+        this.transacaoBancariaId = transacaoId;
+        this.comprovanteUrl = comprovante;
+    }
 }

@@ -42,6 +42,7 @@ app:
 
 server:
   port: 8080
+  forward-headers-strategy: native
   servlet:
     context-path: /api
 
@@ -53,3 +54,14 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# Segredos SEMPRE por variável de ambiente / cofre, nunca no repositório.
+syscor:
+  webhooks:
+    tolerancia-segundos: 300
+    reprocesso-ms: 60000
+    banco-proprio:
+      secret: ${BANCO_PROPRIO_WEBHOOK_SECRET:}
+    banco-brasil:
+      secret: ${BB_WEBHOOK_SECRET:}
+      ips-permitidos: ${BB_WEBHOOK_IPS:}
