@@ -30,9 +30,7 @@ public class TituloFinanceiro {
     @Column(nullable = false, length = 200)
     private String descricao;
 
-    /**
-     * Cliente (a receber) ou fornecedor (a pagar) — texto livre, não é FK.
-     */
+    /** Cliente (a receber) ou fornecedor (a pagar) — texto livre, não é FK. */
     @Column(nullable = false, length = 150)
     private String quem;
 
@@ -50,20 +48,21 @@ public class TituloFinanceiro {
     @Column(name = "data_baixa")
     private LocalDate dataBaixa;
 
-    /**
-     * Vínculo opcional com a venda de origem (ex.: título "a receber" gerado a partir de uma venda).
-     */
+    /** Vínculo opcional com a venda de origem. */
     @Column(name = "venda_id")
     private Long vendaId;
 
     @Column(name = "criado_em", nullable = false, updatable = false)
     @Builder.Default
     private Instant criadoEm = Instant.now();
-    @Column(name = "identificador_pagamento", length = 100)
-    private String identificadorPagamento;   // ID de correlação enviado ao banco ao agendar o pagamento
 
+    /** ID de correlação enviado ao banco ao agendar o pagamento. */
+    @Column(name = "identificador_pagamento", length = 100)
+    private String identificadorPagamento;
+
+    /** Fallback de matching. */
     @Column(name = "codigo_barras", length = 60)
-    private String codigoBarras;             // fallback de matching
+    private String codigoBarras;
 
     @Column(name = "banco_pagador", length = 30)
     private String bancoPagador;
@@ -80,10 +79,10 @@ public class TituloFinanceiro {
     @Column(name = "comprovante_url")
     private String comprovanteUrl;
 
+    /** Lock otimista. */
     @Version
-    private Long versao;                      // lock otimista (não duplique se já existir)
+    private Long versao;
 
-    // ---- métodos novos ----
     public boolean podeSerBaixado() {
         return this.status != StatusTitulo.BAIXADO;
     }
@@ -97,6 +96,7 @@ public class TituloFinanceiro {
         this.status = StatusTitulo.BAIXADO;
         this.valorPago = valorPago;
         this.pagoEm = quando;
+        this.dataBaixa = quando != null ? quando.toLocalDate() : LocalDate.now();
         this.bancoPagador = banco;
         this.transacaoBancariaId = transacaoId;
         this.comprovanteUrl = comprovante;
