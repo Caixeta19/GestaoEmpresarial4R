@@ -22,7 +22,7 @@ public class Cliente {
     private Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "tipo_pessoa", nullable = false, length = 20)
+    @Column(name = "tipo_pessoa", nullable = true, length = 20)
     private TipoPessoa tipoPessoa;
 
     @Column(nullable = false, length = 150)
