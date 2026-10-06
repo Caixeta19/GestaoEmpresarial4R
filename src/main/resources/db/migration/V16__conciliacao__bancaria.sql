@@ -1,5 +1,4 @@
--- >>> Troque "titulo_financeiro" pelo nome real da tabela de TituloFinanceiro (veja o @Table da entidade).
-ALTER TABLE titulo_financeiro
+ALTER TABLE tb_titulo_financeiro
     ADD COLUMN IF NOT EXISTS identificador_pagamento VARCHAR(100),
     ADD COLUMN IF NOT EXISTS codigo_barras           VARCHAR(60),
     ADD COLUMN IF NOT EXISTS banco_pagador           VARCHAR(30),
@@ -9,12 +8,13 @@ ALTER TABLE titulo_financeiro
     ADD COLUMN IF NOT EXISTS comprovante_url         TEXT,
     ADD COLUMN IF NOT EXISTS versao                  BIGINT NOT NULL DEFAULT 0;
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_titulo_ident ON titulo_financeiro (identificador_pagamento) WHERE identificador_pagamento IS NOT NULL;
-CREATE INDEX IF NOT EXISTS ix_titulo_barras ON titulo_financeiro (codigo_barras) WHERE codigo_barras IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_titulo_ident
+    ON tb_titulo_financeiro (identificador_pagamento)
+    WHERE identificador_pagamento IS NOT NULL;
 
--- Se o status é @Enumerated(STRING) com CHECK constraint no banco, inclua o novo valor:
--- ALTER TABLE titulo_financeiro DROP CONSTRAINT IF EXISTS titulo_financeiro_status_check;
--- ALTER TABLE titulo_financeiro ADD CONSTRAINT titulo_financeiro_status_check CHECK (status IN ('ABERTO', 'BAIXADO', 'DIVERGENTE'));
+CREATE INDEX IF NOT EXISTS ix_titulo_barras
+    ON tb_titulo_financeiro (codigo_barras)
+    WHERE codigo_barras IS NOT NULL;
 
 CREATE TABLE webhook_log (
                              id                BIGSERIAL PRIMARY KEY,
@@ -29,7 +29,8 @@ CREATE TABLE webhook_log (
                              recebido_em       TIMESTAMPTZ  NOT NULL DEFAULT now(),
                              processado_em     TIMESTAMPTZ
 );
-CREATE UNIQUE INDEX ux_webhook_log_idem ON webhook_log (provider, payload_sha256) WHERE status <> 'REJEITADO';
+CREATE UNIQUE INDEX ux_webhook_log_idem
+    ON webhook_log (provider, payload_sha256) WHERE status <> 'REJEITADO';
 CREATE INDEX ix_webhook_log_fila ON webhook_log (status, recebido_em);
 
 CREATE TABLE transacao_bancaria (
@@ -41,7 +42,7 @@ CREATE TABLE transacao_bancaria (
                                     valor           NUMERIC(15,2) NOT NULL,
                                     liquidado_em    TIMESTAMPTZ   NOT NULL,
                                     resultado       VARCHAR(20)   NOT NULL,
-                                    titulo_id       BIGINT REFERENCES titulo_financeiro(id),
+                                    titulo_id       BIGINT REFERENCES tb_titulo_financeiro(id),
                                     comprovante_url TEXT,
                                     motivo          TEXT,
                                     criado_em       TIMESTAMPTZ   NOT NULL DEFAULT now(),
