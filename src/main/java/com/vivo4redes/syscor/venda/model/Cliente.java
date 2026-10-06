@@ -28,8 +28,29 @@ public class Cliente {
     @Column(nullable = false, length = 150)
     private String nome;
 
-    @Column(name = "cpf_cnpj", nullable = false, length = 14, updatable = false)
+    @Column(name = "cpf_cnpj", nullable = false, length = 20, updatable = false)
     private String cpfCnpj;
+
+    @Column(name = "rg_ie", length = 30)
+    private String rgIe;
+
+    @Column(length = 2)
+    private String uf;
+
+    @Column(length = 100)
+    private String cidade;
+
+    @Column(length = 255)
+    private String endereco;
+
+    @Column(length = 100)
+    private String complemento;
+
+    @Column(length = 100)
+    private String bairro;
+
+    @Column(length = 10)
+    private String cep;
 
     @Column(length = 150)
     private String email;
