@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS ix_titulo_barras
 CREATE TABLE webhook_log (
                              id                BIGSERIAL PRIMARY KEY,
                              provider          VARCHAR(30)  NOT NULL,
-                             payload_sha256    CHAR(64)     NOT NULL,
+                             payload_sha256    VARCHAR(64)  NOT NULL,
                              payload_raw       TEXT         NOT NULL,
                              ip_origem         VARCHAR(64),
                              assinatura_valida BOOLEAN      NOT NULL,
