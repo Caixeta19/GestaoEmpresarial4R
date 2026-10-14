@@ -29,6 +29,13 @@ public class EstoqueController {
         return ResponseEntity.ok(estoqueService.listarAlertasEstoqueBaixo());
     }
 
+    @GetMapping("/seriais")
+    public ResponseEntity<List<com.vivo4redes.syscor.estoque.dto.response.SerialDisponivelResponseDTO>> buscarSeriais(
+            @RequestParam(defaultValue = "") String busca,
+            @RequestParam(defaultValue = "10") int limite) {
+        return ResponseEntity.ok(estoqueService.buscarSeriaisDisponiveis(busca, limite));
+    }
+
     @PostMapping("/entrada-seriais")
     public ResponseEntity<Void> registrarEntradaSeriais(@RequestBody @Valid EntradaSeriaisRequestDTO request) {
         estoqueService.registrarEntradaSeriais(request);

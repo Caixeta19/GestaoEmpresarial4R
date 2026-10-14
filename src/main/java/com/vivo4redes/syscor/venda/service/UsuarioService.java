@@ -49,7 +49,10 @@ public class UsuarioService {
         return usuarioRepository.findById(id)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Vendedor"));
     }
-
+    @Transactional(readOnly = true)
+    public java.util.List<Usuario> listarAtivos() {
+        return usuarioRepository.findByAtivoTrueOrderByNomeAsc();
+    }
     /**
      * US-302: reautenticação exigida para salvar/alterar uma venda.
      * Mensagem de erro deliberadamente genérica (não revela se o e-mail existe).

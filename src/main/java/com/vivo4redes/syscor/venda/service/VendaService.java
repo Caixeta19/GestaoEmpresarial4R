@@ -101,12 +101,23 @@ public class VendaService {
                 ? estoqueService.buscarProdutoPorId(dto.produtoId())
                 : null;
 
+        // Item com IMEI/Serial é uma unidade física: a quantidade só pode ser 1.
+        boolean serialNaRequisicao = dto.imeiOuSerial() != null
+                && !dto.imeiOuSerial().isBlank() && !dto.imeiOuSerial().equals("-");
+        if (serialNaRequisicao && dto.quantidade().compareTo(BigDecimal.ONE) != 0) {
+            throw new NegocioException("Item com IMEI/Serial deve ter quantidade igual a 1.");
+        }
+
         ItemEstoque itemEstoqueBaixado = null;
         String serialInformado = dto.imeiOuSerial();
         boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
 
         if (informouSerial) {
             itemEstoqueBaixado = estoqueService.baixarSerialNaVenda(serialInformado.trim());
+            // O serial precisa pertencer ao produto informado (evita vender o IMEI de um produto com a descrição/preço de outro).
+            if (produto != null && !produto.getId().equals(itemEstoqueBaixado.getProduto().getId())) {
+                throw new NegocioException("O IMEI/Serial '" + serialInformado.trim() + "' não pertence ao produto informado.");
+            }
         } else if (produto != null && Boolean.TRUE.equals(produto.getRequerSerial())) {
             throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
         }
@@ -156,16 +167,17 @@ public class VendaService {
         Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
 
-        venda.getItens().stream()
+        // Item inexistente agora é erro (antes era ignorado em silêncio).
+        ItemVenda itemRemovido = venda.getItens().stream()
                 .filter(i -> i.getId().equals(itemId))
                 .findFirst()
-                .ifPresent(itemRemovido -> {
-                    if (itemRemovido.getItemEstoque() != null) {
-                        ItemEstoque itemEstoque = itemRemovido.getItemEstoque();
-                        itemEstoque.setStatus(StatusSerial.DISPONIVEL);
-                        itemEstoque.setDataSaida(null);
-                    }
-                });
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item da venda"));
+
+        if (itemRemovido.getItemEstoque() != null) {
+            ItemEstoque itemEstoque = itemRemovido.getItemEstoque();
+            itemEstoque.setStatus(StatusSerial.DISPONIVEL);
+            itemEstoque.setDataSaida(null);
+        }
 
         venda.removerItem(itemId);
         venda.recalcularValorTotal();
@@ -281,9 +293,11 @@ public class VendaService {
                 .filter(v -> vazio(filtro.serialProdutoVivo()) || v.getItens().stream().anyMatch(i ->
                         i.getCategoria() == CategoriaItemVenda.PRODUTO_VIVO
                                 && contemTexto(i.getSerialImei(), filtro.serialProdutoVivo())))
+                // O serial do chip fica em simcard3g/simcard4g (não em serialImei).
                 .filter(v -> vazio(filtro.serialSimcard()) || v.getItens().stream().anyMatch(i ->
                         i.getCategoria() == CategoriaItemVenda.SERVICO_VIVO
-                                && contemTexto(i.getSerialImei(), filtro.serialSimcard())))
+                                && (contemTexto(i.getSimcard4g(), filtro.serialSimcard())
+                                || contemTexto(i.getSimcard3g(), filtro.serialSimcard()))))
                 .filter(v -> vazio(filtro.modeloAcessorio()) || v.getItens().stream().anyMatch(i ->
                         i.getCategoria() == CategoriaItemVenda.ACESSORIO
                                 && (contemTexto(i.getDescricaoProduto(), filtro.modeloAcessorio())
@@ -326,6 +340,13 @@ public class VendaService {
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
         exigirCarrinhoEditavel(venda);
+
+        // O pagamento não pode ultrapassar o saldo restante (antes só era validado ao finalizar).
+        BigDecimal jaPago = somarPagamentos(vendaId);
+        if (jaPago.add(dto.valor()).compareTo(venda.getValorTotal()) > 0) {
+            throw new NegocioException("O pagamento excede o saldo restante da venda ("
+                    + venda.getValorTotal().subtract(jaPago) + ").");
+        }
 
         PagamentoVenda pagamento = PagamentoVenda.builder()
                 .venda(venda)

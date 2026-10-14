@@ -31,6 +31,8 @@ spring:
       max-request-size: 25MB
 
 app:
+  cors:
+    allowed-origins: ${CORS_ALOWED_ORIGINS:http:/localhost:5173,http:/localhost:3000}
   jwt:
     expiration: 60m
   whatsapp:

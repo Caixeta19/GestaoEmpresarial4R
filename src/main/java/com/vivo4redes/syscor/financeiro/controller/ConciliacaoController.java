@@ -18,7 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** API consumida pelo React (exige a autenticação normal do sistema). */
 @RestController
-@RequestMapping("/api/v1")
+@RequestMapping("/financeiro")
 @RequiredArgsConstructor
 public class ConciliacaoController {
 

@@ -33,6 +33,13 @@ public class GlobalExceptionHandler {
                 .body(corpo(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage()));
     }
 
+    // 401: credenciais inválidas (login / reautenticação do vendedor)
+    @ExceptionHandler(AutenticacaoInvalidaException.class)
+    public ResponseEntity<Map<String, Object>> handleAutenticacao(AutenticacaoInvalidaException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(corpo(HttpStatus.UNAUTHORIZED, ex.getMessage()));
+    }
+
     // 404
     @ExceptionHandler(RecursoNaoEncontradoException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(RecursoNaoEncontradoException ex) {

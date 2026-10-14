@@ -24,6 +24,11 @@ public class UsuarioController {
         return ResponseEntity.status(HttpStatus.CREATED).body(UsuarioResponseDTO.from(vendedor));
     }
 
+    @GetMapping
+    public ResponseEntity<java.util.List<UsuarioResponseDTO>> listarAtivos() {
+        return ResponseEntity.ok(usuarioService.listarAtivos().stream().map(UsuarioResponseDTO::from).toList());
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<UsuarioResponseDTO> buscarPorId(@PathVariable Long id) {
         return ResponseEntity.ok(UsuarioResponseDTO.from(usuarioService.buscarPorId(id)));

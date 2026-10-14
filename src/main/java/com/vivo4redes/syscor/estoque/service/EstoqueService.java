@@ -137,4 +137,27 @@ public class EstoqueService {
             itemEstoqueRepository.save(item);
         }
     }
+    /** PDV: aparelhos/itens com serial DISPONÍVEL, por trecho do IMEI/serial ou da descrição. */
+    @Transactional(readOnly = true)
+    public List<com.vivo4redes.syscor.estoque.dto.response.SerialDisponivelResponseDTO> buscarSeriaisDisponiveis(String busca, int limite) {
+        String termo = busca == null ? "" : busca.trim();
+        int tamanho = Math.min(Math.max(limite, 1), 50);
+        return itemEstoqueRepository
+                .buscarDisponiveis(StatusSerial.DISPONIVEL, termo, org.springframework.data.domain.PageRequest.of(0, tamanho))
+                .stream()
+                .map(com.vivo4redes.syscor.estoque.dto.response.SerialDisponivelResponseDTO::from)
+                .toList();
+    }
+
+    /** Catálogo filtrado por categoria e/ou trecho da descrição/SKU. */
+    @Transactional(readOnly = true)
+    public List<Produto> listarProdutos(String busca, com.vivo4redes.syscor.venda.enums.CategoriaItemVenda categoria) {
+        String termo = busca == null ? "" : busca.trim().toLowerCase();
+        return listarProdutos().stream()
+                .filter(p -> categoria == null || p.getCategoria() == categoria)
+                .filter(p -> termo.isEmpty()
+                        || p.getDescricao().toLowerCase().contains(termo)
+                        || p.getSku().toLowerCase().contains(termo))
+                .toList();
+    }
 }

@@ -7,6 +7,8 @@ import java.util.Optional;
 
 public interface UsuarioRepository extends JpaRepository<Usuario, Long> {
 
+    java.util.List<Usuario> findByAtivoTrueOrderByNomeAsc();
+
     Optional<Usuario> findByEmailIgnoreCaseAndAtivoTrue(String email);
 
     boolean existsByEmailIgnoreCase(String email);

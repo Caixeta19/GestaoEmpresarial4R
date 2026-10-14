@@ -32,8 +32,12 @@ public class ProdutoController {
     }
 
     @GetMapping
-    public ResponseEntity<List<ProdutoResponseDTO>> listar() {
-        var produtos = estoqueService.listarProdutos().stream().map(ProdutoResponseDTO::from).toList();
+    public ResponseEntity<List<ProdutoResponseDTO>> listar(
+            @RequestParam(required = false) String busca,
+            @RequestParam(required = false) com.vivo4redes.syscor.venda.enums.CategoriaItemVenda categoria) {
+        var produtos = estoqueService.listarProdutos(busca, categoria).stream()
+                .map(ProdutoResponseDTO::from)
+                .toList();
         return ResponseEntity.ok(produtos);
     }
 }

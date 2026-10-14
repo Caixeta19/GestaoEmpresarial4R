@@ -22,7 +22,7 @@ public class FinanceiroConfig {
     @Bean
     @Order(1)
     SecurityFilterChain webhookChain(HttpSecurity http) throws Exception {
-        http.securityMatcher("/api/webhooks/**")
+        http.securityMatcher("/webhooks/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(a -> a.anyRequest().permitAll());

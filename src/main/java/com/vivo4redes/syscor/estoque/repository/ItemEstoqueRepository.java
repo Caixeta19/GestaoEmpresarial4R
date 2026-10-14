@@ -31,4 +31,12 @@ public interface ItemEstoqueRepository extends JpaRepository<ItemEstoque, Long> 
     java.util.Optional<ItemEstoque> findBySerialImei(String serialImei);
 
     long countByProdutoIdAndStatus(Long produtoId, StatusSerial status);
+    @Query("SELECT i FROM ItemEstoque i JOIN FETCH i.produto p WHERE i.status = :status AND "
+            + "(LOWER(i.serialImei) LIKE LOWER(CONCAT('%', :busca, '%')) "
+            + "OR LOWER(p.descricao) LIKE LOWER(CONCAT('%', :busca, '%'))) "
+            + "ORDER BY p.descricao, i.serialImei")
+    java.util.List<ItemEstoque> buscarDisponiveis(@Param("status") StatusSerial status,
+                                                  @Param("busca") String busca,
+                                                  org.springframework.data.domain.Pageable pageable);
+
 }

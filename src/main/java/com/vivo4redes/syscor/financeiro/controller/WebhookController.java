@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  * Respostas deliberadamente "mudas": não revelam o motivo da recusa.
  */
 @RestController
-@RequestMapping("/api/webhooks")
+@RequestMapping("/webhooks")
 @RequiredArgsConstructor
 public class WebhookController {
 
