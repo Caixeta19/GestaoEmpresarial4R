@@ -1,7 +1,6 @@
 package com.vivo4redes.syscor.security;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -19,11 +18,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
-import java.util.List;
 
 /** Substitui a SegurancaVendasConfig (que hoje libera tudo com permitAll). */
 @Configuration
@@ -38,7 +32,7 @@ public class SecurityConfig {
     SecurityFilterChain filtro(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)            // API stateless com Bearer token
-                .cors(Customizer.withDefaults())
+                .cors(Customizer.withDefaults())                  // usa o bean CorsConfigurationSource do CorsConfig
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
@@ -57,17 +51,5 @@ public class SecurityConfig {
     @Bean
     AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
-    }
-
-    @Bean
-    CorsConfigurationSource corsConfigurationSource(
-            @Value("${syscor.cors.origens:http://localhost:5173,http://localhost:3000}") List<String> origens) {
-        CorsConfiguration cfg = new CorsConfiguration();
-        cfg.setAllowedOrigins(origens);
-        cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        cfg.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        UrlBasedCorsConfigurationSource fonte = new UrlBasedCorsConfigurationSource();
-        fonte.registerCorsConfiguration("/**", cfg);
-        return fonte;
     }
 }
