@@ -31,8 +31,6 @@ spring:
       max-request-size: 25MB
 
 app:
-  cors:
-
   jwt:
     expiration: 60m
   whatsapp:
@@ -59,6 +57,8 @@ management:
 
 # Segredos SEMPRE por variável de ambiente / cofre, nunca no repositório.
 syscor:
+  jwt:
+    secret: ${SYSCOR_JWT_SECRET}
   webhooks:
     tolerancia-segundos: 300
     reprocesso-ms: 60000
