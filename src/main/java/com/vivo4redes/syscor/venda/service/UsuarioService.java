@@ -11,10 +11,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Optional;
+
 /**
  * Cadastro e autenticação de Vendedor. É uma entidade própria do módulo de
- * Vendas (ver nota em Vendedor.java) — não é o "usuário do sistema" do
- * Épico 0, que continua adiado.
+ * Vendas — não é o "usuário do sistema" do Épico 0, que continua adiado.
  */
 @Service
 public class UsuarioService {
@@ -49,22 +51,33 @@ public class UsuarioService {
         return usuarioRepository.findById(id)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Vendedor"));
     }
+
     @Transactional(readOnly = true)
-    public java.util.List<Usuario> listarAtivos() {
+    public List<Usuario> listarAtivos() {
         return usuarioRepository.findByAtivoTrueOrderByNomeAsc();
     }
+
     /**
      * US-302: reautenticação exigida para salvar/alterar uma venda.
-     * Mensagem de erro deliberadamente genérica (não revela se o e-mail existe).
+     * Mensagem de erro deliberadamente genérica (não revela se o e-mail/login existe).
      */
     @Transactional(readOnly = true)
     public Usuario autenticar(AutenticacaoUsuarioDTO dto) {
-        Usuario usuario = usuarioRepository.findByEmailIgnoreCaseAndAtivoTrue(dto.email())
-                .orElseThrow(AutenticacaoInvalidaException::new);
+        String identificador = dto.email(); // Pode conter o e-mail ou o login informado no DTO
 
-        if (!passwordEncoder.matches(dto.senha(), usuario.getSenhaHash())) {
+        // Tenta buscar por e-mail ou por login de forma case-insensitive
+        Optional<Usuario> optUsuario = usuarioRepository.findByEmailIgnoreCase(identificador);
+        if (optUsuario.isEmpty()) {
+            optUsuario = usuarioRepository.findFirstByLoginIgnoreCase(identificador);
+        }
+
+        Usuario usuario = optUsuario.orElseThrow(AutenticacaoInvalidaException::new);
+
+        // Verifica se o usuário está ativo e se a senha confere
+        if (!usuario.isAtivo() || !passwordEncoder.matches(dto.senha(), usuario.getSenhaHash())) {
             throw new AutenticacaoInvalidaException();
         }
+
         return usuario;
     }
 }
