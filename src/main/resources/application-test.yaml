@@ -5,7 +5,7 @@
 
 app:
   jwt:
-    secret: "test-only-secret-fixo-para-os-testes-automatizados-abc123"
+    secret: "dGVzdGUtc2VjcmV0LWtleS1wYXJhLWNpLXNvbWVudGUtMzItYnl0ZXM="
 
 spring:
   jpa:
@@ -18,3 +18,6 @@ logging:
   level:
     com.vivo4redes.syscor: DEBUG
     org.testcontainers: INFO
+  cors:
+    allowed:
+      origins: http://localhost:5173
