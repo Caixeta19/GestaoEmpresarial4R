@@ -26,6 +26,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final UserDetailsService usuarios;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // Don't filter OPTIONS requests or public auth endpoints
+        String path = request.getServletPath();
+        return path.startsWith("/auth/") || "OPTIONS".equalsIgnoreCase(request.getMethod());
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws ServletException, IOException {
         String cabecalho = req.getHeader(HttpHeaders.AUTHORIZATION);
