@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @RestController
 @RequestMapping("/auth")
@@ -21,15 +22,28 @@ public class AuthController {
     private final AuthenticationManager manager;
     private final JwtService jwt;
 
-    public record LoginRequest(@NotBlank String usuario, @NotBlank String senha) {}  // e-mail ou login
+    // Atualize o record para aceitar "login" ou "email" vindos do front-end
+    public record LoginRequest(
+            @NotBlank @JsonProperty(value = "login", required = false) String login,
+            @JsonProperty(value = "email", required = false) String email,
+            @NotBlank String senha
+    ) {
+        // Método utilitário para pegar o identificador preenchido (seja login ou email)
+        public String getIdentificador() {
+            if (login != null && !login.isBlank()) {
+                return login.trim();
+            }
+            return email != null ? email.trim() : "";
+        }
+    }
 
     public record LoginResponse(String token, String tipo, long expiraEmSegundos) {}
 
-    /** Credenciais erradas lançam BadCredentialsException -> trate como 401 no seu @ControllerAdvice. */
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest req) {
+        // Usa o método getIdentificador() para passar ao Spring Security
         Authentication auth = manager.authenticate(
-                new UsernamePasswordAuthenticationToken(req.usuario(), req.senha()));
+                new UsernamePasswordAuthenticationToken(req.getIdentificador(), req.senha()));
         UserDetails usuario = (UserDetails) auth.getPrincipal();
         return new LoginResponse(jwt.gerar(usuario), "Bearer", jwt.getExpiracaoSegundos());
     }
