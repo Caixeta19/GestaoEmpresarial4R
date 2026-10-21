@@ -7,6 +7,7 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
@@ -17,6 +18,7 @@ import java.text.Normalizer;
 public class UsuarioDetailsService implements UserDetailsService {
 
     private final UsuarioRepository repositorio;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     public UserDetails loadUserByUsername(String identificador) throws UsernameNotFoundException {
@@ -32,6 +34,18 @@ public class UsuarioDetailsService implements UserDetailsService {
 
         // 3. Obtém o usuário ou lança exceção se nenhum for encontrado
         Usuario u = optUsuario.orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado"));
+
+        // 4. Criação de senha temporária para primeiro acesso
+        boolean ehPrimeiroAcesso = u.isPrimeiroAcesso();
+        String senhaParaValidar = ehPrimeiroAcesso ? passwordEncoder.encode("00000000") : u.getSenhaHash();
+
+        return User.withUsername(u.getLogin())
+                .password(senhaParaValidar)
+                .roles("USER",papel(u.getCargo()))
+                .disabled(inativo)
+                .build();
+
+
 
         // No banco importado, "INATIVO" aparece no campo cargo; confira também a coluna situacao.
         boolean inativo = !u.isAtivo()

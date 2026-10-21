@@ -41,6 +41,9 @@ public class Usuario {
     @Column(name = "senha_hash", nullable = false, length = 100)
     private String senhaHash;
 
+    @Column(name = "primeiro_acesso")
+    private boolean primeiroAcesso= true;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean ativo = true;
