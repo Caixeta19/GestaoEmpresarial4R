@@ -35,26 +35,19 @@ public class UsuarioDetailsService implements UserDetailsService {
         // 3. Obtém o usuário ou lança exceção se nenhum for encontrado
         Usuario u = optUsuario.orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado"));
 
-        // 4. Criação de senha temporária para primeiro acesso
-        boolean ehPrimeiroAcesso = u.isPrimeiroAcesso();
-        String senhaParaValidar = ehPrimeiroAcesso ? passwordEncoder.encode("00000000") : u.getSenhaHash();
-
-        return User.withUsername(u.getLogin())
-                .password(senhaParaValidar)
-                .roles("USER",papel(u.getCargo()))
-                .disabled(inativo)
-                .build();
-
-
-
-        // No banco importado, "INATIVO" aparece no campo cargo; confira também a coluna situacao.
+        // 4. Validação de status (Inativo, cargo ou situação)
         boolean inativo = !u.isAtivo()
                 || "INATIVO".equalsIgnoreCase(u.getCargo())
                 || "INATIVO".equalsIgnoreCase(u.getSituacao());
 
-        return User.withUsername(u.getEmail())
-                .password(u.getSenhaHash())          // precisa ser BCrypt; "PENDENTE_RESET" nunca autentica
-                .roles("USER", papel(u.getCargo()))  // ex.: ROLE_USER + ROLE_GERENTE_DE_AREA
+        // 5. Tratativa para primeiro acesso (se for true, valida contra a senha temporária "00000000")
+        boolean ehPrimeiroAcesso = u.isPrimeiroAcesso();
+        String senhaParaValidar = ehPrimeiroAcesso ? passwordEncoder.encode("00000000") : u.getSenhaHash();
+
+        // 6. Retorna o UserDetails configurado para o Spring Security
+        return User.withUsername(u.getLogin())
+                .password(senhaParaValidar)
+                .roles("USER", papel(u.getCargo()))
                 .disabled(inativo)
                 .build();
     }
