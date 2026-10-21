@@ -1,7 +1,10 @@
 package com.vivo4redes.syscor.security;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
@@ -34,6 +37,7 @@ public class SecurityConfig {
     }
 
     @Bean
+    @Order(2)
     SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter) throws Exception {
         http
                 .cors(Customizer.withDefaults())
@@ -41,25 +45,27 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/auth/login").permitAll()            // Apenas o login é público
-                        .requestMatchers("/auth/alterar-senha").authenticated() // Alterar senha exige o token JWT
+                        .requestMatchers("/auth/login").permitAll()
+                        .requestMatchers("/auth/alterar-senha").authenticated() // exige o token JWT
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
+    // Evita que o Spring Boot registre o JwtAuthFilter também como filtro de servlet (rodaria 2x)
     @Bean
-    CorsConfigurationSource corsConfigurationSource() {
+    FilterRegistrationBean<JwtAuthFilter> jwtAuthFilterRegistration(JwtAuthFilter filter) {
+        FilterRegistrationBean<JwtAuthFilter> reg = new FilterRegistrationBean<>(filter);
+        reg.setEnabled(false);
+        return reg;
+    }
+
+    @Bean
+    CorsConfigurationSource corsConfigurationSource(
+            @Value("${app.cors.allowed-origins:http://localhost:5173}") List<String> origins) {
         CorsConfiguration config = new CorsConfiguration();
-
-        String allowedOrigins = System.getenv("APP_CORS_ALLOWED_ORIGINS");
-        if (allowedOrigins != null && !allowedOrigins.isEmpty()) {
-            config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
-        } else {
-            config.setAllowedOrigins(List.of("http://localhost:5173"));
-        }
-
+        config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

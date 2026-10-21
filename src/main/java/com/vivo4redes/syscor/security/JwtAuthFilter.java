@@ -25,11 +25,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtService jwt;
     private final UserDetailsService usuarios;
 
+    /**
+     * Só o preflight (OPTIONS) e o login ficam fora do filtro.
+     * /auth/alterar-senha NÃO pode ser ignorado: precisa ler o token para saber quem é o usuário.
+     * O servletPath vem sem o context-path (/api).
+     */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // Don't filter OPTIONS requests or public auth endpoints
-        String path = request.getServletPath();
-        return path.startsWith("/auth/") || "OPTIONS".equalsIgnoreCase(request.getMethod());
+        return "OPTIONS".equalsIgnoreCase(request.getMethod())
+                || "/auth/login".equals(request.getServletPath());
     }
 
     @Override
@@ -38,16 +42,22 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String cabecalho = req.getHeader(HttpHeaders.AUTHORIZATION);
         if (cabecalho != null && cabecalho.startsWith("Bearer ")
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
-            jwt.usuarioDoToken(cabecalho.substring(7)).ifPresent(email -> {
-                try {
-                    UserDetails usuario = usuarios.loadUserByUsername(email);
-                    var auth = new UsernamePasswordAuthenticationToken(usuario, null, usuario.getAuthorities());
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                } catch (UsernameNotFoundException ignorado) {
-                    // usuário removido depois da emissão do token: segue sem autenticar (resulta em 401)
-                }
-            });
+            try {
+                jwt.usuarioDoToken(cabecalho.substring(7)).ifPresent(email -> {
+                    try {
+                        UserDetails usuario = usuarios.loadUserByUsername(email);
+                        var auth = new UsernamePasswordAuthenticationToken(usuario, null, usuario.getAuthorities());
+                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                    } catch (UsernameNotFoundException ignorado) {
+                        // usuário removido depois da emissão do token: segue sem autenticar
+                    }
+                });
+            } catch (RuntimeException tokenInvalido) {
+                // token malformado, expirado ou com assinatura inválida: segue anônimo
+                // (a rota protegida nega o acesso). Não registre o token no log.
+                SecurityContextHolder.clearContext();
+            }
         }
         chain.doFilter(req, res);
     }
