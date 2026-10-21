@@ -48,16 +48,13 @@ public class AuthController {
             @AuthenticationPrincipal UserDetails principal,
             @RequestBody @Valid AlterarSenhaRequest req
     ) {
-        // Correção do parêntese e busca do usuário
         Usuario usuario = usuarioRepository.findFirstByLoginIgnoreCase(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("Usuário Não Encontrado"));
 
-        // Valida se a senha atual digitada confere com a salva no banco
         if (!passwordEncoder.matches(req.senhaAtual(), usuario.getSenhaHash())) {
             throw new BadCredentialsException("Senha atual incorreta");
         }
 
-        // Criptografa e salva a nova senha
         String novoHash = passwordEncoder.encode(req.novaSenha());
 
         usuario.setSenhaHash(novoHash);
@@ -75,7 +72,6 @@ public class AuthController {
                 new UsernamePasswordAuthenticationToken(req.login(), req.senha()));
         UserDetails usuarioDetails = (UserDetails) auth.getPrincipal();
 
-        // Busca o usuário no banco para checar a flag de primeiro acesso
         Usuario usuario = usuarioRepository.findFirstByLoginIgnoreCase(usuarioDetails.getUsername())
                 .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
 

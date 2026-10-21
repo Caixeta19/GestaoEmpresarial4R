@@ -41,7 +41,8 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/auth/**").permitAll()
+                        .requestMatchers("/auth/login").permitAll()            // Apenas o login é público
+                        .requestMatchers("/auth/alterar-senha").authenticated() // Alterar senha exige o token JWT
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
@@ -56,7 +57,6 @@ public class SecurityConfig {
         if (allowedOrigins != null && !allowedOrigins.isEmpty()) {
             config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
         } else {
-            // Default to localhost:5173 if environment variable not set
             config.setAllowedOrigins(List.of("http://localhost:5173"));
         }
 
