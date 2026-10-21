@@ -67,13 +67,23 @@ public class AuthController {
         return ResponseEntity.ok().build();
     }
 
-    public record LoginResponse(String token, String tipo, long expiraEmSegundos) {}
+    public record LoginResponse(String token, String tipo, long expiraEmSegundos, boolean primeiroAcesso) {}
 
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest req) {
         Authentication auth = manager.authenticate(
                 new UsernamePasswordAuthenticationToken(req.login(), req.senha()));
-        UserDetails usuario = (UserDetails) auth.getPrincipal();
-        return new LoginResponse(jwt.gerar(usuario), "Bearer", jwt.getExpiracaoSegundos());
+        UserDetails usuarioDetails = (UserDetails) auth.getPrincipal();
+
+        // Busca o usuário no banco para checar a flag de primeiro acesso
+        Usuario usuario = usuarioRepository.findFirstByLoginIgnoreCase(usuarioDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
+
+        return new LoginResponse(
+                jwt.gerar(usuarioDetails),
+                "Bearer",
+                jwt.getExpiracaoSegundos(),
+                usuario.isPrimeiroAcesso()
+        );
     }
 }
