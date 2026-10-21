@@ -42,7 +42,8 @@ public class Usuario {
     private String senhaHash;
 
     @Column(name = "primeiro_acesso")
-    private boolean primeiroAcesso= true;
+    @Builder.Default
+    private boolean primeiroAcesso = true;
 
     @Column(nullable = false)
     @Builder.Default
