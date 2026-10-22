@@ -45,8 +45,8 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/auth/login").permitAll()
-                        .requestMatchers("/auth/alterar-senha").authenticated() // exige o token JWT
+                        .requestMatchers("/auth/login", "/api/auth/login").permitAll()
+                        .requestMatchers("/auth/alterar-senha", "/api/auth/alterar-senha").authenticated()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
