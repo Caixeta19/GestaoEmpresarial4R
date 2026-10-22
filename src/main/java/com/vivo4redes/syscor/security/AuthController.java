@@ -55,16 +55,24 @@ public class AuthController {
             @AuthenticationPrincipal UserDetails principal,
             @RequestBody @Valid AlterarSenhaRequest req
     ) {
+        System.out.println("=== DEBUG ALTERAR SENHA ===");
+        System.out.println("Utilizador logado (Principal): " + (principal != null ? principal.getUsername() : "NULO"));
+        System.out.println("Senha atual informada: " + req.senhaAtual());
+
         Usuario usuario = usuarioRepository.findFirstByLoginIgnoreCase(principal.getUsername())
                 .orElse(null);
+
         if (usuario == null) {
+            System.out.println("Utilizador não encontrado na base de dados!");
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("mensagem", "Usuário não encontrado"));
+                    .body(Map.of("mensagem", "Utilizador não encontrado"));
         }
 
-        if (!passwordEncoder.matches(req.senhaAtual(), usuario.getSenhaHash())) {
-            // 400 (e não 401): o token está válido, só a senha atual informada está errada.
-            // Um 401 faria o front tratar como sessão expirada.
+        System.out.println("Hash na base de dados: " + usuario.getSenhaHash());
+        boolean senhaBatendo = passwordEncoder.matches(req.senhaAtual(), usuario.getSenhaHash());
+        System.out.println("Senha bateu com o hash? " + senhaBatendo);
+
+        if (!senhaBatendo) {
             return ResponseEntity.badRequest().body(Map.of("mensagem", "Senha atual incorreta"));
         }
 
@@ -87,7 +95,7 @@ public class AuthController {
         UserDetails usuarioDetails = (UserDetails) auth.getPrincipal();
 
         Usuario usuario = usuarioRepository.findFirstByLoginIgnoreCase(usuarioDetails.getUsername())
-                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
+                .orElseThrow(() -> new RuntimeException("Utilizador não encontrado"));
 
         return new LoginResponse(
                 jwt.gerar(usuarioDetails),
