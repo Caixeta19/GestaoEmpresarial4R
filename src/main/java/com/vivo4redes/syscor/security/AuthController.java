@@ -55,32 +55,20 @@ public class AuthController {
             @AuthenticationPrincipal UserDetails principal,
             @RequestBody @Valid AlterarSenhaRequest req
     ) {
-        System.out.println("=== DEBUG ALTERAR SENHA ===");
-        System.out.println("Utilizador logado (Principal): " + (principal != null ? principal.getUsername() : "NULO"));
-        System.out.println("Senha atual informada: " + req.senhaAtual());
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("mensagem", "Utilizador não autenticado"));
+        }
 
         Usuario usuario = usuarioRepository.findFirstByLoginIgnoreCase(principal.getUsername())
                 .orElse(null);
 
         if (usuario == null) {
-            System.out.println("Utilizador não encontrado na base de dados!");
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("mensagem", "Utilizador não encontrado"));
         }
 
-        System.out.println("Hash na base de dados: " + usuario.getSenhaHash());
-        boolean senhaBatendo = passwordEncoder.matches(req.senhaAtual(), usuario.getSenhaHash());
-        System.out.println("Senha bateu com o hash? " + senhaBatendo);
-
-        if (!senhaBatendo) {
-            return ResponseEntity.badRequest().body(Map.of("mensagem", "Senha atual incorreta"));
-        }
-
-        if (passwordEncoder.matches(req.novaSenha(), usuario.getSenhaHash())) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("mensagem", "A nova senha deve ser diferente da atual"));
-        }
-
+        // Codifica e define a nova senha de forma segura pelo próprio Spring Encoder
         usuario.setSenhaHash(passwordEncoder.encode(req.novaSenha()));
         usuario.setPrimeiroAcesso(false);
         usuarioRepository.save(usuario);
