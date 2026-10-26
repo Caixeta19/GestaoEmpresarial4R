@@ -1,11 +1,9 @@
 package com.vivo4redes.syscor.estoque.service;
 import com.vivo4redes.syscor.estoque.dto.LinhaPrecoDTO;
 import com.vivo4redes.syscor.estoque.dto.response.TabelaPrecoResumoResponseDTO;
-import com.vivo4redes.syscor.estoque.model.Produto;
 import com.vivo4redes.syscor.estoque.model.ProdutoPrecoPlano;
 import com.vivo4redes.syscor.estoque.model.TabelaPrecoExecucao;
 import com.vivo4redes.syscor.estoque.repository.ProdutoPrecoPlanoRepository;
-import com.vivo4redes.syscor.estoque.repository.ProdutoRepository;
 import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;

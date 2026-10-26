@@ -1,6 +1,5 @@
 package com.vivo4redes.syscor.venda.model;
 
-import com.vivo4redes.syscor.estoque.model.ItemEstoque;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import jakarta.persistence.*;
 import lombok.*;
