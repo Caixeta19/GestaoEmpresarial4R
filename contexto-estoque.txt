@@ -1,0 +1,1745 @@
+﻿
+===== venda\service\VendaService.java =====
+
+package com.vivo4redes.syscor.venda.service;
+
+import com.vivo4redes.syscor.venda.dto.VendaFiltroDTO;
+import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
+import com.vivo4redes.syscor.venda.dto.ResumoCarrinhoDTO;
+import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
+import com.vivo4redes.syscor.venda.enums.StatusVenda;
+import com.vivo4redes.syscor.exception.CarrinhoNaoEditavelException;
+import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
+import com.vivo4redes.syscor.exception.VendaSemItemException;
+import com.vivo4redes.syscor.venda.model.Cliente;
+import com.vivo4redes.syscor.estoque.model.ItemEstoque;
+import com.vivo4redes.syscor.estoque.model.Produto;
+import com.vivo4redes.syscor.estoque.service.EstoqueService;
+import com.vivo4redes.syscor.estoque.enums.StatusSerial;
+import com.vivo4redes.syscor.venda.model.ItemVenda;
+import com.vivo4redes.syscor.venda.model.PagamentoVenda;
+import com.vivo4redes.syscor.venda.model.Venda;
+import com.vivo4redes.syscor.venda.repository.PagamentoVendaRepository;
+import com.vivo4redes.syscor.venda.repository.VendaRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Service
+public class VendaService {
+
+    private static final java.time.ZoneId ZONA = java.time.ZoneId.of("America/Sao_Paulo");
+
+    private final VendaRepository vendaRepository;
+    private final ClienteService clienteService;
+    private final FilialService filialService;
+    private final UsuarioService usuarioService;
+    private final NumeroVendaGenerator numeroVendaGenerator;
+    private final EstoqueService estoqueService;
+    private final PagamentoVendaRepository pagamentoVendaRepository;
+
+    public VendaService(VendaRepository vendaRepository,
+                        ClienteService clienteService,
+                        FilialService filialService,
+                        UsuarioService usuarioService,
+                        NumeroVendaGenerator numeroVendaGenerator,
+                        EstoqueService estoqueService,
+                        PagamentoVendaRepository pagamentoVendaRepository) {
+        this.vendaRepository = vendaRepository;
+        this.clienteService = clienteService;
+        this.filialService = filialService;
+        this.usuarioService = usuarioService;
+        this.numeroVendaGenerator = numeroVendaGenerator;
+        this.estoqueService = estoqueService;
+        this.pagamentoVendaRepository = pagamentoVendaRepository;
+    }
+
+    @Transactional
+    public Venda abrirCarrinho(VendaRequestDTO dto) {
+        Cliente cliente = clienteService.buscarPorId(dto.clienteId());
+        var filial = filialService.buscarPorId(dto.filialId());
+        var usuario = usuarioService.autenticar(dto.autenticacaoVendedor());
+
+        Venda venda = Venda.builder()
+                .numeroVenda(numeroVendaGenerator.gerar())
+                .cliente(cliente)
+                .filial(filial)
+                .usuario(usuario)
+                .estoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()))
+                .status(StatusVenda.ABERTA)
+                .build();
+
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional
+    public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        // ServiÃ§o (plano) entra com valor 0 e sem produto: a cobranÃ§a Ã© na fatura da operadora.
+        boolean servico = dto.categoria() == CategoriaItemVenda.SERVICO_VIVO;
+
+        if (!servico) {
+            if (dto.produtoId() == null) {
+                throw new NegocioException("produtoId Ã© obrigatÃ³rio para itens que nÃ£o sÃ£o serviÃ§o.");
+            }
+            if (dto.valorUnitario().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new NegocioException("valorUnitario deve ser maior que zero para itens que nÃ£o sÃ£o serviÃ§o.");
+            }
+        }
+
+        Produto produto = dto.produtoId() != null
+                ? estoqueService.buscarProdutoPorId(dto.produtoId())
+                : null;
+
+        // Item com IMEI/Serial Ã© uma unidade fÃ­sica: a quantidade sÃ³ pode ser 1.
+        boolean serialNaRequisicao = dto.imeiOuSerial() != null
+                && !dto.imeiOuSerial().isBlank() && !dto.imeiOuSerial().equals("-");
+        if (serialNaRequisicao && dto.quantidade().compareTo(BigDecimal.ONE) != 0) {
+            throw new NegocioException("Item com IMEI/Serial deve ter quantidade igual a 1.");
+        }
+
+        ItemEstoque itemEstoqueBaixado = null;
+        String serialInformado = dto.imeiOuSerial();
+        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
+
+        if (informouSerial) {
+            itemEstoqueBaixado = estoqueService.baixarSerialNaVenda(serialInformado.trim());
+            // O serial precisa pertencer ao produto informado (evita vender o IMEI de um produto com a descriÃ§Ã£o/preÃ§o de outro).
+            if (produto != null && !produto.getId().equals(itemEstoqueBaixado.getProduto().getId())) {
+                throw new NegocioException("O IMEI/Serial '" + serialInformado.trim() + "' nÃ£o pertence ao produto informado.");
+            }
+        } else if (produto != null && Boolean.TRUE.equals(produto.getRequerSerial())) {
+            throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
+        }
+
+        ItemVenda item = ItemVenda.builder()
+                .categoria(dto.categoria())
+                .produtoId(dto.produtoId())
+                .descricaoProduto(dto.descricaoProduto())
+                .quantidade(dto.quantidade())
+                .valorUnitario(dto.valorUnitario())
+                .itemEstoque(itemEstoqueBaixado)
+                .serialImei(itemEstoqueBaixado != null ? itemEstoqueBaixado.getSerialImei() : serialInformado)
+                .tabelaPreco(dto.tabelaPreco())
+                .sva(dto.sva())
+                .seguro(dto.seguro())
+                .segmento(dto.segmento())
+                .tipoServico(dto.tipoServico())
+                .ddd(dto.ddd())
+                .planoAntigo(dto.planoAntigo())
+                .plano(dto.plano())
+                .debitoAutomatico(dto.debitoAutomatico())
+                .valorAdicional(dto.valorAdicional())
+                .valorAcrescimo(dto.valorAcrescimo())
+                .desconto(dto.desconto())
+                .cupom(dto.cupom())
+                .vencimentoFatura(dto.vencimentoFatura())
+                .numeroAcesso(dto.numeroAcesso())
+                .sistemaOrigem(dto.sistemaOrigem())
+                .numOrdemNext(dto.numOrdemNext())
+                .numSolicitacaoGed(dto.numSolicitacaoGed())
+                .simcard3g(dto.simcard3g())
+                .simcard4g(dto.simcard4g())
+                .clientePossuiSimcard(dto.clientePossuiSimcard())
+                .simcardDoado(dto.simcardDoado())
+                .descontoChip(dto.descontoChip())
+                .valorChip(dto.valorChip())
+                .serialConfirmado(dto.serialConfirmado())
+                .build();
+
+        venda.adicionarItem(item);
+        venda.recalcularValorTotal();
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional
+    public Venda removerItem(Long vendaId, Long itemId) {
+        Venda venda = buscarPorId(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        // Item inexistente agora Ã© erro (antes era ignorado em silÃªncio).
+        ItemVenda itemRemovido = venda.getItens().stream()
+                .filter(i -> i.getId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item da venda"));
+
+        if (itemRemovido.getItemEstoque() != null) {
+            ItemEstoque itemEstoque = itemRemovido.getItemEstoque();
+            itemEstoque.setStatus(StatusSerial.DISPONIVEL);
+            itemEstoque.setDataSaida(null);
+        }
+
+        venda.removerItem(itemId);
+        venda.recalcularValorTotal();
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional(readOnly = true)
+    public ResumoCarrinhoDTO obterResumo(Long vendaId) {
+        Venda venda = buscarPorId(vendaId);
+        return new ResumoCarrinhoDTO(
+                venda.getId(),
+                venda.contarItensPorCategoria(CategoriaItemVenda.PRODUTO_VIVO),
+                venda.contarItensPorCategoria(CategoriaItemVenda.SERVICO_VIVO),
+                venda.contarItensPorCategoria(CategoriaItemVenda.ACESSORIO),
+                venda.contarItensPorCategoria(CategoriaItemVenda.RECARGA),
+                venda.getValorTotal()
+        );
+    }
+
+    @Transactional
+    public Venda atualizarDadosIniciais(Long vendaId, DadosIniciaisVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoUsuario());
+
+        Cliente cliente = clienteService.buscarPorId(dto.clienteId());
+        var filial = filialService.buscarPorId(dto.filialId());
+
+        venda.setCliente(cliente);
+        venda.setFilial(filial);
+        venda.setEstoqueAvancado(Boolean.TRUE.equals(dto.estoqueAvancado()));
+        if (dto.statusScoreCliente() != null) {
+            venda.setStatusScoreCliente(dto.statusScoreCliente());
+        }
+        venda.setNumeroSerieNota(dto.numeroSerieNota());
+        venda.setNumeroNota(dto.numeroNota());
+
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional
+    public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoVendedor());
+
+        if (venda.getItens().isEmpty()) {
+            throw new VendaSemItemException();
+        }
+
+        BigDecimal totalPago = somarPagamentos(vendaId);
+        if (totalPago.compareTo(venda.getValorTotal()) != 0) {
+            throw new NegocioException("A soma dos pagamentos (" + totalPago
+                    + ") nao bate com o valor total da venda (" + venda.getValorTotal() + ").");
+        }
+
+        transicionar(venda, StatusVenda.PENDENTE);
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional
+    public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirVendedorAutenticado(dto.autenticacaoUsuario());
+
+        StatusVenda novoStatus = dto.novoStatus();
+        if (novoStatus == null) {
+            throw new IllegalArgumentException("O novo status da venda e obrigatorio.");
+        }
+
+        if (novoStatus == StatusVenda.CANCELADA) {
+            estornarSeriaisDaVenda(venda);
+        }
+
+        transicionar(venda, novoStatus);
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional
+    public Venda avaliarProcedencia(Long vendaId, StatusAvaliacaoProcedencia resultado) {
+        Venda venda = buscarPorId(vendaId);
+        venda.setAvaliacaoProcedencia(resultado);
+
+        if (resultado == StatusAvaliacaoProcedencia.Improcedente
+                && venda.getStatus() != StatusVenda.CANCELADA) {
+            estornarSeriaisDaVenda(venda);
+            transicionar(venda, StatusVenda.CANCELADA);
+        }
+        return vendaRepository.save(venda);
+    }
+
+    @Transactional(readOnly = true)
+    public Venda buscarPorId(Long id) {
+        return vendaRepository.buscarComDetalhesPorId(id)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Venda> listarTodas() {
+        return vendaRepository.listarComDetalhes();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Venda> buscar(VendaFiltroDTO filtro) {
+        return listarTodas().stream()
+                .filter(v -> filtro.filialId() == null || filtro.filialId().equals(v.getFilial().getId()))
+                .filter(v -> filtro.vendedorId() == null || filtro.vendedorId().equals(v.getUsuario().getId()))
+                .filter(v -> filtro.numeroVenda() == null || filtro.numeroVenda().equals(v.getNumeroVenda()))
+                .filter(v -> filtro.dataInicio() == null || !dataDaVenda(v).isBefore(filtro.dataInicio()))
+                .filter(v -> filtro.dataFim() == null || !dataDaVenda(v).isAfter(filtro.dataFim()))
+                .filter(v -> vazio(filtro.cliente()) || bateCliente(v, filtro.cliente()))
+                .filter(v -> vazio(filtro.numeroAcesso()) || v.getItens().stream().anyMatch(i ->
+                        contemDigitos(i.getNumeroAcesso(), filtro.numeroAcesso())
+                                || contemDigitos(i.getSerialImei(), filtro.numeroAcesso())))
+                .filter(v -> vazio(filtro.serialProdutoVivo()) || v.getItens().stream().anyMatch(i ->
+                        i.getCategoria() == CategoriaItemVenda.PRODUTO_VIVO
+                                && contemTexto(i.getSerialImei(), filtro.serialProdutoVivo())))
+                // O serial do chip fica em simcard3g/simcard4g (nÃ£o em serialImei).
+                .filter(v -> vazio(filtro.serialSimcard()) || v.getItens().stream().anyMatch(i ->
+                        i.getCategoria() == CategoriaItemVenda.SERVICO_VIVO
+                                && (contemTexto(i.getSimcard4g(), filtro.serialSimcard())
+                                || contemTexto(i.getSimcard3g(), filtro.serialSimcard()))))
+                .filter(v -> vazio(filtro.modeloAcessorio()) || v.getItens().stream().anyMatch(i ->
+                        i.getCategoria() == CategoriaItemVenda.ACESSORIO
+                                && (contemTexto(i.getDescricaoProduto(), filtro.modeloAcessorio())
+                                || contemTexto(i.getSerialImei(), filtro.modeloAcessorio()))))
+                .toList();
+    }
+
+    private java.time.LocalDate dataDaVenda(Venda v) {
+        return v.getCriadoEm().atZone(ZONA).toLocalDate();
+    }
+
+    private boolean vazio(String texto) {
+        return texto == null || texto.isBlank();
+    }
+
+    private boolean contemTexto(String campo, String termo) {
+        return campo != null && campo.toLowerCase().contains(termo.trim().toLowerCase());
+    }
+
+    private boolean bateCliente(Venda v, String termo) {
+        String termoLower = termo.trim().toLowerCase();
+        String termoDigitos = termo.replaceAll("\\D", "");
+
+        String nome = v.getCliente().getNome() == null ? "" : v.getCliente().getNome().toLowerCase();
+        String documento = v.getCliente().getCpfCnpj() == null ? "" : v.getCliente().getCpfCnpj().replaceAll("\\D", "");
+
+        boolean bateNome = nome.contains(termoLower);
+        boolean bateDocumento = termoDigitos.length() >= 2 && documento.contains(termoDigitos);
+        return bateNome || bateDocumento;
+    }
+
+    private boolean contemDigitos(String campo, String termo) {
+        if (campo == null) return false;
+        String campoDigitos = campo.replaceAll("\\D", "");
+        String termoDigitos = termo.replaceAll("\\D", "");
+        return !termoDigitos.isBlank() && campoDigitos.contains(termoDigitos);
+    }
+
+    @Transactional
+    public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
+        Venda venda = buscarPorId(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        // O pagamento nÃ£o pode ultrapassar o saldo restante (antes sÃ³ era validado ao finalizar).
+        BigDecimal jaPago = somarPagamentos(vendaId);
+        if (jaPago.add(dto.valor()).compareTo(venda.getValorTotal()) > 0) {
+            throw new NegocioException("O pagamento excede o saldo restante da venda ("
+                    + venda.getValorTotal().subtract(jaPago) + ").");
+        }
+
+        PagamentoVenda pagamento = PagamentoVenda.builder()
+                .venda(venda)
+                .forma(dto.forma())
+                .valor(dto.valor())
+                .parcelas(dto.parcelas() == null ? 1 : dto.parcelas())
+                .build();
+        pagamentoVendaRepository.save(pagamento);
+
+        return buscarPorId(vendaId);
+    }
+
+    @Transactional
+    public Venda removerPagamento(Long vendaId, Long pagamentoId) {
+        Venda venda = buscarPorId(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        PagamentoVenda pagamento = pagamentoVendaRepository.findById(pagamentoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Pagamento"));
+        if (!pagamento.getVenda().getId().equals(vendaId)) {
+            throw new NegocioException("Esse pagamento nao pertence a essa venda.");
+        }
+        pagamentoVendaRepository.delete(pagamento);
+
+        return buscarPorId(vendaId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PagamentoVenda> listarPagamentos(Long vendaId) {
+        return pagamentoVendaRepository.findByVendaIdOrderByIdAsc(vendaId);
+    }
+
+    private BigDecimal somarPagamentos(Long vendaId) {
+        return listarPagamentos(vendaId).stream()
+                .map(PagamentoVenda::getValor)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private void exigirCarrinhoEditavel(Venda venda) {
+        if (venda.getStatus() != StatusVenda.ABERTA) {
+            throw new CarrinhoNaoEditavelException(venda.getId());
+        }
+    }
+
+    private void estornarSeriaisDaVenda(Venda venda) {
+        for (ItemVenda item : venda.getItens()) {
+            if (item.getItemEstoque() != null) {
+                ItemEstoque serial = item.getItemEstoque();
+                serial.setStatus(StatusSerial.DISPONIVEL);
+                serial.setDataSaida(null);
+            }
+        }
+    }
+
+    private void exigirVendedorAutenticado(AutenticacaoUsuarioDTO autenticacao) {
+        if (autenticacao == null) {
+            throw new IllegalArgumentException("Dados de autenticacao do vendedor sao obrigatorios.");
+        }
+        usuarioService.autenticar(autenticacao);
+    }
+
+    private void transicionar(Venda venda, StatusVenda novoStatus) {
+        if (!venda.getStatus().podeTransicionarPara(novoStatus)) {
+            throw new TransicaoStatusInvalidaException(venda.getStatus(), novoStatus);
+        }
+        venda.setStatus(novoStatus);
+    }
+}
+
+===== venda\model\ItemVenda.java =====
+
+package com.vivo4redes.syscor.venda.model;
+
+import com.vivo4redes.syscor.estoque.model.ItemEstoque;
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "itens_venda")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ItemVenda {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "venda_id", nullable = false)
+    private Venda venda;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private CategoriaItemVenda categoria;
+
+    @Column(name = "produto_id")
+    private Long produtoId;
+
+    @Column(name = "descricao_produto", nullable = false, length = 200)
+    private String descricaoProduto;
+
+    @Column(nullable = false, precision = 12, scale = 3)
+    private BigDecimal quantidade;
+
+    @Column(name = "valor_unitario", nullable = false, precision = 12, scale = 2)
+    private BigDecimal valorUnitario;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "item_estoque_id")
+    private ItemEstoque itemEstoque;
+
+    @Column(name = "serial_imei", length = 50)
+    private String serialImei;
+
+    @Column(name = "tabela_preco", length = 50)
+    private String tabelaPreco;
+
+    @Column(name = "sva")
+    private Boolean sva;
+
+    @Column(name = "seguro")
+    private Boolean seguro;
+
+    @Column(name = "segmento", length = 50)
+    private String segmento;
+
+    @Column(name = "tipo_servico", length = 50)
+    private String tipoServico;
+
+    @Column(name = "ddd", length = 2)
+    private String ddd;
+
+    @Column(name = "plano_antigo", length = 60)
+    private String planoAntigo;
+
+    @Column(name = "plano", length = 60)
+    private String plano;
+
+    @Column(name = "debito_automatico")
+    private Boolean debitoAutomatico;
+
+    @Column(name = "valor_adicional", precision = 12, scale = 2)
+    private BigDecimal valorAdicional;
+
+    @Column(name = "valor_acrescimo", precision = 12, scale = 2)
+    private BigDecimal valorAcrescimo;
+
+    @Column(name = "desconto", precision = 12, scale = 2)
+    private BigDecimal desconto;
+
+    @Column(name = "cupom")
+    private Boolean cupom;
+
+    @Column(name = "vencimento_fatura", length = 2)
+    private String vencimentoFatura;
+
+    @Column(name = "numero_acesso", length = 20)
+    private String numeroAcesso;
+
+    @Column(name = "sistema_origem", length = 10)
+    private String sistemaOrigem;
+
+    @Column(name = "num_ordem_next", length = 30)
+    private String numOrdemNext;
+
+    @Column(name = "num_solicitacao_ged", length = 30)
+    private String numSolicitacaoGed;
+
+    @Column(name = "simcard_3g", length = 30)
+    private String simcard3g;
+
+    @Column(name = "simcard_4g", length = 30)
+    private String simcard4g;
+
+    @Column(name = "cliente_possui_simcard")
+    private Boolean clientePossuiSimcard;
+
+    @Column(name = "simcard_doado")
+    private Boolean simcardDoado;
+
+    @Column(name = "desconto_chip", precision = 12, scale = 2)
+    private BigDecimal descontoChip;
+
+    @Column(name = "valor_chip", precision = 12, scale = 2)
+    private BigDecimal valorChip;
+
+    @Column(name = "serial_confirmado")
+    private Boolean serialConfirmado;
+
+    public BigDecimal getValorTotalItem() {
+        return valorUnitario.multiply(quantidade).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+}
+
+===== venda\model\Venda.java =====
+
+package com.vivo4redes.syscor.venda.model;
+
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
+import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
+import com.vivo4redes.syscor.venda.enums.StatusVenda;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity
+@Table(name = "vendas")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Venda {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    /** NÃºmero pÃºblico de 7 dÃ­gitos (ex: 1000000), gerado ao abrir a venda. Ver NumeroVendaGenerator. */
+    @Column(name = "numero_venda", nullable = false, updatable = false, unique = true)
+    private Long numeroVenda;
+
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "cliente_id", nullable = false)
+    private Cliente cliente;
+
+    /** Filial/loja onde a venda foi registrada (tela "InÃ­cio"). */
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "filial_id", nullable = false)
+    private Filial filial;
+
+    /** Vendedor autenticado que abriu/estÃ¡ operando a venda (tela "InÃ­cio"). */
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "usuario_id", nullable = false)
+    private Usuario usuario;
+
+    /** Dropdown "Venda Estoque AvanÃ§ado?" da tela InÃ­cio. */
+    @Column(name = "estoque_avancado", nullable = false)
+    @Builder.Default
+    private boolean estoqueAvancado = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_score_cliente", nullable = false, length = 20)
+    @Builder.Default
+    private StatusScoreCliente statusScoreCliente = StatusScoreCliente.NAO_REALIZADA;
+
+    @Column(name = "numero_serie_nota", length = 10)
+    private String numeroSerieNota;
+
+    @Column(name = "numero_nota", length = 20)
+    private String numeroNota;
+
+    @OneToMany(mappedBy = "venda", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ItemVenda> itens = new ArrayList<>();
+
+    /** Nunca setado diretamente pelo cliente da API â€” sempre recalculado a partir dos itens. */
+    @Column(name = "valor_total", nullable = false, precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal valorTotal = BigDecimal.ZERO;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private StatusVenda status = StatusVenda.ABERTA;
+
+    // length 30: "Em_avaliacao_pelo_BKO" tem 21 caracteres e estourava o limite de 20
+    @Enumerated(EnumType.STRING)
+    @Column(name = "avaliacao_procedencia", length = 30)
+    private StatusAvaliacaoProcedencia avaliacaoProcedencia;
+
+    /** Snapshot do consentimento do cliente no instante da venda â€” auditoria, nÃ£o trava a venda. */
+    @Column(name = "cliente_tinha_consentimento_marketing")
+    private Boolean clienteTinhaConsentimentoMarketing;
+
+    @CreationTimestamp
+    @Column(name = "criado_em", nullable = false, updatable = false)
+    private Instant criadoEm;
+
+    @UpdateTimestamp
+    @Column(name = "atualizado_em", nullable = false)
+    private Instant atualizadoEm;
+
+    public void adicionarItem(ItemVenda item) {
+        item.setVenda(this);
+        this.itens.add(item);
+    }
+
+    public void recalcularValorTotal() {
+        this.valorTotal = itens.stream()
+                .map(ItemVenda::getValorTotalItem)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    public void removerItem(Long itemId) {
+        this.itens.removeIf(i -> i.getId().equals(itemId));
+    }
+
+    public long contarItensPorCategoria(CategoriaItemVenda categoria) {
+        return itens.stream().filter(i -> i.getCategoria() == categoria).count();
+    }
+}
+
+===== venda\dto\response\VendaResponseDTO.java =====
+
+package com.vivo4redes.syscor.venda.dto.response;
+
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
+import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
+import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
+import com.vivo4redes.syscor.venda.enums.StatusVenda;
+import com.vivo4redes.syscor.venda.model.ItemVenda;
+import com.vivo4redes.syscor.venda.model.PagamentoVenda;
+import com.vivo4redes.syscor.venda.model.Venda;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+
+public record VendaResponseDTO(
+        Long id,
+        Long numeroVenda,
+        Long clienteId,
+        String clienteNome,
+        Long filialId,
+        String filialNome,
+        String vendedorNome,
+        boolean estoqueAvancado,
+        StatusScoreCliente statusScoreCliente,
+        String numeroSerieNota,
+        String numeroNota,
+        List<ItemDTO> itens,
+        List<PagamentoDTO> pagamentos,
+        BigDecimal valorTotal,
+        StatusVenda status,
+        StatusAvaliacaoProcedencia avaliacaoProcedencia,
+        Instant criadoEm
+) {
+    public record ItemDTO(
+            Long id, CategoriaItemVenda categoria, Long produtoId, String descricaoProduto,
+            BigDecimal quantidade, BigDecimal valorUnitario, BigDecimal valorTotalItem, String serialImei,
+            String tabelaPreco, Boolean sva, Boolean seguro, String segmento, String tipoServico, String ddd,
+            String planoAntigo, String plano, Boolean debitoAutomatico, BigDecimal valorAdicional,
+            BigDecimal valorAcrescimo, BigDecimal desconto, Boolean cupom, String vencimentoFatura,
+            String numeroAcesso, String sistemaOrigem, String numOrdemNext, String numSolicitacaoGed,
+            String simcard3g, String simcard4g, Boolean clientePossuiSimcard, Boolean simcardDoado,
+            BigDecimal descontoChip, BigDecimal valorChip, Boolean serialConfirmado
+    ) {
+        static ItemDTO from(ItemVenda i) {
+            return new ItemDTO(
+                    i.getId(), i.getCategoria(), i.getProdutoId(), i.getDescricaoProduto(),
+                    i.getQuantidade(), i.getValorUnitario(), i.getValorTotalItem(), i.getSerialImei(),
+                    i.getTabelaPreco(), i.getSva(), i.getSeguro(), i.getSegmento(), i.getTipoServico(), i.getDdd(),
+                    i.getPlanoAntigo(), i.getPlano(), i.getDebitoAutomatico(), i.getValorAdicional(),
+                    i.getValorAcrescimo(), i.getDesconto(), i.getCupom(), i.getVencimentoFatura(),
+                    i.getNumeroAcesso(), i.getSistemaOrigem(), i.getNumOrdemNext(), i.getNumSolicitacaoGed(),
+                    i.getSimcard3g(), i.getSimcard4g(), i.getClientePossuiSimcard(), i.getSimcardDoado(),
+                    i.getDescontoChip(), i.getValorChip(), i.getSerialConfirmado()
+            );
+        }
+    }
+
+    public record PagamentoDTO(Long id, FormaPagamento forma, BigDecimal valor, Integer parcelas) {
+        static PagamentoDTO from(PagamentoVenda p) {
+            return new PagamentoDTO(p.getId(), p.getForma(), p.getValor(), p.getParcelas());
+        }
+    }
+
+    public static VendaResponseDTO from(Venda v) {
+        return from(v, List.of());
+    }
+
+    public static VendaResponseDTO from(Venda v, List<PagamentoVenda> pagamentos) {
+        return new VendaResponseDTO(
+                v.getId(),
+                v.getNumeroVenda(),
+                v.getCliente().getId(),
+                v.getCliente().getNome(),
+                v.getFilial().getId(),
+                v.getFilial().getNome(),
+                v.getUsuario().getNome(),
+                v.isEstoqueAvancado(),
+                v.getStatusScoreCliente(),
+                v.getNumeroSerieNota(),
+                v.getNumeroNota(),
+                v.getItens().stream().map(ItemDTO::from).toList(),
+                pagamentos.stream().map(PagamentoDTO::from).toList(),
+                v.getValorTotal(),
+                v.getStatus(),
+                v.getAvaliacaoProcedencia(),
+                v.getCriadoEm()
+        );
+    }
+}
+
+===== venda\controller\VendaController.java =====
+
+package com.vivo4redes.syscor.venda.controller;
+
+import com.vivo4redes.syscor.venda.dto.ResumoCarrinhoDTO;
+import com.vivo4redes.syscor.venda.dto.request.AvaliacaoProcedenciaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.response.VendaResponseDTO;
+import com.vivo4redes.syscor.venda.model.Venda;
+import com.vivo4redes.syscor.venda.service.VendaService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.util.List;
+import com.vivo4redes.syscor.venda.dto.VendaFiltroDTO;
+import org.springframework.format.annotation.DateTimeFormat;
+import java.time.LocalDate;
+
+@RestController
+@RequestMapping("/vendas")
+public class VendaController {
+
+    private final VendaService vendaService;
+
+    public VendaController(VendaService vendaService) {
+        this.vendaService = vendaService;
+    }
+
+    @PostMapping
+    public ResponseEntity<VendaResponseDTO> abrirCarrinho(@Valid @RequestBody VendaRequestDTO dto) {
+        var venda = vendaService.abrirCarrinho(dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(responder(venda));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<VendaResponseDTO> buscarPorId(@PathVariable Long id) {
+        return ResponseEntity.ok(responder(vendaService.buscarPorId(id)));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<VendaResponseDTO>> listar(
+            @RequestParam(required = false) Long filialId,
+            @RequestParam(required = false) Long vendedorId,
+            @RequestParam(required = false) Long numeroVenda,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicio,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFim,
+            @RequestParam(required = false) String cliente,
+            @RequestParam(required = false) String numeroAcesso,
+            @RequestParam(required = false) String serialProdutoVivo,
+            @RequestParam(required = false) String serialSimcard,
+            @RequestParam(required = false) String modeloAcessorio) {
+
+        var filtro = new VendaFiltroDTO(filialId, vendedorId, numeroVenda, dataInicio, dataFim,
+                cliente, numeroAcesso, serialProdutoVivo, serialSimcard, modeloAcessorio);
+
+        var vendas = vendaService.buscar(filtro).stream().map(this::responder).toList();
+        return ResponseEntity.ok(vendas);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<VendaResponseDTO> atualizarDadosIniciais(
+            @PathVariable Long id, @Valid @RequestBody DadosIniciaisVendaRequestDTO dto) {
+        var venda = vendaService.atualizarDadosIniciais(id, dto);
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    @PostMapping("/{id}/itens")
+    public ResponseEntity<VendaResponseDTO> adicionarItem(
+            @PathVariable Long id, @Valid @RequestBody ItemVendaRequestDTO dto) {
+        var venda = vendaService.adicionarItem(id, dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(responder(venda));
+    }
+
+    @DeleteMapping("/{id}/itens/{itemId}")
+    public ResponseEntity<VendaResponseDTO> removerItem(@PathVariable Long id, @PathVariable Long itemId) {
+        var venda = vendaService.removerItem(id, itemId);
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    @PostMapping("/{id}/pagamentos")
+    public ResponseEntity<VendaResponseDTO> adicionarPagamento(
+            @PathVariable Long id, @Valid @RequestBody PagamentoVendaRequestDTO dto) {
+        var venda = vendaService.adicionarPagamento(id, dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(responder(venda));
+    }
+
+    @DeleteMapping("/{id}/pagamentos/{pagamentoId}")
+    public ResponseEntity<VendaResponseDTO> removerPagamento(
+            @PathVariable Long id, @PathVariable Long pagamentoId) {
+        var venda = vendaService.removerPagamento(id, pagamentoId);
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    @GetMapping("/{id}/resumo")
+    public ResponseEntity<ResumoCarrinhoDTO> obterResumo(@PathVariable Long id) {
+        return ResponseEntity.ok(vendaService.obterResumo(id));
+    }
+
+    @PatchMapping("/{id}/finalizar")
+    public ResponseEntity<VendaResponseDTO> finalizar(
+            @PathVariable Long id, @Valid @RequestBody FinalizarVendaRequestDTO dto) {
+        var venda = vendaService.finalizar(id, dto);
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<VendaResponseDTO> avancarStatus(
+            @PathVariable Long id, @Valid @RequestBody StatusVendaRequestDTO dto) {
+        var venda = vendaService.avancarStatus(id, dto);
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    @PatchMapping("/{id}/avaliacao-procedencia")
+    public ResponseEntity<VendaResponseDTO> avaliarProcedencia(
+            @PathVariable Long id, @Valid @RequestBody AvaliacaoProcedenciaRequestDTO dto) {
+        var venda = vendaService.avaliarProcedencia(id, dto.resultado());
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    private VendaResponseDTO responder(Venda venda) {
+        return VendaResponseDTO.from(venda, vendaService.listarPagamentos(venda.getId()));
+    }
+}
+
+===== estoque\service\EstoqueService.java =====
+
+package com.vivo4redes.syscor.estoque.service;
+
+import com.vivo4redes.syscor.estoque.dto.request.EntradaSeriaisRequestDTO;
+import com.vivo4redes.syscor.estoque.dto.request.ProdutoRequestDTO;
+import com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoResponseDTO;
+import com.vivo4redes.syscor.estoque.enums.StatusSerial;
+import com.vivo4redes.syscor.estoque.model.ItemEstoque;
+import com.vivo4redes.syscor.estoque.model.Produto;
+import com.vivo4redes.syscor.estoque.repository.ItemEstoqueRepository;
+import com.vivo4redes.syscor.estoque.repository.ProdutoRepository;
+import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.ProdutoDuplicadoException;
+import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class EstoqueService {
+
+    private final ProdutoRepository produtoRepository;
+    private final ItemEstoqueRepository itemEstoqueRepository;
+
+    @Transactional
+    public Produto cadastrarProduto(ProdutoRequestDTO dto) {
+        if (produtoRepository.existsBySkuIgnoreCase(dto.getSku())) {
+            throw new ProdutoDuplicadoException(dto.getSku());
+        }
+
+        Produto produto = Produto.builder()
+                .sku(dto.getSku().trim())
+                .descricao(dto.getDescricao())
+                .categoria(dto.getCategoria())
+                .estoqueMinimo(dto.getEstoqueMinimo())
+                .precoBase(dto.getPrecoBase())
+                .requerSerial(dto.getRequerSerial())
+                .build();
+
+        return produtoRepository.save(produto);
+    }
+
+    @Transactional(readOnly = true)
+    public Produto buscarProdutoPorId(Long id) {
+        return produtoRepository.findById(id)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Produto"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Produto> listarProdutos() {
+        return produtoRepository.findAllByOrderByDescricaoAsc();
+    }
+
+    @Transactional(readOnly = true)
+    public List<EstoqueConsolidadoResponseDTO> listarEstoqueConsolidado() {
+        List<Produto> produtos = produtoRepository.findAll();
+        return produtos.stream().map(this::montarConsolidado).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<EstoqueConsolidadoResponseDTO> listarAlertasEstoqueBaixo() {
+        return listarEstoqueConsolidado().stream()
+                .filter(item -> item.getSaldoFisico() <= item.getEstoqueMinimo())
+                .toList();
+    }
+
+    private EstoqueConsolidadoResponseDTO montarConsolidado(Produto prod) {
+        List<ItemEstoque> disponiveis = itemEstoqueRepository.findByProdutoIdAndStatus(
+                prod.getId(),
+                StatusSerial.DISPONIVEL
+        );
+        int saldo = disponiveis.size();
+
+        String statusCalculado;
+        if (saldo <= 0) {
+            statusCalculado = "Ruptura";
+        } else if (saldo <= prod.getEstoqueMinimo()) {
+            statusCalculado = "CrÃ­tico";
+        } else {
+            statusCalculado = "DisponÃ­vel";
+        }
+        return EstoqueConsolidadoResponseDTO.builder()
+                .produtoId(prod.getId())
+                .sku(prod.getSku())
+                .nome(prod.getDescricao())
+                .categoria(prod.getCategoria().name())
+                .estoqueMinimo(prod.getEstoqueMinimo())
+                .saldoFisico(saldo)
+                .status(statusCalculado)
+                .precoBase(prod.getPrecoBase())
+                .seriaisDisponiveis(disponiveis.stream().map(ItemEstoque::getSerialImei).toList())
+                .build();
+    }
+
+    @Transactional
+    public void registrarEntradaSeriais(@Valid EntradaSeriaisRequestDTO request) {
+        Produto produto = produtoRepository.findById(request.getProdutoId())
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Produto"));
+
+        List<ItemEstoque> novosItens = new ArrayList<>();
+        for (String s : request.getSeriais()) {
+            String serialLimpo = s.trim();
+            if (itemEstoqueRepository.existsBySerialImei(serialLimpo)) {
+                throw new NegocioException("O IMEI/Serial " + serialLimpo + " jÃ¡ estÃ¡ cadastrado no estoque.");
+            }
+            novosItens.add(ItemEstoque.builder()
+                    .produto(produto)
+                    .serialImei(serialLimpo)
+                    .status(StatusSerial.DISPONIVEL)
+                    .depositoSap(request.getDepositoSap() != null ? request.getDepositoSap() : "DP01")
+                    .build());
+        }
+        itemEstoqueRepository.saveAll(novosItens);
+    }
+
+    @Transactional
+    public ItemEstoque baixarSerialNaVenda(String serial) {
+        ItemEstoque item = itemEstoqueRepository
+                .findBySerialImeiAndStatusForUpdate(serial.trim(), StatusSerial.DISPONIVEL)
+                .orElseThrow(() -> new NegocioException("O IMEI/Serial '" + serial + "' nÃ£o estÃ¡ disponÃ­vel para venda."));
+
+        item.setStatus(StatusSerial.VENDIDO);
+        item.setDataSaida(LocalDateTime.now());
+        return itemEstoqueRepository.save(item);
+    }
+
+    @Transactional
+    public void estornarItemEstoque(ItemEstoque item) {
+        if (item != null) {
+            item.setStatus(StatusSerial.DISPONIVEL);
+            item.setDataSaida(null);
+            itemEstoqueRepository.save(item);
+        }
+    }
+    /** PDV: aparelhos/itens com serial DISPONÃVEL, por trecho do IMEI/serial ou da descriÃ§Ã£o. */
+    @Transactional(readOnly = true)
+    public List<com.vivo4redes.syscor.estoque.dto.response.SerialDisponivelResponseDTO> buscarSeriaisDisponiveis(String busca, int limite) {
+        String termo = busca == null ? "" : busca.trim();
+        int tamanho = Math.min(Math.max(limite, 1), 50);
+        return itemEstoqueRepository
+                .buscarDisponiveis(StatusSerial.DISPONIVEL, termo, org.springframework.data.domain.PageRequest.of(0, tamanho))
+                .stream()
+                .map(com.vivo4redes.syscor.estoque.dto.response.SerialDisponivelResponseDTO::from)
+                .toList();
+    }
+
+    /** CatÃ¡logo filtrado por categoria e/ou trecho da descriÃ§Ã£o/SKU. */
+    @Transactional(readOnly = true)
+    public List<Produto> listarProdutos(String busca, com.vivo4redes.syscor.venda.enums.CategoriaItemVenda categoria) {
+        String termo = busca == null ? "" : busca.trim().toLowerCase();
+        return listarProdutos().stream()
+                .filter(p -> categoria == null || p.getCategoria() == categoria)
+                .filter(p -> termo.isEmpty()
+                        || p.getDescricao().toLowerCase().contains(termo)
+                        || p.getSku().toLowerCase().contains(termo))
+                .toList();
+    }
+}
+
+===== estoque\controller\EstoqueController.java =====
+
+package com.vivo4redes.syscor.estoque.controller;
+import com.vivo4redes.syscor.estoque.dto.request.EntradaSeriaisRequestDTO;
+import com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoResponseDTO;
+import com.vivo4redes.syscor.estoque.service.EstoqueService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/estoque")
+@RequiredArgsConstructor
+@CrossOrigin(origins = "*")
+public class EstoqueController {
+
+    private final EstoqueService estoqueService;
+
+    @GetMapping("/consolidado")
+    public ResponseEntity<List<EstoqueConsolidadoResponseDTO>> listarConsolidado() {
+        return ResponseEntity.ok(estoqueService.listarEstoqueConsolidado());
+    }
+
+    /** US-204: itens no nÃ­vel mÃ­nimo ou em ruptura â€” alimenta o painel de alertas. */
+    @GetMapping("/alertas")
+    public ResponseEntity<List<EstoqueConsolidadoResponseDTO>> listarAlertas() {
+        return ResponseEntity.ok(estoqueService.listarAlertasEstoqueBaixo());
+    }
+
+    @GetMapping("/seriais")
+    public ResponseEntity<List<com.vivo4redes.syscor.estoque.dto.response.SerialDisponivelResponseDTO>> buscarSeriais(
+            @RequestParam(defaultValue = "") String busca,
+            @RequestParam(defaultValue = "10") int limite) {
+        return ResponseEntity.ok(estoqueService.buscarSeriaisDisponiveis(busca, limite));
+    }
+
+    @PostMapping("/entrada-seriais")
+    public ResponseEntity<Void> registrarEntradaSeriais(@RequestBody @Valid EntradaSeriaisRequestDTO request) {
+        estoqueService.registrarEntradaSeriais(request);
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+}
+
+===== estoque\service\InventarioService.java =====
+
+package com.vivo4redes.syscor.estoque.service;
+
+import com.vivo4redes.syscor.estoque.dto.response.InventarioItemResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.InventarioResumoResponseDTO;
+import com.vivo4redes.syscor.estoque.enums.ResultadoConciliacaoInventario;
+import com.vivo4redes.syscor.estoque.enums.StatusSerial;
+import com.vivo4redes.syscor.estoque.model.InventarioExecucao;
+import com.vivo4redes.syscor.estoque.model.InventarioItem;
+import com.vivo4redes.syscor.estoque.model.ItemEstoque;
+import com.vivo4redes.syscor.estoque.repository.InventarioExecucaoRepository;
+import com.vivo4redes.syscor.estoque.repository.InventarioItemRepository;
+import com.vivo4redes.syscor.estoque.repository.ItemEstoqueRepository;
+import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+import static com.vivo4redes.syscor.estoque.enums.ResultadoConciliacaoInventario.*;
+
+/**
+ * US-206: conciliaÃ§Ã£o de inventÃ¡rio â€” cruza o relatÃ³rio SAP (IQ09) com o
+ * nosso {@link ItemEstoque} por nÃºmero de sÃ©rie. Matching determinÃ­stico
+ * (normalizaÃ§Ã£o de formataÃ§Ã£o), sem IA generativa: dado o volume e a
+ * natureza do dado (serial Ã© um identificador exato, nÃ£o texto livre),
+ * exact-match apÃ³s normalizaÃ§Ã£o Ã© a abordagem correta â€” fuzzy matching
+ * aqui sÃ³ mascararia erro de digitaÃ§Ã£o real que precisa ser corrigido na
+ * origem, nÃ£o "adivinhado".
+ */
+@Service
+@RequiredArgsConstructor
+public class InventarioService {
+
+    private final RelatorioSapParser relatorioSapParser;
+    private final ItemEstoqueRepository itemEstoqueRepository;
+    private final InventarioExecucaoRepository execucaoRepository;
+    private final InventarioItemRepository itemRepository;
+
+    @Transactional
+    public InventarioResumoResponseDTO processarRelatorioSap(MultipartFile arquivo, String executadoPor) {
+        List<LinhaSapDTO> linhasSap = relatorioSapParser.parsear(arquivo);
+        if (linhasSap.isEmpty()) {
+            throw new NegocioException("O relatÃ³rio SAP nÃ£o contÃ©m nenhuma linha de dados a conciliar.");
+        }
+
+        // Carregado uma Ãºnica vez para evitar N+1 â€” se o catÃ¡logo crescer muito
+        // (dezenas de milhares de seriais), trocar por busca em lote paginada.
+        Map<String, ItemEstoque> estoquePorSerial = itemEstoqueRepository.findAll().stream()
+                .collect(Collectors.toMap(
+                        i -> normalizarSerial(i.getSerialImei()),
+                        i -> i,
+                        (existente, duplicado) -> existente));
+
+        Set<String> seriaisNoRelatorio = new HashSet<>();
+        List<InventarioItem> itens = new ArrayList<>();
+        int[] contadores = new int[3]; // [corretos, divergencias, pendentes]
+
+        for (LinhaSapDTO linha : linhasSap) {
+            String serialNormalizado = normalizarSerial(linha.serial());
+            if (serialNormalizado.isBlank()) {
+                continue; // linha sem serial no relatÃ³rio â€” nada a conciliar
+            }
+            seriaisNoRelatorio.add(serialNormalizado);
+            itens.add(conciliarLinhaSap(linha, serialNormalizado, estoquePorSerial.get(serialNormalizado), contadores));
+        }
+
+        // Checagem reversa: o que estÃ¡ DISPONIVEL no nosso sistema mas nÃ£o
+        // apareceu em nenhuma linha do relatÃ³rio enviado â€” possÃ­vel perda,
+        // furto, ou simplesmente um relatÃ³rio SAP que nÃ£o cobre esse depÃ³sito.
+        for (ItemEstoque item : itemEstoqueRepository.findByStatus(StatusSerial.DISPONIVEL)) {
+            String serialNormalizado = normalizarSerial(item.getSerialImei());
+            if (!seriaisNoRelatorio.contains(serialNormalizado)) {
+                contadores[1]++; // divergencia
+                itens.add(InventarioItem.builder()
+                        .materialSap(null)
+                        .denominacaoSap(item.getProduto().getDescricao())
+                        .serialSap(item.getSerialImei())
+                        .centroSap(null)
+                        .depositoSap(item.getDepositoSap())
+                        .statusSap(null)
+                        .resultado(DIVERGENCIA)
+                        .observacao("Consta DISPONÃVEL no nosso sistema, mas nÃ£o apareceu no relatÃ³rio SAP enviado.")
+                        .itemEstoqueId(item.getId())
+                        .build());
+            }
+        }
+
+        InventarioExecucao execucao = InventarioExecucao.builder()
+                .nomeArquivo(arquivo.getOriginalFilename())
+                .totalLinhasSap(linhasSap.size())
+                .totalCorretos(contadores[0])
+                .totalDivergencias(contadores[1])
+                .totalPendentes(contadores[2])
+                .executadoPor(executadoPor)
+                .build();
+        execucao = execucaoRepository.save(execucao);
+
+        for (InventarioItem item : itens) {
+            item.setExecucao(execucao);
+        }
+        itens = itemRepository.saveAll(itens);
+
+        return InventarioResumoResponseDTO.from(
+                execucao,
+                itens.stream().map(InventarioItemResponseDTO::from).toList());
+    }
+
+    @Transactional(readOnly = true)
+    public InventarioResumoResponseDTO buscarExecucao(Long execucaoId) {
+        InventarioExecucao execucao = execucaoRepository.findById(execucaoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("ExecuÃ§Ã£o de inventÃ¡rio"));
+
+        List<InventarioItemResponseDTO> itens = itemRepository
+                .findByExecucaoIdOrderByResultadoAscSerialSapAsc(execucaoId).stream()
+                .map(InventarioItemResponseDTO::from)
+                .toList();
+
+        return InventarioResumoResponseDTO.from(execucao, itens);
+    }
+
+    private InventarioItem conciliarLinhaSap(LinhaSapDTO linha, String serialNormalizado,
+                                             ItemEstoque encontrado, int[] contadores) {
+        ResultadoConciliacaoInventario resultado;
+        String observacao;
+        Long itemEstoqueId = null;
+
+        if (encontrado == null) {
+            resultado = PENDENTE;
+            observacao = "Serial nÃ£o encontrado no nosso estoque â€” nunca deu entrada no sistema (ver US-202, entrada de seriais).";
+            contadores[2]++;
+        } else {
+            itemEstoqueId = encontrado.getId();
+            if (encontrado.getStatus() == StatusSerial.DISPONIVEL) {
+                resultado = CORRETO;
+                observacao = "DisponÃ­vel nos dois lados.";
+                contadores[0]++;
+            } else {
+                resultado = DIVERGENCIA;
+                observacao = "No nosso sistema o status Ã© " + encontrado.getStatus()
+                        + ", mas o SAP ainda lista o item em depÃ³sito (" + linha.deposito() + ").";
+                contadores[1]++;
+            }
+        }
+
+        return InventarioItem.builder()
+                .materialSap(linha.material())
+                .denominacaoSap(linha.denominacao())
+                .serialSap(linha.serial())
+                .centroSap(linha.centro())
+                .depositoSap(linha.deposito())
+                .statusSap(linha.statusSistema())
+                .resultado(resultado)
+                .observacao(observacao)
+                .itemEstoqueId(itemEstoqueId)
+                .build();
+    }
+
+    /** NormalizaÃ§Ã£o determinÃ­stica â€” remove espaÃ§os e uniformiza caixa, sem inventar correspondÃªncia aproximada. */
+    private String normalizarSerial(String serial) {
+        if (serial == null) return "";
+        return serial.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
+    }
+}
+
+===== estoque\service\TabelaPrecoService.java =====
+
+package com.vivo4redes.syscor.estoque.service;
+import com.vivo4redes.syscor.estoque.dto.LinhaPrecoDTO;
+import com.vivo4redes.syscor.estoque.dto.response.TabelaPrecoResumoResponseDTO;
+import com.vivo4redes.syscor.estoque.model.Produto;
+import com.vivo4redes.syscor.estoque.model.ProdutoPrecoPlano;
+import com.vivo4redes.syscor.estoque.model.TabelaPrecoExecucao;
+import com.vivo4redes.syscor.estoque.repository.ProdutoPrecoPlanoRepository;
+import com.vivo4redes.syscor.estoque.repository.ProdutoRepository;
+import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
+import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import java.math.BigDecimal;
+import java.util.*;
+
+/**
+ * US: importaÃ§Ã£o diÃ¡ria (upload manual) da tabela de preÃ§o da TelefÃ´nica.
+ * Escopo v1 (decisÃ£o explÃ­cita): sÃ³ TABELA REGULAR, um preÃ§o por
+ * (produto, oferta de comunicaÃ§Ã£o/plano) â€” sem forma de pagamento
+ * (PIX/parcelas) nem TABELA RENOVA. Atualiza na hora, sem aprovaÃ§Ã£o â€”
+ * o histÃ³rico completo fica em ProdutoPrecoPlano para auditoria.
+ */
+@Service
+@RequiredArgsConstructor
+public class TabelaPrecoService {
+
+    private final TabelaPrecoTelefonicaParser parser;
+    private final ProdutoRepository produtoRepository;
+    private final TabelaPrecoExecucaoRepository execucaoRepository;
+    private final ProdutoPrecoPlanoRepository precoPlanoRepository;
+
+    @Transactional
+    public TabelaPrecoResumoResponseDTO importar(MultipartFile arquivo) {
+        ResultadoParseTabelaPreco resultado = parser.parsear(arquivo);
+
+        // SKU (nosso Produto.sku) = Cod_Sap â€” carregado uma vez para evitar N+1.
+        Map<String, Produto> produtosPorSku = new HashMap<>();
+        for (Produto p : produtoRepository.findAll()) {
+            produtosPorSku.put(p.getSku().trim().toUpperCase(Locale.ROOT), p);
+        }
+
+        List<ProdutoPrecoPlano> itens = new ArrayList<>();
+        Set<Long> produtosAtualizados = new HashSet<>();
+        int naoEncontrados = 0;
+
+        // Para produtos SEM variaÃ§Ã£o por plano (oferta == null), o Ãºltimo preÃ§o processado
+        // vira o Produto.precoBase diretamente â€” nÃ£o hÃ¡ ambiguidade nesse caso.
+        // Para produtos COM variaÃ§Ã£o por plano, o precoBase vira uma referÃªncia
+        // ("a partir de": o menor preÃ§o entre os planos) â€” o preÃ§o correto por
+        // plano fica disponÃ­vel via ProdutoPrecoPlano.
+        Map<Long, BigDecimal> menorPrecoPorProduto = new HashMap<>();
+
+        for (LinhaPrecoDTO linha : resultado.linhasPreco()) {
+            Set<String> skusCandidatos = resultado.indiceSkuPorNomeComercial()
+                    .getOrDefault(normalizarChave(linha.nomeComercial()), Set.of());
+
+            List<Produto> produtosResolvidos = skusCandidatos.stream()
+                    .map(sku -> produtosPorSku.get(sku.trim().toUpperCase(Locale.ROOT)))
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            if (produtosResolvidos.isEmpty()) {
+                naoEncontrados++;
+                itens.add(ProdutoPrecoPlano.builder()
+                        .produto(null)
+                        .skuResolvido(null)
+                        .nomeComercial(linha.nomeComercial())
+                        .categoriaPlanilha(linha.categoriaPlanilha())
+                        .ofertaComunicacao(linha.ofertaComunicacao())
+                        .preco(linha.preco())
+                        .encontrado(false)
+                        .build());
+                continue;
+            }
+
+            // Nome Comercial pode apontar para mais de um Cod_Sap (variaÃ§Ã£o de cor) â€”
+            // todos recebem o mesmo preÃ§o, jÃ¡ que a TelefÃ´nica nÃ£o diferencia por cor.
+            for (Produto produto : produtosResolvidos) {
+                produtosAtualizados.add(produto.getId());
+                itens.add(ProdutoPrecoPlano.builder()
+                        .produto(produto)
+                        .skuResolvido(produto.getSku())
+                        .nomeComercial(linha.nomeComercial())
+                        .categoriaPlanilha(linha.categoriaPlanilha())
+                        .ofertaComunicacao(linha.ofertaComunicacao())
+                        .preco(linha.preco())
+                        .encontrado(true)
+                        .build());
+
+                if (linha.ofertaComunicacao() == null) {
+                    produto.setPrecoBase(linha.preco());
+                } else {
+                    menorPrecoPorProduto.merge(produto.getId(), linha.preco(), BigDecimal::min);
+                }
+            }
+        }
+
+        // Aplica o "a partir de" sÃ³ para quem nÃ£o teve preÃ§o fixo (sem oferta) jÃ¡ setado acima.
+        for (Produto produto : produtosResolvidosUnicos(itens)) {
+            BigDecimal menorPreco = menorPrecoPorProduto.get(produto.getId());
+            if (menorPreco != null) {
+                boolean temPrecoSemOferta = itens.stream()
+                        .anyMatch(i -> i.getProduto() != null
+                                && i.getProduto().getId().equals(produto.getId())
+                                && i.getOfertaComunicacao() == null);
+                if (!temPrecoSemOferta) {
+                    produto.setPrecoBase(menorPreco);
+                }
+            }
+        }
+        produtoRepository.saveAll(produtosResolvidosUnicos(itens));
+
+        TabelaPrecoExecucao execucao = TabelaPrecoExecucao.builder()
+                .nomeArquivo(arquivo.getOriginalFilename())
+                .vigenciaEm(resultado.vigenciaEm())
+                .totalLinhasProcessadas(resultado.linhasPreco().size())
+                .totalProdutosAtualizados(produtosAtualizados.size())
+                .totalNaoEncontrados(naoEncontrados)
+                .build();
+        execucao = execucaoRepository.save(execucao);
+
+        for (ProdutoPrecoPlano item : itens) {
+            item.setExecucao(execucao);
+        }
+        precoPlanoRepository.saveAll(itens);
+
+        return TabelaPrecoResumoResponseDTO.from(execucao);
+    }
+
+    @Transactional(readOnly = true)
+    public TabelaPrecoResumoResponseDTO buscarExecucao(Long execucaoId) {
+        TabelaPrecoExecucao execucao = execucaoRepository.findById(execucaoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("ExecuÃ§Ã£o de importaÃ§Ã£o de preÃ§o"));
+        return TabelaPrecoResumoResponseDTO.from(execucao);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProdutoPrecoPlano> listarPrecosPorProduto(Long produtoId) {
+        if (!produtoRepository.existsById(produtoId)) {
+            throw new RecursoNaoEncontradoException("Produto");
+        }
+        return precoPlanoRepository.findByProdutoIdOrderByOfertaComunicacaoAsc(produtoId);
+    }
+
+    /** Tabs de oferta disponÃ­veis (texto bruto da planilha) na importaÃ§Ã£o mais recente. */
+    @Transactional(readOnly = true)
+    public List<String> listarOfertasDisponiveis() {
+        TabelaPrecoExecucao ultima = execucaoRepository.findTopByOrderByCriadoEmDesc()
+                .orElseThrow(() -> new NegocioException("Nenhuma tabela de preÃ§o foi importada ainda."));
+        return precoPlanoRepository.listarOfertasDistintas(ultima.getId());
+    }
+
+    /** CatÃ¡logo de produtos com preÃ§o para uma oferta especÃ­fica (o conteÃºdo de um dos tabs), sempre da importaÃ§Ã£o mais recente. */
+    @Transactional(readOnly = true)
+    public List<ProdutoPrecoPlano> listarProdutosPorOferta(String oferta) {
+        TabelaPrecoExecucao ultima = execucaoRepository.findTopByOrderByCriadoEmDesc()
+                .orElseThrow(() -> new NegocioException("Nenhuma tabela de preÃ§o foi importada ainda."));
+        return precoPlanoRepository.listarPorExecucaoEOferta(ultima.getId(), oferta);
+    }
+
+    private List<Produto> produtosResolvidosUnicos(List<ProdutoPrecoPlano> itens) {
+        Map<Long, Produto> unicos = new LinkedHashMap<>();
+        for (ProdutoPrecoPlano item : itens) {
+            if (item.getProduto() != null) {
+                unicos.putIfAbsent(item.getProduto().getId(), item.getProduto());
+            }
+        }
+        return new ArrayList<>(unicos.values());
+    }
+
+    private String normalizarChave(String texto) {
+        if (texto == null) return "";
+        String semAcento = java.text.Normalizer.normalize(texto, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return semAcento.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+}
+
+===== estoque\model\Produto.java =====
+
+package com.vivo4redes.syscor.estoque.model;
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity
+@Table(name = "tb_produto")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Produto {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true, length = 50)
+    private String sku;
+
+    @Column(nullable = false, length = 150)
+    private String descricao;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private CategoriaItemVenda categoria;
+
+    @Column(name = "estoque_minimo", nullable = false)
+    private Integer estoqueMinimo;
+
+    @Column(name = "preco_base", nullable = false, precision = 12, scale = 2)
+    private BigDecimal precoBase;
+
+    @Column(name = "requer_serial", nullable = false)
+    private Boolean requerSerial;
+
+    @OneToMany(mappedBy = "produto", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<ItemEstoque> itensEstoque = new ArrayList<>();
+
+    @Column(name = "criado_em", updatable = false)
+    private LocalDateTime criadoEm;
+
+    @PrePersist
+    public void prePersist() {
+        this.criadoEm = LocalDateTime.now();
+        if (this.estoqueMinimo == null) this.estoqueMinimo = 2;
+        if (this.requerSerial == null) this.requerSerial = false;
+    }
+}
+
+===== estoque\model\InventarioItem.java =====
+
+package com.vivo4redes.syscor.estoque.model;
+
+import com.vivo4redes.syscor.estoque.enums.ResultadoConciliacaoInventario;
+import jakarta.persistence.*;
+import lombok.*;
+
+/** US-206: resultado da conciliaÃ§Ã£o de uma linha (um serial) do relatÃ³rio SAP. */
+@Entity
+@Table(name = "tb_inventario_item", indexes = {
+        @Index(name = "idx_inventario_item_execucao", columnList = "execucao_id"),
+        @Index(name = "idx_inventario_item_resultado", columnList = "resultado")
+})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class InventarioItem {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "execucao_id", nullable = false)
+    private InventarioExecucao execucao;
+
+    @Column(name = "material_sap", length = 40)
+    private String materialSap;
+
+    @Column(name = "denominacao_sap", length = 200)
+    private String denominacaoSap;
+
+    @Column(name = "serial_sap", length = 50)
+    private String serialSap;
+
+    @Column(name = "centro_sap", length = 20)
+    private String centroSap;
+
+    @Column(name = "deposito_sap", length = 20)
+    private String depositoSap;
+
+    @Column(name = "status_sap", length = 30)
+    private String statusSap;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ResultadoConciliacaoInventario resultado;
+
+    @Column(length = 300)
+    private String observacao;
+
+    /** ReferÃªncia ao ItemEstoque nosso, quando o serial foi encontrado â€” nulo se PENDENTE. */
+    @Column(name = "item_estoque_id")
+    private Long itemEstoqueId;
+}
+
+===== estoque\model\ProdutoPrecoPlano.java =====
+
+package com.vivo4redes.syscor.estoque.model;
+import jakarta.persistence.*;
+import lombok.*;
+import java.math.BigDecimal;
+
+/**
+ * Um preÃ§o resolvido de uma linha da tabela da TelefÃ´nica: produto (quando
+ * encontrado no nosso catÃ¡logo) x oferta de comunicaÃ§Ã£o (plano, pode ser
+ * nulo para itens sem variaÃ§Ã£o por plano) x preÃ§o da TABELA REGULAR.
+ */
+@Entity
+@Table(name = "tb_produto_preco_plano", indexes = {
+        @Index(name = "idx_produto_preco_plano_execucao2", columnList = "execucao_id"),
+        @Index(name = "idx_produto_preco_plano_produto2", columnList = "produto_id")
+})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ProdutoPrecoPlano {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "execucao_id", nullable = false)
+    private TabelaPrecoExecucao execucao;
+
+    /** Nulo quando o Nome Comercial nÃ£o resolveu para nenhum SKU do nosso catÃ¡logo. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "produto_id")
+    private Produto produto;
+
+    @Column(name = "sku_resolvido", length = 40)
+    private String skuResolvido;
+
+    @Column(name = "nome_comercial", length = 200)
+    private String nomeComercial;
+
+    @Column(name = "categoria_planilha", nullable = false, length = 60)
+    private String categoriaPlanilha;
+
+    @Column(name = "oferta_comunicacao", length = 120)
+    private String ofertaComunicacao;
+
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal preco;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean encontrado = false;
+}
+
+===== estoque\controller\ProdutoController.java =====
+
+package com.vivo4redes.syscor.estoque.controller;
+
+import com.vivo4redes.syscor.estoque.dto.request.ProdutoRequestDTO;
+import com.vivo4redes.syscor.estoque.dto.response.ProdutoResponseDTO;
+import com.vivo4redes.syscor.estoque.service.EstoqueService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+/** US-201: cadastro e consulta de produtos/SKUs. */
+@RestController
+@RequestMapping("/produtos")
+@RequiredArgsConstructor
+@CrossOrigin(origins = "*")
+public class ProdutoController {
+
+    private final EstoqueService estoqueService;
+
+    @PostMapping
+    public ResponseEntity<ProdutoResponseDTO> cadastrar(@Valid @RequestBody ProdutoRequestDTO dto) {
+        var produto = estoqueService.cadastrarProduto(dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ProdutoResponseDTO.from(produto));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ProdutoResponseDTO> buscarPorId(@PathVariable Long id) {
+        return ResponseEntity.ok(ProdutoResponseDTO.from(estoqueService.buscarProdutoPorId(id)));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<ProdutoResponseDTO>> listar(
+            @RequestParam(required = false) String busca,
+            @RequestParam(required = false) com.vivo4redes.syscor.venda.enums.CategoriaItemVenda categoria) {
+        var produtos = estoqueService.listarProdutos(busca, categoria).stream()
+                .map(ProdutoResponseDTO::from)
+                .toList();
+        return ResponseEntity.ok(produtos);
+    }
+}
+
+===== estoque\repository\ProdutoRepository.java =====
+
+package com.vivo4redes.syscor.estoque.repository;
+import com.vivo4redes.syscor.estoque.model.Produto;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface ProdutoRepository extends JpaRepository<Produto, Long> {
+    Optional<Produto> findBySku(String sku);
+    Optional<Produto> findFirstByDescricaoContainingIgnoreCase(String descricao);
+    boolean existsBySkuIgnoreCase(String sku);
+    List<Produto> findAllByOrderByDescricaoAsc();
+}
+
+===== estoque\repository\ItemEstoqueRepository.java =====
+
+package com.vivo4redes.syscor.estoque.repository;
+
+import com.vivo4redes.syscor.estoque.enums.StatusSerial;
+import com.vivo4redes.syscor.estoque.model.ItemEstoque;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface ItemEstoqueRepository extends JpaRepository<ItemEstoque, Long> {
+
+    List<ItemEstoque> findByProdutoIdAndStatus(Long produtoId, StatusSerial status);
+
+    List<ItemEstoque> findByStatus(StatusSerial status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM ItemEstoque i WHERE i.serialImei = :serial AND i.status = :status")
+    Optional<ItemEstoque> findBySerialImeiAndStatusForUpdate(
+            @Param("serial") String serial,
+            @Param("status") StatusSerial status
+    );
+
+    boolean existsBySerialImei(String serialImei);
+
+    java.util.Optional<ItemEstoque> findBySerialImei(String serialImei);
+
+    long countByProdutoIdAndStatus(Long produtoId, StatusSerial status);
+    @Query("SELECT i FROM ItemEstoque i JOIN FETCH i.produto p WHERE i.status = :status AND "
+            + "(LOWER(i.serialImei) LIKE LOWER(CONCAT('%', :busca, '%')) "
+            + "OR LOWER(p.descricao) LIKE LOWER(CONCAT('%', :busca, '%'))) "
+            + "ORDER BY p.descricao, i.serialImei")
+    java.util.List<ItemEstoque> buscarDisponiveis(@Param("status") StatusSerial status,
+                                                  @Param("busca") String busca,
+                                                  org.springframework.data.domain.Pageable pageable);
+
+}
