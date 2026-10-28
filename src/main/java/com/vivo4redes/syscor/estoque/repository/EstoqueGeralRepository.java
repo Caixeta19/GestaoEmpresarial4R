@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.estoque.repository;
 
+import com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoModeloDTO;
 import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import jakarta.persistence.LockModeType;
@@ -16,54 +17,47 @@ import java.util.Optional;
 @Repository
 public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long> {
 
-    // 1. Verificar existência por serial
+    // 1. Buscas e validações por serial
     boolean existsBySerial(String serial);
 
-    // 2. Buscar múltiplos seriais de uma vez
     List<EstoqueGeral> findBySerialIn(List<String> seriais);
 
-    // 3. Buscar por modelo e status
-    List<EstoqueGeral> findByModeloComercialInAndStatus(List<String> modelos, StatusEstoque status);
-
-    // Alias caso o serviço utilize nome alternativo para modelo
-    default List<EstoqueGeral> findByModeloIn(List<String> modelos, StatusEstoque status) {
-        return findByModeloComercialInAndStatus(modelos, status);
-    }
-
-    // 4. Buscar seriais excluindo determinado status
     List<EstoqueGeral> findBySerialInAndStatusNot(List<String> seriais, StatusEstoque status);
 
-    // 5. Encontrar modelos existentes na base
+    Optional<EstoqueGeral> findBySerialAndStatus(String serial, StatusEstoque status);
+
+    List<EstoqueGeral> findByStatus(StatusEstoque statusEstoque);
+
+    // 2. Buscas e atualizações por modelo
+    @Query("SELECT e FROM EstoqueGeral e WHERE e.modeloComercial IN :modelos AND e.status <> :status")
+    List<EstoqueGeral> findByModeloIn(@Param("modelos") List<String> modelos, @Param("status") StatusEstoque status);
+
     @Query("SELECT DISTINCT e.modeloComercial FROM EstoqueGeral e WHERE e.modeloComercial IN :modelos")
     List<String> findModelosExistentes(@Param("modelos") List<String> modelos);
 
-    // 6. Bloqueio pessimista para concorrência no PDV por serial
+    // 3. Bloqueio pessimista para baixa transacional no PDV (por serial ou por ID)
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT e FROM EstoqueGeral e WHERE e.serial = :serial")
     Optional<EstoqueGeral> findBySerialForUpdate(@Param("serial") String serial);
 
-    // 7. Buscar com bloqueio pessimista por serial e status
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT e FROM EstoqueGeral e WHERE e.serial = :serial AND e.status = :status")
-    Optional<EstoqueGeral> findBySerialAndStatusForUpdate(@Param("serial") String serial, @Param("status") StatusEstoque status);
+    @Query("SELECT e FROM EstoqueGeral e WHERE e.id = :id")
+    Optional<EstoqueGeral> findByIdForUpdate(@Param("id") Long id);
 
-    // 8. Buscar padrão por serial e status simples
-    Optional<EstoqueGeral> findBySerialAndStatus(String serial, StatusEstoque status);
+    // 4. Consultas de itens disponíveis com filtro por termo e filial
+    @Query("SELECT e FROM EstoqueGeral e WHERE e.status = :status " +
+            "AND (:termo IS NULL OR :termo = '' OR e.serial LIKE %:termo% OR e.modeloComercial LIKE %:termo% OR e.marca LIKE %:termo% OR e.codigoAcessorio LIKE %:termo%) " +
+            "AND (:filial IS NULL OR :filial = '' OR e.filialEstoque = :filial)")
+    List<EstoqueGeral> buscarDisponiveis(
+            @Param("status") StatusEstoque status,
+            @Param("termo") String termo,
+            @Param("filial") String filial,
+            Pageable pageable
+    );
 
-    // 9. Buscar disponíveis com filtro genérico (modelo ou serial)
-    @Query("SELECT e FROM EstoqueGeral e WHERE e.status = :status AND (:termo IS NULL OR :termo = '' OR e.serial LIKE %:termo% OR e.modeloComercial LIKE %:termo%)")
-    List<EstoqueGeral> buscarDisponiveis(@Param("status") StatusEstoque status, @Param("termo") String termo, Pageable pageable);
-
-    // Métodos específicos para aparelhos vs acessórios se aplicável
-    default List<EstoqueGeral> buscarAparelhosDisponiveis(StatusEstoque status, String termo, Pageable pageable) {
-        return buscarDisponiveis(status, termo, pageable);
-    }
-
-    default List<EstoqueGeral> buscarAcessoriosDisponiveis(StatusEstoque status, String termo, Pageable pageable) {
-        return buscarDisponiveis(status, termo, pageable);
-    }
-
-    // 10. Consulta auxiliar para consolidação por modelo (caso utilize projeção ou listagem agrupada)
-    @Query("SELECT e FROM EstoqueGeral e")
-    List<EstoqueGeral> consolidarPorModelo();
+    // 5. Consolidação por modelo (retornando o DTO correspondente)
+    @Query("NEW com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoModeloDTO(" +
+            "e.modeloComercial, e.categoria, COUNT(e), SUM(CASE WHEN e.status = 'DISPONIVEL' THEN 1 ELSE 0 END)) " +
+            "FROM EstoqueGeral e GROUP BY e.modeloComercial, e.categoria")
+    List<EstoqueConsolidadoModeloDTO> consolidarPorModelo();
 }
