@@ -68,12 +68,17 @@ public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long
     }
 
     // 5. Consolidação
-    @Query("NEW com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoModeloDTO(" +
-            "e.modeloComercial, MAX(e.marca), e.categoria, " +
-            "SUM(CASE WHEN e.status = 'DISPONIVEL' THEN 1 ELSE 0 END), " +
-            "SUM(CASE WHEN e.status = 'RESERVADO' THEN 1 ELSE 0 END), " +
-            "SUM(CASE WHEN e.status = 'AVARIADO' THEN 1 ELSE 0 END), " +
-            "MIN(e.valorVenda)) " +
-            "FROM EstoqueGeral e GROUP BY e.modeloComercial, e.categoria")
+    @Query("""
+    SELECT NEW com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoModeloDTO(
+        e.modeloComercial,
+        MAX(e.marca),
+        e.categoria,
+        SUM(CASE WHEN e.status = 'DISPONIVEL' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN e.status = 'RESERVADO' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN e.status = 'AVARIADO' THEN 1 ELSE 0 END),
+        MIN(e.valorVenda))
+    FROM EstoqueGeral e
+    GROUP BY e.modeloComercial, e.categoria
+    """)
     List<EstoqueConsolidadoModeloDTO> consolidarPorModelo();
 }
