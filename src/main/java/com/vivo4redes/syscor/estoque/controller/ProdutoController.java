@@ -1,7 +1,6 @@
 package com.vivo4redes.syscor.estoque.controller;
 
 import com.vivo4redes.syscor.estoque.dto.response.ProdutoResponseDTO;
-import com.vivo4redes.syscor.estoque.service.EstoqueService;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

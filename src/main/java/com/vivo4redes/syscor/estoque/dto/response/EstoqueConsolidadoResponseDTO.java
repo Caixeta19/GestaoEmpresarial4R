@@ -4,13 +4,15 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.util.List;
 
+/**
+ * Saldo consolidado por item/modelo (painel de estoque e alertas).
+ * Usado por {@code EstoqueService.listarEstoqueConsolidado()} e {@code listarAlertasEstoqueBaixo()}.
+ */
 @Getter
-@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

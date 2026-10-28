@@ -13,4 +13,11 @@ public record ResultadoImportacaoDTO(
         int ignorados,
         List<String> erros
 ) {
+    private static final int MAX_ERROS = 100;
+
+    public ResultadoImportacaoDTO {
+        erros = erros == null ? List.of()
+                : erros.size() > MAX_ERROS ? List.copyOf(erros.subList(0, MAX_ERROS))
+                : List.copyOf(erros);
+    }
 }
