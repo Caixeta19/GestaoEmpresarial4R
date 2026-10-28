@@ -1,3 +1,8 @@
+-- Estoque unificado: tb_estoque_geral passa a ser a ÚNICA fonte da verdade para
+-- catálogo, controle unitário (serial/IMEI) e baixa no PDV.
+-- Substitui tb_produto + tb_item_estoque (dados migrados abaixo, IDs preservados).
+-- Sem tabelas de staging/temporárias/auxiliares.
+
 -- 1. TABELA OFICIAL ---------------------------------------------------------
 CREATE TABLE tb_estoque_geral (
                                   id                      BIGSERIAL     PRIMARY KEY,
@@ -44,8 +49,8 @@ CREATE TABLE tb_estoque_geral (
                                   data_venda              TIMESTAMP WITHOUT TIME ZONE,
                                   version                 BIGINT        NOT NULL DEFAULT 0,   -- lock otimista (@Version)
 
-                                  CONSTRAINT idx_serial_unico            UNIQUE (serial),
-                                  CONSTRAINT chk_estoque_geral_status    CHECK (status IN ('DISPONIVEL', 'VENDIDO', 'RESERVADO', 'AVARIADO')),
+                                  CONSTRAINT idx_serial_unico             UNIQUE (serial),
+                                  CONSTRAINT chk_estoque_geral_status     CHECK (status IN ('DISPONIVEL', 'VENDIDO', 'RESERVADO', 'AVARIADO')),
                                   CONSTRAINT chk_estoque_geral_quantidade CHECK (quantidade >= 0)
 );
 
@@ -95,14 +100,40 @@ ALTER TABLE tb_inventario_item
     ADD CONSTRAINT fk_inventario_item_estoque_geral
         FOREIGN KEY (item_estoque_id) REFERENCES tb_estoque_geral (id);
 
--- 4. TABELA DE PREÇO POR OFERTA: deixa de depender de tb_produto -------------
--- O vínculo passa a ser o modelo comercial (texto normalizado), não um SKU.
-ALTER TABLE tb_produto_preco_plano ADD COLUMN modelo_comercial VARCHAR(200);
-UPDATE tb_produto_preco_plano SET modelo_comercial = nome_comercial;
-ALTER TABLE tb_produto_preco_plano DROP COLUMN produto_id;
-ALTER TABLE tb_produto_preco_plano DROP COLUMN sku_resolvido;
-CREATE INDEX idx_produto_preco_plano_modelo ON tb_produto_preco_plano (upper(modelo_comercial));
+-- 4. TABELA DE PREÇO POR OFERTA: produto_id passa a guardar o id de tb_estoque_geral (sem FK)
+DO $$
+DECLARE r RECORD;
+BEGIN
+FOR r IN
+SELECT c.conname
+FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+WHERE c.contype = 'f'
+  AND c.conrelid = 'tb_produto_preco_plano'::regclass
+          AND a.attname = 'produto_id'
+    LOOP
+        EXECUTE format('ALTER TABLE tb_produto_preco_plano DROP CONSTRAINT %I', r.conname);
+END LOOP;
+END $$;
+
+ALTER TABLE tb_produto_preco_plano ALTER COLUMN produto_id DROP NOT NULL;
+ALTER TABLE tb_produto_preco_plano ALTER COLUMN sku_resolvido DROP NOT NULL;
+
+-- Dados antigos apontavam para tb_produto; a tabela é cache da última importação.
+UPDATE tb_produto_preco_plano SET produto_id = NULL;
 
 -- 5. REMOVE O MODELO ANTIGO --------------------------------------------------
+-- Remove qualquer FK restante que aponte para tb_produto (ex.: itens_venda.produto_id).
+DO $$
+DECLARE r RECORD;
+BEGIN
+FOR r IN SELECT conrelid::regclass AS tabela, conname
+         FROM pg_constraint
+         WHERE contype = 'f' AND confrelid = 'tb_produto'::regclass
+    LOOP
+        EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.tabela, r.conname);
+END LOOP;
+END $$;
+
 DROP TABLE tb_item_estoque;
 DROP TABLE tb_produto;
