@@ -1,9 +1,3 @@
-V19__create_estoque_geral.sql
--- Estoque unificado: tb_estoque_geral passa a ser a ÚNICA fonte da verdade para
--- catálogo, controle unitário (serial/IMEI) e baixa no PDV.
--- Substitui tb_produto + tb_item_estoque (dados migrados abaixo, IDs preservados).
--- Sem tabelas de staging/temporárias/auxiliares.
-
 -- 1. TABELA OFICIAL ---------------------------------------------------------
 CREATE TABLE tb_estoque_geral (
                                   id                      BIGSERIAL     PRIMARY KEY,
