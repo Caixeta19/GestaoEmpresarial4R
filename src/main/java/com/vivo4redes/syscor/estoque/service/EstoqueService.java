@@ -133,8 +133,6 @@ public class EstoqueService {
                 .build();
     }
 
-    // ------------------------------------------------------------------ entrada
-
     /**
      * Entrada de seriais novos. {@code produtoId} agora é o id de uma linha de
      * tb_estoque_geral já existente do mesmo modelo: os dados de catálogo dela

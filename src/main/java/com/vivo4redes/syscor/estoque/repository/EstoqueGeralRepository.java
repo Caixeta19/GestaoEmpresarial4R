@@ -13,46 +13,57 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
-/** Substitui ProdutoRepository e ItemEstoqueRepository. */
 @Repository
 public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long> {
 
-    Optional<EstoqueGeral> findBySerial(String serial);
-
+    // 1. Verificar existência por serial
     boolean existsBySerial(String serial);
 
-    List<EstoqueGeral> findByStatus(StatusEstoque status);
+    // 2. Buscar múltiplos seriais de uma vez
+    List<EstoqueGeral> findBySerialIn(List<String> seriais);
 
-    long countByStatus(StatusEstoque status);
+    // 3. Buscar por modelo e status
+    List<EstoqueGeral> findByModeloComercialInAndStatus(List<String> modelos, StatusEstoque status);
 
-    /** Baixa de um serial: trava a linha para duas vendas simultâneas não pegarem o mesmo IMEI. */
+    // Alias caso o serviço utilize nome alternativo para modelo
+    default List<EstoqueGeral> findByModeloIn(List<String> modelos, StatusEstoque status) {
+        return findByModeloComercialInAndStatus(modelos, status);
+    }
+
+    // 4. Buscar seriais excluindo determinado status
+    List<EstoqueGeral> findBySerialInAndStatusNot(List<String> seriais, StatusEstoque status);
+
+    // 5. Encontrar modelos existentes na base
+    @Query("SELECT DISTINCT e.modeloComercial FROM EstoqueGeral e WHERE e.modeloComercial IN :modelos")
+    List<String> findModelosExistentes(@Param("modelos") List<String> modelos);
+
+    // 6. Bloqueio pessimista para concorrência no PDV por serial
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM EstoqueGeral e WHERE e.serial = :serial")
+    Optional<EstoqueGeral> findBySerialForUpdate(@Param("serial") String serial);
+
+    // 7. Buscar com bloqueio pessimista por serial e status
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT e FROM EstoqueGeral e WHERE e.serial = :serial AND e.status = :status")
-    Optional<EstoqueGeral> findBySerialAndStatusForUpdate(@Param("serial") String serial,
-                                                          @Param("status") StatusEstoque status);
+    Optional<EstoqueGeral> findBySerialAndStatusForUpdate(@Param("serial") String serial, @Param("status") StatusEstoque status);
 
-    /** Baixa por quantidade (acessórios): trava a linha pelo id. */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT e FROM EstoqueGeral e WHERE e.id = :id")
-    Optional<EstoqueGeral> findByIdForUpdate(@Param("id") Long id);
+    // 8. Buscar padrão por serial e status simples
+    Optional<EstoqueGeral> findBySerialAndStatus(String serial, StatusEstoque status);
 
-    /** PDV: aparelhos (sem código de acessório) disponíveis, por trecho do serial ou do modelo. */
-    @Query("SELECT e FROM EstoqueGeral e WHERE e.status = :status "
-            + "AND (e.codigoAcessorio IS NULL OR e.codigoAcessorio = '') "
-            + "AND (LOWER(e.serial) LIKE LOWER(CONCAT('%', :busca, '%')) "
-            + "  OR LOWER(e.modeloComercial) LIKE LOWER(CONCAT('%', :busca, '%'))) "
-            + "ORDER BY e.modeloComercial, e.serial")
-    List<EstoqueGeral> buscarAparelhosDisponiveis(@Param("status") StatusEstoque status,
-                                                  @Param("busca") String busca,
-                                                  Pageable pageable);
+    // 9. Buscar disponíveis com filtro genérico (modelo ou serial)
+    @Query("SELECT e FROM EstoqueGeral e WHERE e.status = :status AND (:termo IS NULL OR :termo = '' OR e.serial LIKE %:termo% OR e.modeloComercial LIKE %:termo%)")
+    List<EstoqueGeral> buscarDisponiveis(@Param("status") StatusEstoque status, @Param("termo") String termo, Pageable pageable);
 
-    /** PDV: acessórios disponíveis, por trecho do código ou do modelo. */
-    @Query("SELECT e FROM EstoqueGeral e WHERE e.status = :status "
-            + "AND e.codigoAcessorio IS NOT NULL AND e.codigoAcessorio <> '' "
-            + "AND (LOWER(e.codigoAcessorio) LIKE LOWER(CONCAT('%', :busca, '%')) "
-            + "  OR LOWER(e.modeloComercial) LIKE LOWER(CONCAT('%', :busca, '%'))) "
-            + "ORDER BY e.modeloComercial, e.codigoAcessorio")
-    List<EstoqueGeral> buscarAcessoriosDisponiveis(@Param("status") StatusEstoque status,
-                                                   @Param("busca") String busca,
-                                                   Pageable pageable);
+    // Métodos específicos para aparelhos vs acessórios se aplicável
+    default List<EstoqueGeral> buscarAparelhosDisponiveis(StatusEstoque status, String termo, Pageable pageable) {
+        return buscarDisponiveis(status, termo, pageable);
+    }
+
+    default List<EstoqueGeral> buscarAcessoriosDisponiveis(StatusEstoque status, String termo, Pageable pageable) {
+        return buscarDisponiveis(status, termo, pageable);
+    }
+
+    // 10. Consulta auxiliar para consolidação por modelo (caso utilize projeção ou listagem agrupada)
+    @Query("SELECT e FROM EstoqueGeral e")
+    List<EstoqueGeral> consolidarPorModelo();
 }
