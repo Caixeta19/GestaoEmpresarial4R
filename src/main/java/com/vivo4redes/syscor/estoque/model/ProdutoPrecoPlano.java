@@ -4,14 +4,13 @@ import lombok.*;
 import java.math.BigDecimal;
 
 /**
- * Um preço resolvido de uma linha da tabela da Telefônica: produto (quando
- * encontrado no nosso catálogo) x oferta de comunicação (plano, pode ser
- * nulo para itens sem variação por plano) x preço da TABELA REGULAR.
+ * Um preço resolvido de uma linha da tabela da Telefônica: modelo comercial
+ * (texto normalizado) x oferta de comunicação (plano, pode ser nulo para itens
+ * sem variação por plano) x preço da TABELA REGULAR.
  */
 @Entity
 @Table(name = "tb_produto_preco_plano", indexes = {
-        @Index(name = "idx_produto_preco_plano_execucao2", columnList = "execucao_id"),
-        @Index(name = "idx_produto_preco_plano_produto2", columnList = "produto_id")
+        @Index(name = "idx_produto_preco_plano_execucao2", columnList = "execucao_id")
 })
 @Getter
 @Setter
@@ -28,16 +27,9 @@ public class ProdutoPrecoPlano {
     @JoinColumn(name = "execucao_id", nullable = false)
     private TabelaPrecoExecucao execucao;
 
-    /**
-     * Id de uma linha de tb_estoque_geral do item resolvido (representante do modelo).
-     * Nulo quando o Nome Comercial não resolveu para nada do nosso estoque.
-     * (Antes era um @ManyToOne para Produto; agora é só o id, sem FK.)
-     */
-    @Column(name = "produto_id")
-    private Long produtoId;
-
-    @Column(name = "sku_resolvido", length = 40)
-    private String skuResolvido;
+    /** Vínculo com o estoque: modelo comercial normalizado (não mais um SKU/produto). */
+    @Column(name = "modelo_comercial", length = 200)
+    private String modeloComercial;
 
     @Column(name = "nome_comercial", length = 200)
     private String nomeComercial;
