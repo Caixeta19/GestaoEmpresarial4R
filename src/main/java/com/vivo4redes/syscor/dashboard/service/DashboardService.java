@@ -3,6 +3,7 @@ package com.vivo4redes.syscor.dashboard.service;
 import com.vivo4redes.syscor.dashboard.dto.AtividadeRecenteDTO;
 import com.vivo4redes.syscor.dashboard.dto.DashboardExecutivoDTO;
 import com.vivo4redes.syscor.dashboard.dto.EvolucaoMensalDTO;
+import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.repository.VendaRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,8 +27,7 @@ public class DashboardService {
     private static final ZoneId ZONA = ZoneId.of("America/Sao_Paulo");
 
     private final VendaRepository vendaRepository;
-    private final ProdutoRepository produtoRepository;
-    private final ItemEstoqueRepository itemEstoqueRepository;
+    private final EstoqueGeralService estoqueGeralService;
 
     @Transactional(readOnly = true)
     public DashboardExecutivoDTO obterPainelExecutivo(Long filialId) {
@@ -52,11 +52,8 @@ public class DashboardService {
                 : BigDecimal.ZERO;
 
         // 4. SKUs Críticos ou em Ruptura
-        List<Produto> produtos = produtoRepository.findAll();
-        long skusCriticos = produtos.stream().filter(p -> {
-            long saldo = itemEstoqueRepository.countByProdutoIdAndStatus(p.getId(), StatusSerial.DISPONIVEL);
-            return saldo <= p.getEstoqueMinimo();
-        }).count();
+        // Modelos críticos/em ruptura (saldo disponível <= mínimo), direto de tb_estoque_geral.
+        long skusCriticos = estoqueGeralService.contarModelosCriticos();
 
         // 5. Histórico 6 Meses
         List<EvolucaoMensalDTO> evolucao = new ArrayList<>();

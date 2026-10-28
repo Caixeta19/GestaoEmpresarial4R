@@ -18,6 +18,8 @@ import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.VendaSemItemException;
 import com.vivo4redes.syscor.venda.model.Cliente;
+import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
+import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
 import com.vivo4redes.syscor.venda.model.PagamentoVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
@@ -39,7 +41,7 @@ public class VendaService {
     private final FilialService filialService;
     private final UsuarioService usuarioService;
     private final NumeroVendaGenerator numeroVendaGenerator;
-    private final EstoqueService estoqueService;
+    private final EstoqueGeralService estoqueService;
     private final PagamentoVendaRepository pagamentoVendaRepository;
 
     public VendaService(VendaRepository vendaRepository,
@@ -47,7 +49,7 @@ public class VendaService {
                         FilialService filialService,
                         UsuarioService usuarioService,
                         NumeroVendaGenerator numeroVendaGenerator,
-                        EstoqueService estoqueService,
+                        EstoqueGeralService estoqueService,
                         PagamentoVendaRepository pagamentoVendaRepository) {
         this.vendaRepository = vendaRepository;
         this.clienteService = clienteService;
@@ -93,29 +95,38 @@ public class VendaService {
             }
         }
 
-        Produto produto = dto.produtoId() != null
-                ? estoqueService.buscarProdutoPorId(dto.produtoId())
-                : null;
-
         // Item com IMEI/Serial é uma unidade física: a quantidade só pode ser 1.
-        boolean serialNaRequisicao = dto.imeiOuSerial() != null
-                && !dto.imeiOuSerial().isBlank() && !dto.imeiOuSerial().equals("-");
-        if (serialNaRequisicao && dto.quantidade().compareTo(BigDecimal.ONE) != 0) {
+        String serialInformado = dto.imeiOuSerial() == null ? null : dto.imeiOuSerial().trim();
+        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
+        if (informouSerial && dto.quantidade().compareTo(BigDecimal.ONE) != 0) {
             throw new NegocioException("Item com IMEI/Serial deve ter quantidade igual a 1.");
         }
 
-        ItemEstoque itemEstoqueBaixado = null;
-        String serialInformado = dto.imeiOuSerial();
-        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
-
-        if (informouSerial) {
-            itemEstoqueBaixado = estoqueService.baixarSerialNaVenda(serialInformado.trim());
-            // O serial precisa pertencer ao produto informado (evita vender o IMEI de um produto com a descrição/preço de outro).
-            if (produto != null && !produto.getId().equals(itemEstoqueBaixado.getProduto().getId())) {
-                throw new NegocioException("O IMEI/Serial '" + serialInformado.trim() + "' não pertence ao produto informado.");
+        // produtoId = id da linha de tb_estoque_geral escolhida no PDV; a baixa é sempre por serial.
+        EstoqueGeral linhaEstoque = null;
+        if (!servico) {
+            EstoqueGeral escolhida = estoqueService.buscarPorId(dto.produtoId());
+            String serialDaBaixa;
+            if (informouSerial) {
+                serialDaBaixa = serialInformado;
+            } else {
+                boolean acessorio = escolhida.getCodigoAcessorio() != null && !escolhida.getCodigoAcessorio().isBlank();
+                if (!acessorio) {
+                    throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
+                }
+                // A baixa marca a linha inteira como VENDIDA: a quantidade precisa bater com a da linha.
+                int emEstoque = escolhida.getQuantidade() == null ? 1 : escolhida.getQuantidade();
+                if (dto.quantidade().compareTo(BigDecimal.valueOf(emEstoque)) != 0) {
+                    throw new NegocioException("Este item é baixado da linha inteira do estoque (quantidade na linha: "
+                            + emEstoque + "). Informe a quantidade " + emEstoque + ".");
+                }
+                serialDaBaixa = escolhida.getSerial();
             }
-        } else if (produto != null && Boolean.TRUE.equals(produto.getRequerSerial())) {
-            throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
+            linhaEstoque = estoqueService.baixarNaVenda(serialDaBaixa);
+            // O serial precisa ser o da linha escolhida (evita vender o IMEI de um item com a descrição/preço de outro).
+            if (!escolhida.getId().equals(linhaEstoque.getId())) {
+                throw new NegocioException("O IMEI/Serial '" + serialDaBaixa + "' não corresponde ao item informado.");
+            }
         }
 
         ItemVenda item = ItemVenda.builder()
@@ -124,8 +135,8 @@ public class VendaService {
                 .descricaoProduto(dto.descricaoProduto())
                 .quantidade(dto.quantidade())
                 .valorUnitario(dto.valorUnitario())
-                .itemEstoque(itemEstoqueBaixado)
-                .serialImei(itemEstoqueBaixado != null ? itemEstoqueBaixado.getSerialImei() : serialInformado)
+                .estoque(linhaEstoque)
+                .serialImei(informouSerial && linhaEstoque != null ? linhaEstoque.getSerial() : null)
                 .tabelaPreco(dto.tabelaPreco())
                 .sva(dto.sva())
                 .seguro(dto.seguro())
@@ -169,11 +180,7 @@ public class VendaService {
                 .findFirst()
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Item da venda"));
 
-        if (itemRemovido.getItemEstoque() != null) {
-            ItemEstoque itemEstoque = itemRemovido.getItemEstoque();
-            itemEstoque.setStatus(StatusSerial.DISPONIVEL);
-            itemEstoque.setDataSaida(null);
-        }
+        estornarEstoqueDoItem(itemRemovido);
 
         venda.removerItem(itemId);
         venda.recalcularValorTotal();
@@ -389,11 +396,14 @@ public class VendaService {
 
     private void estornarSeriaisDaVenda(Venda venda) {
         for (ItemVenda item : venda.getItens()) {
-            if (item.getItemEstoque() != null) {
-                ItemEstoque serial = item.getItemEstoque();
-                serial.setStatus(StatusSerial.DISPONIVEL);
-                serial.setDataSaida(null);
-            }
+            estornarEstoqueDoItem(item);
+        }
+    }
+
+    /** Devolve ao estoque a linha que o item baixou (volta a DISPONÍVEL). */
+    private void estornarEstoqueDoItem(ItemVenda item) {
+        if (item.getEstoque() != null) {
+            estoqueService.estornarBaixa(item.getEstoque());
         }
     }
 

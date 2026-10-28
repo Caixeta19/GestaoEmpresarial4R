@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.venda.model;
 
+import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import jakarta.persistence.*;
 import lombok.*;
@@ -27,6 +28,7 @@ public class ItemVenda {
     @Column(nullable = false, length = 20)
     private CategoriaItemVenda categoria;
 
+    /** Agora é o id da linha de tb_estoque_geral escolhida no PDV (antes era tb_produto.id). */
     @Column(name = "produto_id")
     private Long produtoId;
 
@@ -39,9 +41,10 @@ public class ItemVenda {
     @Column(name = "valor_unitario", nullable = false, precision = 12, scale = 2)
     private BigDecimal valorUnitario;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "item_estoque_id")
-    private ItemEstoque itemEstoque;
+    /** Linha de estoque baixada por esta venda. ManyToOne porque acessório por quantidade se repete entre vendas. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "estoque_geral_id")
+    private EstoqueGeral estoque;
 
     @Column(name = "serial_imei", length = 50)
     private String serialImei;

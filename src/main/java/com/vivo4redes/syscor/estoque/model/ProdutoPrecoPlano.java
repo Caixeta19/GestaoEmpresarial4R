@@ -28,10 +28,13 @@ public class ProdutoPrecoPlano {
     @JoinColumn(name = "execucao_id", nullable = false)
     private TabelaPrecoExecucao execucao;
 
-    /** Nulo quando o Nome Comercial não resolveu para nenhum SKU do nosso catálogo. */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "produto_id")
-    private Produto produto;
+    /**
+     * Id de uma linha de tb_estoque_geral do item resolvido (representante do modelo).
+     * Nulo quando o Nome Comercial não resolveu para nada do nosso estoque.
+     * (Antes era um @ManyToOne para Produto; agora é só o id, sem FK.)
+     */
+    @Column(name = "produto_id")
+    private Long produtoId;
 
     @Column(name = "sku_resolvido", length = 40)
     private String skuResolvido;

@@ -22,9 +22,9 @@ public class ProdutoComPrecoResponseDTO {
 
     public static ProdutoComPrecoResponseDTO from(ProdutoPrecoPlano p) {
         return ProdutoComPrecoResponseDTO.builder()
-                .produtoId(p.getProduto().getId())
-                .sku(p.getProduto().getSku())
-                .descricao(p.getProduto().getDescricao())
+                .produtoId(p.getProdutoId())
+                .sku(p.getSkuResolvido())
+                .descricao(p.getNomeComercial())
                 .ofertaComunicacao(p.getOfertaComunicacao())
                 .preco(p.getPreco())
                 .build();
