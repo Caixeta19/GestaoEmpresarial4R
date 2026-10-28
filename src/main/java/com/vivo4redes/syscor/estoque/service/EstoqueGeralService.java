@@ -2,12 +2,14 @@ package com.vivo4redes.syscor.estoque.service;
 
 import com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoModeloDTO;
 import com.vivo4redes.syscor.estoque.dto.response.EstoqueDisponivelResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.ProdutoResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.ResultadoImportacaoDTO;
 import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.repository.EstoqueGeralRepository;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -363,6 +365,18 @@ public class EstoqueGeralService {
     @Transactional(readOnly = true)
     public EstoqueGeral buscarPorId(Long id) {
         return repository.findById(id).orElseThrow(() -> new RecursoNaoEncontradoException("Item de estoque"));
+    }
+
+    /** Catálogo para o PDV: unidades DISPONIVEL, com busca livre e filtro opcional de categoria. */
+    @Transactional(readOnly = true)
+    public List<ProdutoResponseDTO> listarCatalogo(String busca, CategoriaItemVenda categoria) {
+        String termo = busca == null ? "" : busca.trim();
+        return repository.buscarDisponiveis(StatusEstoque.DISPONIVEL, termo, "", PageRequest.of(0, LIMITE_MAXIMO_BUSCA))
+                .stream()
+                .filter(e -> categoria == null
+                        || (e.getCategoria() != null && e.getCategoria().equalsIgnoreCase(categoria.name())))
+                .map(ProdutoResponseDTO::from)
+                .toList();
     }
 
     @Transactional(readOnly = true)

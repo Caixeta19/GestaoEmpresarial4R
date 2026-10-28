@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.estoque.controller;
 
 import com.vivo4redes.syscor.estoque.dto.response.ProdutoResponseDTO;
+import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +19,7 @@ import java.util.List;
 @CrossOrigin(origins = "*")
 public class ProdutoController {
 
-    private final EstoqueService estoqueService;
+    private final EstoqueGeralService estoqueService;
 
     @GetMapping("/{id}")
     public ResponseEntity<ProdutoResponseDTO> buscarPorId(@PathVariable Long id) {
