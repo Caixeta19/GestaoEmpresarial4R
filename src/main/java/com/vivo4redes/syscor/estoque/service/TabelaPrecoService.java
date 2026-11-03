@@ -3,14 +3,19 @@ package com.vivo4redes.syscor.estoque.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vivo4redes.syscor.estoque.dto.response.ImportacaoTabelaPrecoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.PlanoVivoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.PrecoItemResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.TabelaPrecoResumoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.TabelaVigenteResponseDTO;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
-import com.vivo4redes.syscor.estoque.model.ProdutoPrecoPlano;
+import com.vivo4redes.syscor.estoque.model.PrecoItem;
 import com.vivo4redes.syscor.estoque.model.TabelaPrecoExecucao;
 import com.vivo4redes.syscor.estoque.repository.EstoqueGeralRepository;
-import com.vivo4redes.syscor.estoque.repository.ProdutoPrecoPlanoRepository;
+import com.vivo4redes.syscor.estoque.repository.PlanoVivoRepository;
+import com.vivo4redes.syscor.estoque.repository.PrecoItemRepository;
+import com.vivo4redes.syscor.estoque.repository.ProdutoVivoRepository;
 import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService.IndicesReferencia;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService.ResultadoReferencia;
@@ -20,6 +25,7 @@ import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaProd
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.util.TextoUtil;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +59,9 @@ public class TabelaPrecoService {
     private final TabelaPrecoTelefonicaParser parser;
     private final EstoqueGeralRepository estoqueGeralRepository;
     private final TabelaPrecoExecucaoRepository execucaoRepository;
-    private final ProdutoPrecoPlanoRepository precoPlanoRepository;
+    private final PrecoItemRepository precoItemRepository;
+    private final PlanoVivoRepository planoVivoRepository;
+    private final ProdutoVivoRepository produtoVivoRepository;
     private final PrecoVigenteService precoVigenteService;
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -185,8 +193,41 @@ public class TabelaPrecoService {
         return texto.length() <= max ? texto : texto.substring(0, max);
     }
 
-    // ------------------------------------------------------------------ consultas antigas (deprecadas)
+    // ------------------------------------------------------------------ consultas (API nova)
 
+    /** GET /produtos/precos/vigente. */
+    @Transactional(readOnly = true)
+    public TabelaVigenteResponseDTO buscarVigente() {
+        TabelaPrecoExecucao e = exigirVigente();
+        return new TabelaVigenteResponseDTO(e.getId(), e.getVigenciaEm(), e.getCriadoEm(), e.getNomeArquivo(),
+                new TabelaVigenteResponseDTO.Totais(precoItemRepository.countByExecucaoId(e.getId()),
+                        planoVivoRepository.countByExecucaoId(e.getId()), produtoVivoRepository.countByExecucaoId(e.getId()),
+                        e.getTotalProdutosAtualizados(), e.getTotalNaoEncontrados()));
+    }
+
+    /** GET /produtos/precos/planos — combo "Plano Ativo / Linha" da execução vigente. */
+    @Transactional(readOnly = true)
+    public List<PlanoVivoResponseDTO> listarPlanos(String busca, Boolean disponivelAlta) {
+        TabelaPrecoExecucao e = exigirVigente();
+        return planoVivoRepository.listar(e.getId(), TextoUtil.chave(busca), disponivelAlta).stream()
+                .map(PlanoVivoResponseDTO::from)
+                .toList();
+    }
+
+    /** GET /produtos/precos/item — preço de uma unidade do estoque (422 se sem preço). */
+    @Transactional(readOnly = true)
+    public PrecoItemResponseDTO precoDoItem(Long estoqueId, String plano, TabelaPreco tabela,
+                                            FormaPagamento pagamento, Integer parcelas) {
+        EstoqueGeral unidade = estoqueGeralRepository.findById(estoqueId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item de estoque"));
+        return PrecoItemResponseDTO.from(precoVigenteService.calcular(unidade, plano, tabela, pagamento, parcelas));
+    }
+
+    // ------------------------------------------------------------------ consultas antigas (deprecadas)
+    // Respondem a partir das tabelas novas, no formato antigo, até o syscor-frontend migrar.
+    // "Oferta" passa a ser o grupo do plano (PRE, VIVO_V...), sempre da TABELA REGULAR da execução vigente.
+
+    @Deprecated
     @Transactional(readOnly = true)
     public TabelaPrecoResumoResponseDTO buscarExecucao(Long execucaoId) {
         TabelaPrecoExecucao execucao = execucaoRepository.findById(execucaoId)
@@ -194,25 +235,41 @@ public class TabelaPrecoService {
         return TabelaPrecoResumoResponseDTO.from(execucao);
     }
 
+    /** Preços (TABELA REGULAR) da unidade por grupo do plano, na execução vigente. */
+    @Deprecated
     @Transactional(readOnly = true)
-    public List<ProdutoPrecoPlano> listarPrecosPorProduto(Long produtoId) {
-        if (!estoqueGeralRepository.existsById(produtoId)) {
-            throw new RecursoNaoEncontradoException("Produto");
-        }
-        return precoPlanoRepository.findByProdutoIdOrderByOfertaComunicacaoAsc(produtoId);
+    public List<PrecoItem> listarPrecosPorProduto(Long produtoId) {
+        EstoqueGeral unidade = estoqueGeralRepository.findById(produtoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Produto"));
+        TabelaPrecoExecucao e = exigirVigente();
+        String chave = precoVigenteService.chaveNomeDe(unidade, e.getId());
+        return precoItemRepository.findByExecucaoIdAndChaveNomeOrderByTabelaAscGrupoPlanoAsc(e.getId(), chave).stream()
+                .filter(p -> p.getTabela() == TabelaPreco.REGULAR)
+                .toList();
     }
 
+    /** Grupos de plano com preço na execução vigente. */
+    @Deprecated
     @Transactional(readOnly = true)
     public List<String> listarOfertasDisponiveis() {
-        TabelaPrecoExecucao ultima = execucaoRepository.findTopByOrderByCriadoEmDesc()
-                .orElseThrow(() -> new NegocioException("Nenhuma tabela de preço foi importada ainda."));
-        return precoPlanoRepository.listarOfertasDistintas(ultima.getId());
+        return precoItemRepository.gruposDistintos(exigirVigente().getId()).stream()
+                .sorted()
+                .map(GrupoPlano::name)
+                .toList();
     }
 
+    /** Itens com preço (TABELA REGULAR) para o grupo informado ("VIVO_V", "Vivo V", "PRÉ"...). */
+    @Deprecated
     @Transactional(readOnly = true)
-    public List<ProdutoPrecoPlano> listarProdutosPorOferta(String oferta) {
-        TabelaPrecoExecucao ultima = execucaoRepository.findTopByOrderByCriadoEmDesc()
+    public List<PrecoItem> listarProdutosPorOferta(String oferta) {
+        GrupoPlano grupo = GrupoPlano.deRotulo(oferta)
+                .orElseThrow(() -> new NegocioException("Oferta/grupo de plano desconhecido: '" + oferta + "'."));
+        return precoItemRepository.findByExecucaoIdAndTabelaAndGrupoPlanoOrderByNomeComercialAsc(
+                exigirVigente().getId(), TabelaPreco.REGULAR, grupo);
+    }
+
+    private TabelaPrecoExecucao exigirVigente() {
+        return precoVigenteService.vigente()
                 .orElseThrow(() -> new NegocioException("Nenhuma tabela de preço foi importada ainda."));
-        return precoPlanoRepository.listarPorExecucaoEOferta(ultima.getId(), oferta);
     }
 }

@@ -262,6 +262,46 @@ class TabelaPrecoServiceIntegracaoTest {
         assertThat(valor(vendido)).isEqualByComparingTo("5000.00");
     }
 
+    // ------------------------------------------------------------------ consultas da API
+
+    @Test
+    @DisplayName("Vigente, combo de planos e preço do item pela API do serviço")
+    void consultasDaApi() {
+        EstoqueGeral iphone = unidade("IP-1", IPHONE, null, StatusEstoque.DISPONIVEL);
+        ImportacaoTabelaPrecoResponseDTO r = service.importar(arquivo(0));
+
+        var vigente = service.buscarVigente();
+        assertThat(vigente.execucaoId()).isEqualTo(r.execucaoId());
+        assertThat(vigente.vigencia()).isEqualTo(LocalDate.of(2026, 11, 1));
+        assertThat(vigente.totais().planos()).isEqualTo(3);
+        assertThat(vigente.totais().precos()).isEqualTo(r.totalPrecos());
+
+        assertThat(service.listarPlanos(null, null)).hasSize(3);
+        assertThat(service.listarPlanos("vivo v", null)).extracting(p -> p.grupoPlano()).containsExactly(GrupoPlano.VIVO_V);
+        assertThat(service.listarPlanos(null, false)).extracting(p -> p.nomePlano()).containsExactly(PLANO_PRE);
+
+        var item = service.precoDoItem(iphone.getId(), PLANO_VIVO_V, null, FormaPagamento.PIX, null);
+        assertThat(item.nomeComercial()).isEqualTo(IPHONE);
+        assertThat(item.tabela()).isEqualTo(TabelaPreco.REGULAR);
+        assertThat(item.preco()).isEqualByComparingTo("10149.00");
+        assertThat(item.valorAplicado()).isEqualByComparingTo("9134.10");
+    }
+
+    @Test
+    @DisplayName("Endpoints deprecados respondem a partir da tabela nova (oferta = grupo do plano)")
+    void deprecadosSobreTabelaNova() {
+        EstoqueGeral iphone = unidade("IP-1", IPHONE, null, StatusEstoque.DISPONIVEL);
+        service.importar(arquivo(0));
+
+        assertThat(service.listarOfertasDisponiveis()).containsExactly("PRE", "VIVO_V", "SEM_PLANO");
+        assertThat(service.listarProdutosPorOferta("Vivo V")).extracting(PrecoItem::getNomeComercial)
+                .containsExactly(GALAXY, IPHONE);
+        assertThat(service.listarPrecosPorProduto(iphone.getId())).extracting(PrecoItem::getGrupoPlano)
+                .containsExactlyInAnyOrder(GrupoPlano.PRE, GrupoPlano.VIVO_V);
+        assertThatThrownBy(() -> service.listarProdutosPorOferta("Oferta Antiga de Marketing"))
+                .isInstanceOf(NegocioException.class);
+    }
+
     private BigDecimal valor(EstoqueGeral item, String plano, FormaPagamento forma, Integer parcelas) {
         return precoVigente.calcular(item, plano, TabelaPreco.REGULAR, forma, parcelas).valorAplicado();
     }
