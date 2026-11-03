@@ -131,7 +131,8 @@ public class TabelaPrecoService {
 
         TabelaPrecoExecucao execucao = TabelaPrecoExecucao.builder()
                 .nomeArquivo(arquivo.getOriginalFilename())
-                .vigenciaEm(resultado.vigenciaEm())
+                .vigenciaEm(resultado.vigenciaEm() == null ? null
+                        : java.time.LocalDate.parse(resultado.vigenciaEm(), java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")))
                 .totalLinhasProcessadas(resultado.linhasPreco().size())
                 .totalProdutosAtualizados(atualizados.size())
                 .totalNaoEncontrados(naoEncontrados)

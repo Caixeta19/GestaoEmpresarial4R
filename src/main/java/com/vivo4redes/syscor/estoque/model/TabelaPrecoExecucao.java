@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 /**
  * Cabeçalho de uma importação da tabela de preço da Telefônica (planilha
@@ -26,8 +27,8 @@ public class TabelaPrecoExecucao {
     private String nomeArquivo;
 
     /** Texto de "Vigência a partir de: DD/MM/AAAA" extraído da planilha, quando presente. */
-    @Column(name = "vigencia_em", length = 20)
-    private String vigenciaEm;
+    @Column(name = "vigencia_em")
+    private LocalDate vigenciaEm;
 
     @Column(name = "total_linhas_processadas", nullable = false)
     private Integer totalLinhasProcessadas;
