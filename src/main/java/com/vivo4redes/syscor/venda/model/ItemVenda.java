@@ -1,7 +1,10 @@
 package com.vivo4redes.syscor.venda.model;
 
+import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -123,6 +126,22 @@ public class ItemVenda {
 
     @Column(name = "serial_confirmado")
     private Boolean serialConfirmado;
+
+    // ---- Como o preço foi calculado (tabela vigente da Telefônica)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "grupo_plano", length = 30)
+    private GrupoPlano grupoPlano;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tabela_aplicada", length = 10)
+    private TabelaPreco tabelaAplicada;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "forma_pagamento", length = 30)
+    private FormaPagamento formaPagamento;
+
+    @Column(name = "parcelas")
+    private Integer parcelas;
 
     public BigDecimal getValorTotalItem() {
         return valorUnitario.multiply(quantidade).setScale(2, java.math.RoundingMode.HALF_UP);
