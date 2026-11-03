@@ -42,6 +42,7 @@ public class EstoqueGeralService {
 
     private final EstoqueGeralRepository repository;
     private final LeitorTabular leitor;
+    private final PrecoVigenteService precoVigenteService;
 
     // ======================================================================
     // Mapeamento coluna do arquivo -> campo da entidade
@@ -137,6 +138,7 @@ public class EstoqueGeralService {
 
         int inseridos = 0;
         int atualizados = 0;
+        List<EstoqueGeral> gravados = new ArrayList<>();
         List<String> seriais = new ArrayList<>(linhasPorSerial.keySet());
         for (int ini = 0; ini < seriais.size(); ini += TAMANHO_LOTE) {
             List<String> lote = seriais.subList(ini, Math.min(ini + TAMANHO_LOTE, seriais.size()));
@@ -150,7 +152,10 @@ public class EstoqueGeralService {
                 boolean novo = destino == null;
                 if (novo) destino = EstoqueGeral.builder().serial(serial).build();
                 try {
+                    // Unidade VENDIDO guarda o preço da época: o relatório não sobrescreve valor_venda dela.
+                    BigDecimal precoDaVenda = destino.getStatus() == StatusEstoque.VENDIDO ? destino.getValorVenda() : null;
                     aplicarLinha(destino, linha, porColuna);
+                    if (destino.getStatus() == StatusEstoque.VENDIDO) destino.setValorVenda(precoDaVenda);
                     destino.setSerial(serial); // garante a chave normalizada
                     paraSalvar.add(destino);
                     if (novo) inseridos++; else atualizados++;
@@ -159,9 +164,12 @@ public class EstoqueGeralService {
                     registrarErro(erros, "Linha " + linha.numero() + " (serial " + serial + "): " + ex.getMessage());
                 }
             }
-            repository.saveAll(paraSalvar);
+            gravados.addAll(repository.saveAll(paraSalvar));
             repository.flush();
         }
+
+        // Estoque novo ou atualizado recebe o preço da tabela vigente (DISPONIVEL/RESERVADO; VENDIDO não muda).
+        precoVigenteService.aplicarPrecoVigente(gravados);
 
         log.info("Importação do relatório Vivo: {} linhas, {} inseridos, {} atualizados, {} ignorados",
                 tabela.linhas().size(), inseridos, atualizados, ignorados);
