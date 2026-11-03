@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.estoque.repository;
 
+import com.vivo4redes.syscor.estoque.dto.response.EstoqueConsolidadoModeloDTO;
 import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,15 +11,21 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Busca do PDV (V1): IMEI completo ou parcial precisa encontrar a unidade DISPONIVEL.
@@ -40,6 +47,9 @@ class EstoqueGeralRepositoryTest {
 
     @Autowired
     private EstoqueGeralRepository repository;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @BeforeEach
     void popular() {
@@ -86,6 +96,52 @@ class EstoqueGeralRepositoryTest {
     @DisplayName("Termo vazio traz todas as unidades disponíveis")
     void termoVazio() {
         assertThat(seriais("", "", "")).containsExactlyInAnyOrder(IMEI_A15, IMEI_IPHONE);
+    }
+
+    // ---- V21: literais do enum x CHECK do banco
+
+    @Test
+    @DisplayName("Todo valor de StatusEstoque é aceito pelo CHECK do banco")
+    void checkAceitaTodosOsStatusDoEnum() {
+        int i = 0;
+        for (StatusEstoque status : StatusEstoque.values()) {
+            repository.saveAndFlush(unidade("CHK" + i++, "Modelo", "Marca", "LOJA01", status));
+        }
+        assertThat(repository.findByStatus(StatusEstoque.DEFEITO)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("CHECK rejeita o literal antigo AVARIADO")
+    void checkRejeitaAvariado() {
+        assertThatThrownBy(() -> jdbc.update(
+                "INSERT INTO tb_estoque_geral (serial, status) VALUES ('AVR1', 'AVARIADO')"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("chk_estoque_geral_status");
+    }
+
+    // ---- V5: consolidado por modelo
+
+    @Test
+    @DisplayName("Consolidado conta disponível, reservado e defeito por modelo, sem contar vendido")
+    void consolidaPorModelo() {
+        repository.saveAllAndFlush(List.of(
+                unidade("M1", "Galaxy A15", "Samsung", "LOJA01", StatusEstoque.RESERVADO),
+                unidade("M2", "Galaxy A15", "Samsung", "LOJA01", StatusEstoque.DEFEITO),
+                unidade("M3", "Galaxy A15", "Samsung", "LOJA01", StatusEstoque.DEFEITO)));
+
+        Map<String, EstoqueConsolidadoModeloDTO> porModelo = repository.consolidarPorModelo().stream()
+                .collect(Collectors.toMap(EstoqueConsolidadoModeloDTO::modeloComercial, Function.identity()));
+
+        // Galaxy A15: 1 disponível (popular), 1 vendido (popular, não entra), 1 reservado, 2 defeito
+        EstoqueConsolidadoModeloDTO a15 = porModelo.get("Galaxy A15");
+        assertThat(a15.disponivel()).isEqualTo(1L);
+        assertThat(a15.reservado()).isEqualTo(1L);
+        assertThat(a15.defeito()).isEqualTo(2L);
+
+        EstoqueConsolidadoModeloDTO iphone = porModelo.get("iPhone 15");
+        assertThat(iphone.disponivel()).isEqualTo(1L);
+        assertThat(iphone.reservado()).isZero();
+        assertThat(iphone.defeito()).isZero();
     }
 
     private List<String> seriais(String serial, String termo, String filial) {

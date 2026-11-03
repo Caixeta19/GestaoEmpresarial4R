@@ -501,7 +501,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/filiais/{id}` | Buscar filial |
 | POST | `/usuarios` | Cadastrar usuário/vendedor |
 | GET | `/usuarios/{id}` | Buscar usuário |
-| GET | `/estoque/consolidado` | Estoque consolidado por produto |
+| GET | `/estoque/consolidado` | Estoque consolidado por produto (`disponivel`, `reservado`, `defeito`; `avariado` é alias obsoleto de `defeito`) |
 | GET | `/estoque/alertas` | Produtos em nível crítico de estoque |
 | POST | `/estoque/entrada-seriais` | Dar entrada em seriais/IMEIs |
 | POST | `/estoque/inventario/importar-sap` | Importar relatório IQ09 (multipart) e conciliar |

@@ -263,7 +263,7 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 
 ## 6. Modelo de dados
 
-O schema tem 20 migrations Flyway (V1 a V20) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V21 em diante.
+O schema tem 21 migrations Flyway (V1 a V21) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V22 em diante.
 
 | Tabela | Módulo | Conteúdo | Migrations |
 | --- | --- | --- | --- |
@@ -273,7 +273,7 @@ O schema tem 20 migrations Flyway (V1 a V20) em `src/main/resources/db/migration
 | `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário, total, status, procedência, score | V1–V3, V13 |
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id` | V1, V4, V8, V13, V14, V19, V20 |
 | `pagamentos_venda` | venda | Pagamentos por forma | V8 |
-| `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status, `version` | V19 |
+| `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21 |
 | `tb_inventario_execucao` / `tb_inventario_item` | estoque | Execuções e linhas da conciliação SAP | V5 |
 | `tb_tabela_preco_execucao` / `tb_produto_preco_plano` | estoque | Importações da Telefônica e preço por oferta | V6, V19 |
 | `tb_protocolo_documental` | gestao | Protocolo 1:1 com a venda | V9 |
@@ -422,7 +422,7 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 
 | # | Problema | Evidência | Correção sugerida |
 | --- | --- | --- | --- |
-| 1 | Enum `StatusEstoque` tem `DEFEITO`, mas o `CHECK` da V19 aceita `AVARIADO` | `StatusEstoque.java` x `chk_estoque_geral_status` | **Decidido: `DEFEITO`.** V21 troca `AVARIADO` por `DEFEITO` no `CHECK` |
+| 1 | Enum `StatusEstoque` tem `DEFEITO`, mas o `CHECK` da V19 aceita `AVARIADO` | `StatusEstoque.java` x `chk_estoque_geral_status` | ✅ **Corrigido (V21).** `CHECK` aceita `DEFEITO`; linhas `AVARIADO` foram convertidas |
 | 2 | Sem RBAC: qualquer token válido acessa financeiro, importações e cadastro de usuário | `UsuarioDetailsService.papel()` já gera `ROLE_<CARGO>` (ex.: GERENTE DE ÁREA → `ROLE_GERENTE_DE_AREA`), mas nenhuma rota usa `hasRole` | Levantar os cargos com `SELECT DISTINCT cargo FROM usuarios`, montar a matriz cargo × rota e aplicar `@EnableMethodSecurity` + `@PreAuthorize` |
 | 3 | Webhook do BB autentica comparando o parâmetro `hmac` com um segredo, mas o BB autentica por **mTLS com certificado A1** e não envia segredo | `BancoDoBrasilAdapter.autenticar` | Exigir certificado de cliente do BB: terminar o mTLS no proxy/load balancer (ou `server.ssl.client-auth=need` no Tomcat), validar a cadeia da AC do BB, repassar o subject do certificado ao app e checar no `BancoDoBrasilAdapter`; manter allowlist de IP e remover o `hmac` |
 | 4 | O carrinho baixa o serial para `VENDIDO` no momento em que o item entra, antes de a venda concluir | `VendaService.adicionarItem` chama `baixarNaVenda` | **Decidido:** `RESERVADO` ao adicionar, `VENDIDO` ao concluir, volta a `DISPONIVEL` ao remover/cancelar; expirar carrinhos abandonados |
@@ -442,7 +442,7 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 A ordem segue o backlog do produto (Épico 0 → Clientes → Estoque → Vendas → Financeiro → Documental → Fiscal → Integrações → BI), começando pelos riscos da seção 9. Cada etapa termina com testes passando no CI.
 
 1. **Estabilização (1 sprint)**
-   - V21: trocar `AVARIADO` por `DEFEITO` no `chk_estoque_geral_status` (bug 1).
+   - ✅ V21: trocar `AVARIADO` por `DEFEITO` no `chk_estoque_geral_status` (bug 1).
    - Corrigir `AuthController` (bugs 6 e 7), a autenticação do webhook BB por mTLS (bug 3) e a senha fixa de primeiro acesso (bug 14).
    - Remover arquivos de lixo e reescrever o README a partir deste documento.
    - Critério de aceite: `./mvnw verify` verde, `docker compose up --build` sobe e `GET /api/actuator/health` retorna `UP` (liberar /actuator/health no SecurityConfig).
@@ -484,7 +484,7 @@ A venda é a primeira fase. Ela só fica utilizável no PDV depois de corrigir a
 | V2 | Item que entrou no estoque depois da última tabela fica sem preço | `TabelaPrecoService.importar` grava o preço em `valor_venda` só das unidades `DISPONIVEL` que existem no momento da importação; `importarRelatorioVivo` não aplica o preço vigente nas unidades novas | Ao importar estoque (e ao consultar no PDV), aplicar o preço da tabela vigente pelo código/modelo |
 | V3 | Combo "Tabela de Preço" vazio ou com preços antigos | `tb_produto_preco_plano.produto_id` guarda só o id de **uma** unidade ("representante") e `listarPrecosPorProduto` não filtra pela importação mais recente | Guardar a chave do produto (código SAP ou modelo normalizado) na linha de preço (V22) e buscar por essa chave **na execução mais recente** |
 | V4 | O preço do item pode ser digitado/alterado pelo front | `VendaService.adicionarItem` aceita `valorUnitario` do request sem conferir com a tabela | Resolver o preço no backend pela tabela escolhida (`tabelaPreco` = oferta); só desconto/acréscimo vem do front |
-| V5 | Consolidado de estoque pode falhar | `consolidarPorModelo` usa o literal `'AVARIADO'` | Trocar por `DEFEITO` junto com a V21 |
+| V5 | Consolidado de estoque pode falhar | `consolidarPorModelo` usa o literal `'AVARIADO'` | ✅ **Corrigido.** A query usa as constantes do enum (`StatusEstoque.DEFEITO`); o DTO expõe `defeito` e mantém `avariado` como alias `@Deprecated` até o syscor-frontend migrar |
 
 **Regra de preço desejada**
 

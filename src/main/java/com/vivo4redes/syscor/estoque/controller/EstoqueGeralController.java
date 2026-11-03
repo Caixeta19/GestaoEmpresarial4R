@@ -59,7 +59,7 @@ public class EstoqueGeralController {
         return ResponseEntity.ok(service.buscarDisponivelPorSerial(serial));
     }
 
-    /** Saldo por modelo (Disponível / Reservado / Avariado). */
+    /** Saldo por modelo (Disponível / Reservado / Defeito). */
     @GetMapping("/consolidado")
     public ResponseEntity<List<EstoqueConsolidadoModeloDTO>> consolidado() {
         return ResponseEntity.ok(service.consolidarPorModelo());

@@ -90,9 +90,9 @@ public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long
         e.modeloComercial,
         MAX(e.marca),
         e.categoria,
-        SUM(CASE WHEN e.status = 'DISPONIVEL' THEN 1 ELSE 0 END),
-        SUM(CASE WHEN e.status = 'RESERVADO' THEN 1 ELSE 0 END),
-        SUM(CASE WHEN e.status = 'AVARIADO' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN e.status = com.vivo4redes.syscor.estoque.enums.StatusEstoque.DISPONIVEL THEN 1 ELSE 0 END),
+        SUM(CASE WHEN e.status = com.vivo4redes.syscor.estoque.enums.StatusEstoque.RESERVADO THEN 1 ELSE 0 END),
+        SUM(CASE WHEN e.status = com.vivo4redes.syscor.estoque.enums.StatusEstoque.DEFEITO THEN 1 ELSE 0 END),
         MIN(e.valorVenda))
     FROM EstoqueGeral e
     GROUP BY e.modeloComercial, e.categoria
