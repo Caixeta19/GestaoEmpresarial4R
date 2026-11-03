@@ -1,6 +1,9 @@
 package com.vivo4redes.syscor.venda.dto.request;
 
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -26,8 +29,10 @@ public record ItemVendaRequestDTO(
         @DecimalMin(value = "0.001", message = "quantidade deve ser maior que zero")
         BigDecimal quantidade,
 
-        /** Pode ser 0 em SERVICO_VIVO (plano cobrado na fatura); fora de serviço deve ser maior que zero (validado no service). */
-        @NotNull(message = "valorUnitario é obrigatório")
+        /**
+         * Ignorado em PRODUTO_VIVO e ACESSORIO: o preço vem da tabela vigente da Telefônica (plano, tabela e pagamento).
+         * Usado só em RECARGA (deve ser maior que zero). Serviço Vivo entra com 0.
+         */
         @PositiveOrZero(message = "valorUnitario não pode ser negativo")
         @Digits(integer = 10, fraction = 2, message = "valorUnitario deve ter no máximo 2 casas decimais")
         BigDecimal valorUnitario,
@@ -58,6 +63,14 @@ public record ItemVendaRequestDTO(
         Boolean simcardDoado,
         BigDecimal descontoChip,
         BigDecimal valorChip,
-        Boolean serialConfirmado
+        Boolean serialConfirmado,
+
+        /** Forma de pagamento usada no preço do item (PIX -> preço PIX; crédito em 13x–21x -> parcela). Opcional: preço cheio. */
+        FormaPagamento formaPagamento,
+
+        /** Número de parcelas no crédito (1 a 21). Opcional. */
+        @Min(value = 1, message = "parcelas deve ser no mínimo 1")
+        @Max(value = 21, message = "parcelas deve ser no máximo 21")
+        Integer parcelas
 ) {
 }

@@ -1,5 +1,7 @@
 package com.vivo4redes.syscor.venda.dto.response;
 
+import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
@@ -40,7 +42,8 @@ public record VendaResponseDTO(
             BigDecimal valorAcrescimo, BigDecimal desconto, Boolean cupom, String vencimentoFatura,
             String numeroAcesso, String sistemaOrigem, String numOrdemNext, String numSolicitacaoGed,
             String simcard3g, String simcard4g, Boolean clientePossuiSimcard, Boolean simcardDoado,
-            BigDecimal descontoChip, BigDecimal valorChip, Boolean serialConfirmado
+            BigDecimal descontoChip, BigDecimal valorChip, Boolean serialConfirmado,
+            GrupoPlano grupoPlano, TabelaPreco tabelaAplicada, FormaPagamento formaPagamento, Integer parcelas
     ) {
         static ItemDTO from(ItemVenda i) {
             return new ItemDTO(
@@ -51,7 +54,8 @@ public record VendaResponseDTO(
                     i.getValorAcrescimo(), i.getDesconto(), i.getCupom(), i.getVencimentoFatura(),
                     i.getNumeroAcesso(), i.getSistemaOrigem(), i.getNumOrdemNext(), i.getNumSolicitacaoGed(),
                     i.getSimcard3g(), i.getSimcard4g(), i.getClientePossuiSimcard(), i.getSimcardDoado(),
-                    i.getDescontoChip(), i.getValorChip(), i.getSerialConfirmado()
+                    i.getDescontoChip(), i.getValorChip(), i.getSerialConfirmado(),
+                    i.getGrupoPlano(), i.getTabelaAplicada(), i.getFormaPagamento(), i.getParcelas()
             );
         }
     }
