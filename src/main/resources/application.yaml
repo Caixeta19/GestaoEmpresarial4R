@@ -59,6 +59,9 @@ management:
 syscor:
   jwt:
     secret: ${SYSCOR_JWT_SECRET}
+  precos:
+    # Regra 6 da tabela da Telefônica: o PVP do aparelho NÃO inclui o chip, que tem preço fixo.
+    chip: ${SYSCOR_PRECO_CHIP:13.00}
   carrinho:
     # Venda ABERTA sem atividade há mais que isso é cancelada e libera o estoque reservado.
     expiracao: ${SYSCOR_CARRINHO_EXPIRACAO:24h}

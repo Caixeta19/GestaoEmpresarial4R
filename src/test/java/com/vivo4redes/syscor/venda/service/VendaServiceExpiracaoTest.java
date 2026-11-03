@@ -2,6 +2,8 @@ package com.vivo4redes.syscor.venda.service;
 
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
+import com.vivo4redes.syscor.estoque.service.PrecoVigenteService;
+import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.exception.CarrinhoNaoEditavelException;
 import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
@@ -48,6 +50,8 @@ class VendaServiceExpiracaoTest {
     @Mock private NumeroVendaGenerator numeroVendaGenerator;
     @Mock private EstoqueGeralService estoqueService;
     @Mock private PagamentoVendaRepository pagamentoVendaRepository;
+    @Mock private PrecoVigenteService precoVigenteService;
+    @Mock private ResolvedorTabela resolvedorTabela;
 
     @InjectMocks
     private VendaService service;

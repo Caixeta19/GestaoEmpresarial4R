@@ -25,7 +25,8 @@ public class TabelaPrecoResumoResponseDTO {
         return TabelaPrecoResumoResponseDTO.builder()
                 .execucaoId(e.getId())
                 .nomeArquivo(e.getNomeArquivo())
-                .vigenciaEm(e.getVigenciaEm())
+                .vigenciaEm(e.getVigenciaEm() == null ? null
+                        : e.getVigenciaEm().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")))
                 .dataExecucao(e.getCriadoEm())
                 .totalLinhasProcessadas(e.getTotalLinhasProcessadas())
                 .totalProdutosAtualizados(e.getTotalProdutosAtualizados())

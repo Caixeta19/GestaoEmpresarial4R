@@ -265,7 +265,7 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 
 ## 6. Modelo de dados
 
-O schema tem 23 migrations Flyway (V1 a V23) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V24 em diante.
+O schema tem 24 migrations Flyway (V1 a V24) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V25 em diante.
 
 | Tabela | Módulo | Conteúdo | Migrations |
 | --- | --- | --- | --- |
@@ -277,7 +277,10 @@ O schema tem 23 migrations Flyway (V1 a V23) em `src/main/resources/db/migration
 | `pagamentos_venda` | venda | Pagamentos por forma | V8 |
 | `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22, V23 |
 | `tb_inventario_execucao` / `tb_inventario_item` | estoque | Execuções e linhas da conciliação SAP | V5 |
-| `tb_tabela_preco_execucao` / `tb_produto_preco_plano` | estoque | Importações da Telefônica e preço por oferta | V6, V19 |
+| `tb_tabela_preco_execucao` | estoque | Uma linha por upload da tabela da Telefônica; a mais recente é a vigente (`vigencia_em DATE`) | V6, V24 |
+| `tb_preco_item` | estoque | Preço por Nome Comercial × tabela (`REGULAR`/`RENOVA`) × grupo do plano: cheio, PIX e 13x–21x (`parcelas JSONB`) | V24 |
+| `tb_plano_vivo` / `tb_produto_vivo` | estoque | Abas PLANOS (plano → grupo de preço) e PRODUTOS (Cod_Sap → Nome Comercial), por execução | V24 |
+| `tb_produto_preco_plano` | estoque | **Fora de uso desde a V24** (será removida numa migration futura) | V6, V19 |
 | `tb_protocolo_documental` | gestao | Protocolo 1:1 com a venda | V9 |
 | `tb_campanha_mailing` / `tb_destinatario_mailing` | mailing | Campanhas e destinatários | V7 |
 | `tb_titulo_financeiro` | financeiro | Títulos a pagar/receber, identificador de pagamento, código de barras | V10, V16 |
@@ -366,8 +369,11 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | GET | `/produtos`, `/produtos/{id}` | Catálogo (derivado do estoque geral) |
 | POST | `/estoque/inventario/importar-sap` | Importar IQ09 e conciliar |
 | GET | `/estoque/inventario/{execucaoId}` | Resumo da execução |
-| POST | `/produtos/precos/importar-telefonica` | Importar tabela da Telefônica |
-| GET | `/produtos/precos/execucoes/{id}`, `/produtos/precos/produtos/{produtoId}`, `/produtos/precos/ofertas`, `/produtos/precos?oferta=` | Consultas de preço |
+| POST | `/produtos/precos/importar-telefonica` | Importar tabela da Telefônica (relatório da importação) |
+| GET | `/produtos/precos/vigente` | Execução vigente e totais |
+| GET | `/produtos/precos/planos?busca=&disponivelAlta=` | Planos da vigente (combo "Plano Ativo / Linha") |
+| GET | `/produtos/precos/item?estoqueId=&plano=&tabela=&pagamento=&parcelas=` | Preço de uma unidade (422 se sem preço) |
+| GET | `/produtos/precos/execucoes/{id}`, `/produtos/precos/produtos/{produtoId}`, `/produtos/precos/ofertas`, `/produtos/precos?oferta=` | **Deprecados**: formato antigo, respondendo da tabela nova (oferta = grupo do plano) |
 
 **Documental, mailing e dashboard**
 
@@ -483,25 +489,27 @@ A venda é a primeira fase. Ela só fica utilizável no PDV depois de corrigir a
 | # | Sintoma no PDV | Causa no código | Correção |
 | --- | --- | --- | --- |
 | V1 | Digita o IMEI e o produto não aparece para selecionar | `EstoqueGeralService.buscarDisponiveis` e `listarCatalogo` chamam `repository.buscarDisponiveis(status, termo, filial, page)`. Com 4 argumentos o Java escolhe a sobrecarga `(status, categoria, termo, page)`: o IMEI vira filtro de **categoria** e a busca volta vazia. O commit `b3deace` criou `buscarDisponiveisPorFiltro` para isso, mas o service não foi trocado | ✅ **Corrigido.** Os dois métodos chamam `buscarDisponiveisPorFiltro(status, serial, termo, filial, page)`: `serial` = termo normalizado com `serial()` (comparado com o IMEI), `termo` = texto com `trim()` (modelo/marca/código, preserva espaços como em "Galaxy A15"); sobrecargas antigas apagadas; testes em `EstoqueGeralRepositoryTest` (Testcontainers, IMEI completo e parcial) e `EstoqueGeralServiceBuscaTest` |
-| V2 | Item que entrou no estoque depois da última tabela fica sem preço | `TabelaPrecoService.importar` grava o preço em `valor_venda` só das unidades `DISPONIVEL` que existem no momento da importação; `importarRelatorioVivo` não aplica o preço vigente nas unidades novas | Ao importar estoque (e ao consultar no PDV), aplicar o preço da tabela vigente pelo código/modelo |
-| V3 | Combo "Tabela de Preço" vazio ou com preços antigos | `tb_produto_preco_plano.produto_id` guarda só o id de **uma** unidade ("representante") e `listarPrecosPorProduto` não filtra pela importação mais recente | Guardar a chave do produto (código SAP ou modelo normalizado) na linha de preço (V22) e buscar por essa chave **na execução mais recente** |
-| V4 | O preço do item pode ser digitado/alterado pelo front | `VendaService.adicionarItem` aceita `valorUnitario` do request sem conferir com a tabela | Resolver o preço no backend pela tabela escolhida (`tabelaPreco` = oferta); só desconto/acréscimo vem do front |
+| V2 | Item que entrou no estoque depois da última tabela fica sem preço | `TabelaPrecoService.importar` gravava o preço só nas unidades existentes no upload | ✅ **Corrigido (V24).** O upload atualiza `valor_venda` de todas as unidades `DISPONIVEL`/`RESERVADO` e `importarRelatorioVivo` aplica o preço vigente ao estoque novo |
+| V3 | Combo "Tabela de Preço" vazio ou com preços antigos | `tb_produto_preco_plano` apontava para uma unidade "representante" e não filtrava pela importação mais recente | ✅ **Corrigido (V24).** Preço guardado por Nome Comercial (`chave_nome`) em `tb_preco_item`, sempre lido da execução vigente |
+| V4 | O preço do item pode ser digitado/alterado pelo front | `VendaService.adicionarItem` aceitava `valorUnitario` do request | ✅ **Corrigido.** Aparelho e acessório têm o preço calculado no backend (plano, tabela, pagamento); o valor do front é ignorado |
 | V5 | Consolidado de estoque pode falhar | `consolidarPorModelo` usa o literal `'AVARIADO'` | ✅ **Corrigido.** A query usa as constantes do enum (`StatusEstoque.DEFEITO`); o DTO expõe `defeito` e mantém `avariado` como alias `@Deprecated` até o syscor-frontend migrar |
 
-**Regra de preço desejada**
+**Regra de preço (implementada na V24)**
+
+O preço de um aparelho depende de: produto (Nome Comercial) + grupo do plano do cliente + tabela (Regular/Renova) + forma de pagamento.
 
 1. Cada upload da tabela da Telefônica cria uma nova execução; a mais recente é a **vigente**.
-2. O preço de um item = preço da tabela vigente para (código/modelo do item, oferta escolhida no PDV).
-3. Ao importar uma nova tabela, `valor_venda` de todas as unidades `DISPONIVEL` e `RESERVADO` do modelo é atualizado; unidades `VENDIDO` guardam o preço da época no `itens_venda`.
-4. Unidade sem preço na tabela vigente aparece no PDV com aviso "sem preço na tabela" e não pode ser vendida.
-5. A tela de importação mostra os itens não encontrados (`encontrado = false`) para correção do cadastro.
+2. Estoque → Nome Comercial: `codigo_acessorio` presente em PRODUTOS.Cod_Sap usa aquele nome; senão, o `modelo_comercial` normalizado. Plano → grupo pelo `GRUPAMENTO ATUAL` da aba PLANOS (nome, COD SISTEMA ou COD SAP); sem plano/pré-pago = `PRE`. Tabela `RENOVA` quando o `tipoServico` indica troca de aparelho ("troca"/"renova"), senão `REGULAR` (`ResolvedorTabela`). Itens que só existem nas abas sem plano usam `SEM_PLANO`/`REGULAR`. Pagamento: PIX → `preco_pix`; crédito até 12x, débito, dinheiro → `preco`; 13x–21x → `parcelas`. Chip com preço fixo `syscor.precos.chip` (13,00). A "Oferta de Comunicação" da planilha não entra no cálculo.
+3. `valor_venda` (referência) = preço `REGULAR`/`PRE` cheio da vigente, atualizado a cada upload em todas as unidades `DISPONIVEL` e `RESERVADO` e ao importar estoque novo; unidades `VENDIDO` não mudam (guardam o preço da época, também em `itens_venda`).
+4. Unidade sem preço na tabela vigente não pode ser vendida: `adicionarItem` responde 422 "Item sem preço na tabela vigente (<nome comercial>)."
+5. O upload devolve `estoqueSemPreco` (modelos do estoque sem preço) e `planilhaSemEstoque` (itens da planilha sem estoque), para correção do cadastro. A importação é toda numa transação: se falhar, a vigente continua a anterior.
 
 **Ordem de execução no Claude Code**
 
 1. V1 (busca por IMEI) — correção pequena, destrava o PDV.
 2. V21: `DEFEITO` no `CHECK` + V5.
 3. ✅ Reserva no carrinho: `RESERVADO` ao adicionar, `VENDIDO` ao concluir (bug 4), com expiração de carrinhos abandonados após 24h (RN.49).
-4. V2, V3 e V4: preço pela tabela vigente.
+4. ✅ V2, V3 e V4: preço pela tabela vigente (V24).
 5. Testes de `VendaService` e `EstoqueGeralService` cobrindo RN.11 a RN.27.
 
 ## 11. Instruções para o Claude Code

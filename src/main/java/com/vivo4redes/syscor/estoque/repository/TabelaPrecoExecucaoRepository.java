@@ -9,4 +9,7 @@ import java.util.Optional;
 @Repository
 public interface TabelaPrecoExecucaoRepository extends JpaRepository<TabelaPrecoExecucao, Long> {
     Optional<TabelaPrecoExecucao> findTopByOrderByCriadoEmDesc();
+
+    /** Execução vigente = a mais recente (id crescente; desempata uploads no mesmo instante). */
+    Optional<TabelaPrecoExecucao> findTopByOrderByIdDesc();
 }

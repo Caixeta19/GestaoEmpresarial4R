@@ -32,6 +32,7 @@ class EstoqueGeralServiceBuscaTest {
 
     @Mock
     private LeitorTabular leitor;
+    @Mock private PrecoVigenteService precoVigenteService;
 
     @InjectMocks
     private EstoqueGeralService service;

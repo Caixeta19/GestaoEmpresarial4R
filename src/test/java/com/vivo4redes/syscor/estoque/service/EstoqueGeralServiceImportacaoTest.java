@@ -34,6 +34,7 @@ class EstoqueGeralServiceImportacaoTest {
 
     @Mock private EstoqueGeralRepository repository;
     @Mock private LeitorTabular leitor;
+    @Mock private PrecoVigenteService precoVigenteService;
 
     @InjectMocks
     private EstoqueGeralService service;

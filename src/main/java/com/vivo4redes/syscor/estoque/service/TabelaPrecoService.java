@@ -1,151 +1,233 @@
 package com.vivo4redes.syscor.estoque.service;
 
-import com.vivo4redes.syscor.estoque.dto.LinhaPrecoDTO;
-import com.vivo4redes.syscor.util.EstoqueUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vivo4redes.syscor.estoque.dto.response.ImportacaoTabelaPrecoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.PlanoVivoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.PrecoItemResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.TabelaPrecoResumoResponseDTO;
-import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
+import com.vivo4redes.syscor.estoque.dto.response.TabelaVigenteResponseDTO;
+import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
-import com.vivo4redes.syscor.estoque.model.ProdutoPrecoPlano;
+import com.vivo4redes.syscor.estoque.model.PrecoItem;
 import com.vivo4redes.syscor.estoque.model.TabelaPrecoExecucao;
 import com.vivo4redes.syscor.estoque.repository.EstoqueGeralRepository;
-import com.vivo4redes.syscor.estoque.repository.ProdutoPrecoPlanoRepository;
+import com.vivo4redes.syscor.estoque.repository.PlanoVivoRepository;
+import com.vivo4redes.syscor.estoque.repository.PrecoItemRepository;
+import com.vivo4redes.syscor.estoque.repository.ProdutoVivoRepository;
 import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
+import com.vivo4redes.syscor.estoque.service.PrecoVigenteService.IndicesReferencia;
+import com.vivo4redes.syscor.estoque.service.PrecoVigenteService.ResultadoReferencia;
+import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaPlano;
+import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaPreco;
+import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaProduto;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.util.TextoUtil;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * Importação diária (upload manual) da tabela de preço da Telefônica.
- * Escopo v1: só TABELA REGULAR, um preço por (item, oferta de comunicação/plano).
- * Atualiza na hora, sem aprovação; o histórico fica em ProdutoPrecoPlano.
- *
- * Sem tb_produto, o "produto" da planilha é resolvido direto em tb_estoque_geral:
- * por código de acessório (= Cod_Sap) ou pelo modelo comercial (nome normalizado).
- * O preço novo vai para valor_venda das linhas DISPONÍVEIS — unidades já vendidas
- * mantêm o preço da época.
+ * Importação (upload manual) da tabela de preços da Telefônica.
+ * <p>
+ * Cada upload cria uma execução; a mais recente é a VIGENTE. Tudo roda numa transação só (regra 11):
+ * se algo falhar, nada da execução nova fica gravado e a vigente continua a anterior.
+ * <p>
+ * Grava preços (tb_preco_item), planos (tb_plano_vivo) e produtos (tb_produto_vivo) da execução e atualiza o
+ * preço de referência ({@code valor_venda}) das unidades DISPONIVEL e RESERVADO (regra 7). VENDIDO não muda.
+ * {@code tb_produto_preco_plano} deixou de ser gravada.
  */
 @Service
 @RequiredArgsConstructor
 public class TabelaPrecoService {
 
+    private static final Logger log = LoggerFactory.getLogger(TabelaPrecoService.class);
+    private static final DateTimeFormatter DD_MM_YYYY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final int TAMANHO_LOTE = 1000;
+
     private final TabelaPrecoTelefonicaParser parser;
     private final EstoqueGeralRepository estoqueGeralRepository;
     private final TabelaPrecoExecucaoRepository execucaoRepository;
-    private final ProdutoPrecoPlanoRepository precoPlanoRepository;
+    private final PrecoItemRepository precoItemRepository;
+    private final PlanoVivoRepository planoVivoRepository;
+    private final ProdutoVivoRepository produtoVivoRepository;
+    private final PrecoVigenteService precoVigenteService;
+    private final JdbcTemplate jdbc;
+    private final ObjectMapper objectMapper;
 
     @Transactional
-    public TabelaPrecoResumoResponseDTO importar(MultipartFile arquivo) {
-        ResultadoParseTabelaPreco resultado = parser.parsear(arquivo);
+    public ImportacaoTabelaPrecoResponseDTO importar(MultipartFile arquivo) {
+        ResultadoParseTabelaPreco lido = parser.parsear(arquivo);
 
-        // Índices carregados uma vez (evita N+1): por código de acessório e por modelo comercial.
-        Map<String, List<EstoqueGeral>> porCodigo = new HashMap<>();
-        Map<String, List<EstoqueGeral>> porModelo = new HashMap<>();
-        for (EstoqueGeral e : estoqueGeralRepository.findAll()) {
-            if (EstoqueUtil.ehAcessorio(e)) {
-                porCodigo.computeIfAbsent(e.getCodigoAcessorio().trim().toUpperCase(Locale.ROOT), k -> new ArrayList<>()).add(e);
-            }
-            if (e.getModeloComercial() != null && !e.getModeloComercial().isBlank()) {
-                porModelo.computeIfAbsent(normalizarChave(e.getModeloComercial()), k -> new ArrayList<>()).add(e);
-            }
-        }
-
-        List<ProdutoPrecoPlano> itens = new ArrayList<>();
-        Set<Long> atualizados = new HashSet<>();
-        Map<Long, EstoqueGeral> linhasAlteradas = new LinkedHashMap<>();
-        int naoEncontrados = 0;
-
-        // Sem variação por plano (oferta == null): o preço vira valor_venda direto.
-        // Com variação por plano: valor_venda vira referência "a partir de" (o menor entre os planos).
-        Map<Long, BigDecimal> menorPrecoPorLinha = new HashMap<>();
-        Set<Long> comPrecoFixo = new HashSet<>();
-
-        for (LinhaPrecoDTO linha : resultado.linhasPreco()) {
-            String chaveNome = normalizarChave(linha.nomeComercial());
-            Set<String> skusCandidatos = resultado.indiceSkuPorNomeComercial().getOrDefault(chaveNome, Set.of());
-
-            Map<Long, EstoqueGeral> resolvidas = new LinkedHashMap<>();
-            for (String sku : skusCandidatos) {
-                for (EstoqueGeral e : porCodigo.getOrDefault(sku.trim().toUpperCase(Locale.ROOT), List.of())) {
-                    resolvidas.put(e.getId(), e);
-                }
-            }
-            for (EstoqueGeral e : porModelo.getOrDefault(chaveNome, List.of())) {
-                resolvidas.put(e.getId(), e);
-            }
-
-            if (resolvidas.isEmpty()) {
-                naoEncontrados++;
-                itens.add(ProdutoPrecoPlano.builder()
-                        .produtoId(null)
-                        .skuResolvido(null)
-                        .nomeComercial(linha.nomeComercial())
-                        .categoriaPlanilha(linha.categoriaPlanilha())
-                        .ofertaComunicacao(linha.ofertaComunicacao())
-                        .preco(linha.preco())
-                        .encontrado(false)
-                        .build());
-                continue;
-            }
-
-            // Mesmo nome pode apontar para várias linhas (cores/unidades): todas recebem o mesmo preço.
-            EstoqueGeral representante = resolvidas.values().iterator().next();
-            atualizados.add(representante.getId());
-            itens.add(ProdutoPrecoPlano.builder()
-                    .produtoId(representante.getId())
-                    .skuResolvido(truncar(skuDe(representante), 40))
-                    .nomeComercial(linha.nomeComercial())
-                    .categoriaPlanilha(linha.categoriaPlanilha())
-                    .ofertaComunicacao(linha.ofertaComunicacao())
-                    .preco(linha.preco())
-                    .encontrado(true)
-                    .build());
-
-            for (EstoqueGeral e : resolvidas.values()) {
-                if (e.getStatus() != StatusEstoque.DISPONIVEL) {
-                    continue;
-                }
-                if (linha.ofertaComunicacao() == null) {
-                    e.setValorVenda(linha.preco());
-                    comPrecoFixo.add(e.getId());
-                    linhasAlteradas.put(e.getId(), e);
-                } else {
-                    menorPrecoPorLinha.merge(e.getId(), linha.preco(), BigDecimal::min);
-                    linhasAlteradas.putIfAbsent(e.getId(), e);
-                }
-            }
-        }
-
-        // "A partir de" só para quem não teve preço fixo (sem oferta) nesta importação.
-        menorPrecoPorLinha.forEach((id, menor) -> {
-            if (!comPrecoFixo.contains(id)) {
-                linhasAlteradas.get(id).setValorVenda(menor);
-            }
-        });
-        estoqueGeralRepository.saveAll(linhasAlteradas.values());
-
-        TabelaPrecoExecucao execucao = TabelaPrecoExecucao.builder()
+        TabelaPrecoExecucao execucao = execucaoRepository.saveAndFlush(TabelaPrecoExecucao.builder()
                 .nomeArquivo(arquivo.getOriginalFilename())
-                .vigenciaEm(resultado.vigenciaEm())
-                .totalLinhasProcessadas(resultado.linhasPreco().size())
-                .totalProdutosAtualizados(atualizados.size())
-                .totalNaoEncontrados(naoEncontrados)
-                .build();
-        execucao = execucaoRepository.save(execucao);
+                .vigenciaEm(lido.vigencia())
+                .totalLinhasProcessadas(lido.precos().size())
+                .totalProdutosAtualizados(0)
+                .totalNaoEncontrados(0)
+                .build());
 
-        for (ProdutoPrecoPlano item : itens) {
-            item.setExecucao(execucao);
-        }
-        precoPlanoRepository.saveAll(itens);
+        gravarProdutos(execucao.getId(), lido.produtos());
+        gravarPlanos(execucao.getId(), lido.planos());
+        gravarPrecos(execucao.getId(), lido.precos());
 
-        return TabelaPrecoResumoResponseDTO.from(execucao);
+        IndicesReferencia indices = indices(lido);
+        List<EstoqueGeral> unidades = estoqueGeralRepository.findByStatusIn(PrecoVigenteService.STATUS_COM_PRECO_VIGENTE);
+        ResultadoReferencia referencia = precoVigenteService.aplicarReferencia(unidades, indices);
+        int planilhaSemEstoque = contarPlanilhaSemEstoque(lido, indices);
+
+        execucao.setTotalProdutosAtualizados(referencia.unidadesAtualizadas());
+        execucao.setTotalNaoEncontrados(planilhaSemEstoque);
+        execucaoRepository.save(execucao);
+
+        log.info("Tabela de preços importada (execução {}, vigência {}): {} preços, {} planos, {} produtos, "
+                        + "{} unidades com preço, {} modelos do estoque sem preço, {} itens da planilha sem estoque.",
+                execucao.getId(), lido.vigencia(), lido.precos().size(), lido.planos().size(), lido.produtos().size(),
+                referencia.unidadesAtualizadas(), referencia.modelosSemPreco().size(), planilhaSemEstoque);
+
+        return new ImportacaoTabelaPrecoResponseDTO(
+                execucao.getId(), lido.vigencia(), lido.linhasPorAba(),
+                lido.precos().size(), lido.planos().size(), lido.produtos().size(),
+                referencia.unidadesAtualizadas(), List.copyOf(referencia.modelosSemPreco()), planilhaSemEstoque,
+                execucao.getNomeArquivo(),
+                lido.vigencia() == null ? null : lido.vigencia().format(DD_MM_YYYY),
+                execucao.getCriadoEm(),
+                execucao.getTotalLinhasProcessadas(), execucao.getTotalProdutosAtualizados(), execucao.getTotalNaoEncontrados());
     }
 
+    // ------------------------------------------------------------------ gravação em lote
+
+    private void gravarProdutos(Long execucaoId, List<LinhaProduto> produtos) {
+        String sql = """
+                INSERT INTO tb_produto_vivo (execucao_id, cod_sap, descricao_sap, modelo_dpgc, cor, nome_comercial, chave_nome, categoria)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        emLotes(sql, produtos, p -> new Object[]{execucaoId, truncar(p.codSap(), 60), truncar(p.descricaoSap(), 255),
+                truncar(p.modeloDpgc(), 200), truncar(p.cor(), 60), truncar(p.nomeComercial(), 200),
+                truncar(TextoUtil.chave(p.nomeComercial()), 200), truncar(p.categoria(), 80)});
+    }
+
+    private void gravarPlanos(Long execucaoId, List<LinhaPlano> planos) {
+        String sql = """
+                INSERT INTO tb_plano_vivo (execucao_id, nome_plano, chave_plano, sistema, cod_sistema, cod_sap, grupo_plano, disponivel_alta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        emLotes(sql, planos, p -> new Object[]{execucaoId, truncar(p.nomePlano(), 200),
+                truncar(TextoUtil.chave(p.nomePlano()), 200), truncar(p.sistema(), 60), truncar(p.codSistema(), 60),
+                truncar(p.codSap(), 60), p.grupo().name(), p.disponivelAlta()});
+    }
+
+    private void gravarPrecos(Long execucaoId, List<LinhaPreco> precos) {
+        String sql = """
+                INSERT INTO tb_preco_item (execucao_id, aba, tabela, grupo_plano, nome_comercial, chave_nome, preco, preco_pix, parcelas)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                """;
+        emLotes(sql, precos, p -> new Object[]{execucaoId, truncar(p.aba(), 60), p.tabela().name(), p.grupo().name(),
+                truncar(p.nomeComercial(), 200), truncar(TextoUtil.chave(p.nomeComercial()), 200),
+                p.preco(), p.precoPix(), json(p.parcelas())});
+    }
+
+    private <T> void emLotes(String sql, List<T> linhas, java.util.function.Function<T, Object[]> parametros) {
+        for (int ini = 0; ini < linhas.size(); ini += TAMANHO_LOTE) {
+            List<Object[]> lote = linhas.subList(ini, Math.min(ini + TAMANHO_LOTE, linhas.size()))
+                    .stream().map(parametros).toList();
+            jdbc.batchUpdate(sql, lote);
+        }
+    }
+
+    private String json(Map<Integer, BigDecimal> parcelas) {
+        if (parcelas == null || parcelas.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(parcelas);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Falha ao serializar parcelas", e);
+        }
+    }
+
+    // ------------------------------------------------------------------ referência e contagens
+
+    /** Índices da execução recém-lida (em memória): Cod_Sap -> chave e chave -> preço REGULAR PRE (ou SEM_PLANO). */
+    private IndicesReferencia indices(ResultadoParseTabelaPreco lido) {
+        Map<String, String> chavePorCodSap = new HashMap<>();
+        for (LinhaProduto p : lido.produtos()) {
+            chavePorCodSap.putIfAbsent(p.codSap().trim().toUpperCase(Locale.ROOT), TextoUtil.chave(p.nomeComercial()));
+        }
+        Map<String, BigDecimal> referencia = new HashMap<>();
+        for (GrupoPlano grupo : List.of(GrupoPlano.PRE, GrupoPlano.SEM_PLANO)) {
+            for (LinhaPreco p : lido.precos()) {
+                if (p.tabela() == TabelaPreco.REGULAR && p.grupo() == grupo) {
+                    referencia.putIfAbsent(TextoUtil.chave(p.nomeComercial()), p.preco());
+                }
+            }
+        }
+        return new IndicesReferencia(chavePorCodSap, referencia);
+    }
+
+    /** Itens distintos da planilha (por Nome Comercial) sem nenhuma unidade correspondente no estoque. */
+    private int contarPlanilhaSemEstoque(ResultadoParseTabelaPreco lido, IndicesReferencia indices) {
+        Set<String> chavesEstoque = new HashSet<>();
+        estoqueGeralRepository.modelosDistintos().forEach(m -> chavesEstoque.add(TextoUtil.chave(m)));
+        for (String codigo : estoqueGeralRepository.codigosAcessorioDistintos()) {
+            String chave = indices.chavePorCodSap().get(codigo.trim().toUpperCase(Locale.ROOT));
+            if (chave != null) chavesEstoque.add(chave);
+        }
+        Set<String> chavesPlanilha = new HashSet<>();
+        lido.precos().forEach(p -> chavesPlanilha.add(TextoUtil.chave(p.nomeComercial())));
+        chavesPlanilha.removeAll(chavesEstoque);
+        return chavesPlanilha.size();
+    }
+
+    private static String truncar(String texto, int max) {
+        if (texto == null) return null;
+        return texto.length() <= max ? texto : texto.substring(0, max);
+    }
+
+    // ------------------------------------------------------------------ consultas (API nova)
+
+    /** GET /produtos/precos/vigente. */
+    @Transactional(readOnly = true)
+    public TabelaVigenteResponseDTO buscarVigente() {
+        TabelaPrecoExecucao e = exigirVigente();
+        return new TabelaVigenteResponseDTO(e.getId(), e.getVigenciaEm(), e.getCriadoEm(), e.getNomeArquivo(),
+                new TabelaVigenteResponseDTO.Totais(precoItemRepository.countByExecucaoId(e.getId()),
+                        planoVivoRepository.countByExecucaoId(e.getId()), produtoVivoRepository.countByExecucaoId(e.getId()),
+                        e.getTotalProdutosAtualizados(), e.getTotalNaoEncontrados()));
+    }
+
+    /** GET /produtos/precos/planos — combo "Plano Ativo / Linha" da execução vigente. */
+    @Transactional(readOnly = true)
+    public List<PlanoVivoResponseDTO> listarPlanos(String busca, Boolean disponivelAlta) {
+        TabelaPrecoExecucao e = exigirVigente();
+        return planoVivoRepository.listar(e.getId(), TextoUtil.chave(busca), disponivelAlta).stream()
+                .map(PlanoVivoResponseDTO::from)
+                .toList();
+    }
+
+    /** GET /produtos/precos/item — preço de uma unidade do estoque (422 se sem preço). */
+    @Transactional(readOnly = true)
+    public PrecoItemResponseDTO precoDoItem(Long estoqueId, String plano, TabelaPreco tabela,
+                                            FormaPagamento pagamento, Integer parcelas) {
+        EstoqueGeral unidade = estoqueGeralRepository.findById(estoqueId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item de estoque"));
+        return PrecoItemResponseDTO.from(precoVigenteService.calcular(unidade, plano, tabela, pagamento, parcelas));
+    }
+
+    // ------------------------------------------------------------------ consultas antigas (deprecadas)
+    // Respondem a partir das tabelas novas, no formato antigo, até o syscor-frontend migrar.
+    // "Oferta" passa a ser o grupo do plano (PRE, VIVO_V...), sempre da TABELA REGULAR da execução vigente.
+
+    @Deprecated
     @Transactional(readOnly = true)
     public TabelaPrecoResumoResponseDTO buscarExecucao(Long execucaoId) {
         TabelaPrecoExecucao execucao = execucaoRepository.findById(execucaoId)
@@ -153,46 +235,41 @@ public class TabelaPrecoService {
         return TabelaPrecoResumoResponseDTO.from(execucao);
     }
 
+    /** Preços (TABELA REGULAR) da unidade por grupo do plano, na execução vigente. */
+    @Deprecated
     @Transactional(readOnly = true)
-    public List<ProdutoPrecoPlano> listarPrecosPorProduto(Long produtoId) {
-        if (!estoqueGeralRepository.existsById(produtoId)) {
-            throw new RecursoNaoEncontradoException("Produto");
-        }
-        return precoPlanoRepository.findByProdutoIdOrderByOfertaComunicacaoAsc(produtoId);
+    public List<PrecoItem> listarPrecosPorProduto(Long produtoId) {
+        EstoqueGeral unidade = estoqueGeralRepository.findById(produtoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Produto"));
+        TabelaPrecoExecucao e = exigirVigente();
+        String chave = precoVigenteService.chaveNomeDe(unidade, e.getId());
+        return precoItemRepository.findByExecucaoIdAndChaveNomeOrderByTabelaAscGrupoPlanoAsc(e.getId(), chave).stream()
+                .filter(p -> p.getTabela() == TabelaPreco.REGULAR)
+                .toList();
     }
 
-    /** Tabs de oferta disponíveis (texto bruto da planilha) na importação mais recente. */
+    /** Grupos de plano com preço na execução vigente. */
+    @Deprecated
     @Transactional(readOnly = true)
     public List<String> listarOfertasDisponiveis() {
-        TabelaPrecoExecucao ultima = execucaoRepository.findTopByOrderByCriadoEmDesc()
-                .orElseThrow(() -> new NegocioException("Nenhuma tabela de preço foi importada ainda."));
-        return precoPlanoRepository.listarOfertasDistintas(ultima.getId());
+        return precoItemRepository.gruposDistintos(exigirVigente().getId()).stream()
+                .sorted()
+                .map(GrupoPlano::name)
+                .toList();
     }
 
-    /** Catálogo de itens com preço para uma oferta específica, sempre da importação mais recente. */
+    /** Itens com preço (TABELA REGULAR) para o grupo informado ("VIVO_V", "Vivo V", "PRÉ"...). */
+    @Deprecated
     @Transactional(readOnly = true)
-    public List<ProdutoPrecoPlano> listarProdutosPorOferta(String oferta) {
-        TabelaPrecoExecucao ultima = execucaoRepository.findTopByOrderByCriadoEmDesc()
+    public List<PrecoItem> listarProdutosPorOferta(String oferta) {
+        GrupoPlano grupo = GrupoPlano.deRotulo(oferta)
+                .orElseThrow(() -> new NegocioException("Oferta/grupo de plano desconhecido: '" + oferta + "'."));
+        return precoItemRepository.findByExecucaoIdAndTabelaAndGrupoPlanoOrderByNomeComercialAsc(
+                exigirVigente().getId(), TabelaPreco.REGULAR, grupo);
+    }
+
+    private TabelaPrecoExecucao exigirVigente() {
+        return precoVigenteService.vigente()
                 .orElseThrow(() -> new NegocioException("Nenhuma tabela de preço foi importada ainda."));
-        return precoPlanoRepository.listarPorExecucaoEOferta(ultima.getId(), oferta);
-    }
-
-    private String skuDe(EstoqueGeral e) {
-        if (EstoqueUtil.ehAcessorio(e)) {
-            return e.getCodigoAcessorio();
-        }
-        return e.getModeloComercial();
-    }
-
-    private String truncar(String texto, int max) {
-        if (texto == null) return null;
-        return texto.length() <= max ? texto : texto.substring(0, max);
-    }
-
-    private String normalizarChave(String texto) {
-        if (texto == null) return "";
-        String semAcento = java.text.Normalizer.normalize(texto, java.text.Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "");
-        return semAcento.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
 }
