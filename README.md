@@ -34,9 +34,9 @@ diferente, e nada conversa entre si.
 
 A solução: um ERP modular onde a venda é o centro. Um vendedor abre um carrinho
 (`ABERTA`), adiciona itens de categorias diferentes (produto físico, serviço Vivo,
-acessório, recarga), registra pagamentos e finaliza. A finalização baixa o serial do
-estoque, e a partir daí a venda alimenta o protocolo documental e os KPIs do painel
-executivo.
+acessório, recarga), registra pagamentos e finaliza. Cada item reserva o serial no
+estoque (`RESERVADO`) e a conclusão da venda o baixa (`VENDIDO`); a partir daí a
+venda alimenta o protocolo documental e os KPIs do painel executivo.
 
 O modelo mental inteiro cabe em duas frases:
 
@@ -288,7 +288,7 @@ Front (syscor-frontend)         API Spring Boot                       Banco
       |                               |                                  |
       |-- PATCH .../finalizar ------->|-- valida ≥1 item                 |
       |                               |-- valida transição de status     |
-      |                               |-- (baixa serial no estoque)      |
+      |                               |-- (CONCLUIDA: RESERVADO->VENDIDO)|
       |                               |-- UPDATE status = CONCLUIDA ---->|
       |                               |                                  |
       |-- PUT /api/documental/        |                                  |
@@ -501,7 +501,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/filiais/{id}` | Buscar filial |
 | POST | `/usuarios` | Cadastrar usuário/vendedor |
 | GET | `/usuarios/{id}` | Buscar usuário |
-| GET | `/estoque/consolidado` | Estoque consolidado por produto |
+| GET | `/estoque/consolidado` | Estoque consolidado por produto (`disponivel`, `reservado`, `defeito`; `avariado` é alias obsoleto de `defeito`) |
 | GET | `/estoque/alertas` | Produtos em nível crítico de estoque |
 | POST | `/estoque/entrada-seriais` | Dar entrada em seriais/IMEIs |
 | POST | `/estoque/inventario/importar-sap` | Importar relatório IQ09 (multipart) e conciliar |
@@ -617,6 +617,8 @@ docker compose -f Docker-compose.yml up --build
 | `WHATSAPP_PHONE_NUMBER_ID` | Sim, para disparar mailing | ID do número na Graph API |
 | `WHATSAPP_ACCESS_TOKEN` | Sim, para disparar mailing | Token de acesso da Graph API |
 | `WHATSAPP_WABA_ID` | Sim, para disparar mailing | ID da WhatsApp Business Account |
+| `SYSCOR_CARRINHO_EXPIRACAO` | Não (padrão `24h`) | Tempo sem atividade para cancelar um carrinho `ABERTA` e liberar o estoque reservado (formato `Duration`: `30m`, `24h`, `2d`) |
+| `SYSCOR_CARRINHO_VERIFICACAO_MS` | Não (padrão `300000`) | Intervalo, em ms, entre as verificações do job de expiração |
 
 Sem as três variáveis do WhatsApp, a aplicação sobe normalmente — o disparo de
 campanha que falha com `NegocioException` no momento do envio, não no boot.

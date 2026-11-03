@@ -59,6 +59,11 @@ management:
 syscor:
   jwt:
     secret: ${SYSCOR_JWT_SECRET}
+  carrinho:
+    # Venda ABERTA sem atividade há mais que isso é cancelada e libera o estoque reservado.
+    expiracao: ${SYSCOR_CARRINHO_EXPIRACAO:24h}
+    # Intervalo entre verificações do job de expiração.
+    verificacao-ms: ${SYSCOR_CARRINHO_VERIFICACAO_MS:300000}
   webhooks:
     tolerancia-segundos: 300
     reprocesso-ms: 60000

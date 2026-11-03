@@ -305,38 +305,46 @@ public class EstoqueGeralService {
     }
 
     // ======================================================================
-    // 3. PDV: baixa e estorno
+    // 3. PDV: reserva, confirmação e liberação
     // ======================================================================
 
     /**
-     * Baixa uma unidade na venda. Trava a linha (FOR UPDATE), valida que está
-     * DISPONIVEL, marca VENDIDO e carimba {@code data_venda}. Além do lock
-     * pessimista, {@code @Version} protege contra qualquer escrita concorrente
-     * fora desse fluxo (importação, estorno).
+     * Reserva uma unidade para o carrinho. Trava a linha (FOR UPDATE), valida que está
+     * DISPONIVEL e marca RESERVADO. Além do lock pessimista, {@code @Version} protege
+     * contra qualquer escrita concorrente fora desse fluxo (importação, liberação).
      */
     @Transactional
-    public EstoqueGeral baixarNaVenda(String serialInformado) {
+    public EstoqueGeral reservarNaVenda(String serialInformado) {
         String serial = serial(serialInformado);
         if (serial.isBlank()) {
             throw new NegocioException("Informe o IMEI/Serial do item.");
         }
         EstoqueGeral item = repository.findBySerialForUpdate(serial)
                 .orElseThrow(() -> new NegocioException("O IMEI/Serial '" + serial + "' não foi encontrado no estoque."));
-
-        if (!item.disponivelParaVenda()) {
-            throw new NegocioException("O IMEI/Serial '" + serial + "' não está disponível para venda (status atual: "
-                    + item.getStatus() + ").");
-        }
-        item.baixarPorVenda();
+        item.reservar();
         return repository.save(item);
     }
 
-    /** Desfaz a baixa (item removido do carrinho ou venda cancelada/estornada). */
+    /** Venda concluída: a unidade reservada vira VENDIDO (com {@code data_venda}). */
     @Transactional
-    public void estornarBaixa(EstoqueGeral item) {
+    public EstoqueGeral confirmarVenda(EstoqueGeral item) {
+        EstoqueGeral travado = travar(item);
+        travado.confirmarVenda();
+        return repository.save(travado);
+    }
+
+    /** Item removido do carrinho ou venda cancelada: a unidade volta a DISPONIVEL. */
+    @Transactional
+    public void liberar(EstoqueGeral item) {
         if (item == null) return;
-        item.estornarBaixa();
-        repository.save(item);
+        EstoqueGeral travado = travar(item);
+        travado.liberar();
+        repository.save(travado);
+    }
+
+    private EstoqueGeral travar(EstoqueGeral item) {
+        return repository.findByIdForUpdate(item.getId())
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item de estoque"));
     }
 
     // ======================================================================
@@ -346,10 +354,9 @@ public class EstoqueGeralService {
     /** Carrega, para a tela de venda, as unidades DISPONIVEL filtradas por trecho de serial/modelo/marca/código. */
     @Transactional(readOnly = true)
     public List<EstoqueDisponivelResponseDTO> buscarDisponiveis(String busca, String filial, int limite) {
-        String termo = busca == null ? "" : busca.trim();
         String filialFiltro = filial == null ? "" : filial.trim();
         int tamanho = Math.min(Math.max(limite, 1), LIMITE_MAXIMO_BUSCA);
-        return repository.buscarDisponiveis(StatusEstoque.DISPONIVEL, termo, filialFiltro, PageRequest.of(0, tamanho))
+        return buscarPorFiltro(busca, filialFiltro, tamanho)
                 .stream().map(EstoqueDisponivelResponseDTO::from).toList();
     }
 
@@ -370,13 +377,22 @@ public class EstoqueGeralService {
     /** Catálogo para o PDV: unidades DISPONIVEL, com busca livre e filtro opcional de categoria. */
     @Transactional(readOnly = true)
     public List<ProdutoResponseDTO> listarCatalogo(String busca, CategoriaItemVenda categoria) {
-        String termo = busca == null ? "" : busca.trim();
-        return repository.buscarDisponiveis(StatusEstoque.DISPONIVEL, termo, "", PageRequest.of(0, LIMITE_MAXIMO_BUSCA))
+        return buscarPorFiltro(busca, "", LIMITE_MAXIMO_BUSCA)
                 .stream()
                 .filter(e -> categoria == null
                         || (e.getCategoria() != null && e.getCategoria().equalsIgnoreCase(categoria.name())))
                 .map(ProdutoResponseDTO::from)
                 .toList();
+    }
+
+    /**
+     * Unidades DISPONIVEL pelo termo do PDV: o serial é comparado já normalizado (sem espaços,
+     * maiúsculas), e o texto original (com trim) é usado para modelo/marca/código de acessório.
+     */
+    private List<EstoqueGeral> buscarPorFiltro(String busca, String filial, int tamanho) {
+        String termo = busca == null ? "" : busca.trim();
+        return repository.buscarDisponiveisPorFiltro(
+                StatusEstoque.DISPONIVEL, serial(termo), termo, filial, PageRequest.of(0, tamanho));
     }
 
     @Transactional(readOnly = true)

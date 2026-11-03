@@ -28,6 +28,9 @@
 		<openhtmltopdf.version>1.0.10</openhtmltopdf.version>
 		<caelumstella.version>2.1.5</caelumstella.version>
 		<springdoc.version>2.5.0</springdoc.version>
+		<!-- Sobrescreve o BOM do Spring Boot (1.19.x): versões anteriores à 1.21.4 usam uma API
+		     do Docker que o Docker Engine 29+ recusa ("Could not find a valid Docker environment"). -->
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
 
 	<dependencies>

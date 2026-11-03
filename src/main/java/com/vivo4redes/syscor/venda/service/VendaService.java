@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -80,7 +81,7 @@ public class VendaService {
 
     @Transactional
     public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         // Serviço (plano) entra com valor 0 e sem produto: a cobrança é na fatura da operadora.
@@ -114,7 +115,7 @@ public class VendaService {
                 if (!acessorio) {
                     throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
                 }
-                // A baixa marca a linha inteira como VENDIDA: a quantidade precisa bater com a da linha.
+                // A reserva prende a linha inteira: a quantidade precisa bater com a da linha.
                 int emEstoque = escolhida.getQuantidade() == null ? 1 : escolhida.getQuantidade();
                 if (dto.quantidade().compareTo(BigDecimal.valueOf(emEstoque)) != 0) {
                     throw new NegocioException("Este item é baixado da linha inteira do estoque (quantidade na linha: "
@@ -122,7 +123,8 @@ public class VendaService {
                 }
                 serialDaBaixa = escolhida.getSerial();
             }
-            linhaEstoque = estoqueService.baixarNaVenda(serialDaBaixa);
+            // Carrinho só reserva; a unidade vira VENDIDO quando a venda é CONCLUIDA.
+            linhaEstoque = estoqueService.reservarNaVenda(serialDaBaixa);
             // O serial precisa ser o da linha escolhida (evita vender o IMEI de um item com a descrição/preço de outro).
             if (!escolhida.getId().equals(linhaEstoque.getId())) {
                 throw new NegocioException("O IMEI/Serial '" + serialDaBaixa + "' não corresponde ao item informado.");
@@ -171,7 +173,7 @@ public class VendaService {
 
     @Transactional
     public Venda removerItem(Long vendaId, Long itemId) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         // Item inexistente agora é erro (antes era ignorado em silêncio).
@@ -180,7 +182,7 @@ public class VendaService {
                 .findFirst()
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Item da venda"));
 
-        estornarEstoqueDoItem(itemRemovido);
+        liberarEstoqueDoItem(itemRemovido);
 
         venda.removerItem(itemId);
         venda.recalcularValorTotal();
@@ -249,11 +251,12 @@ public class VendaService {
             throw new IllegalArgumentException("O novo status da venda e obrigatorio.");
         }
 
-        if (novoStatus == StatusVenda.CANCELADA) {
-            estornarSeriaisDaVenda(venda);
-        }
-
         transicionar(venda, novoStatus);
+        if (novoStatus == StatusVenda.CONCLUIDA) {
+            confirmarEstoqueDaVenda(venda);
+        } else if (novoStatus == StatusVenda.CANCELADA) {
+            liberarEstoqueDaVenda(venda);
+        }
         return vendaRepository.save(venda);
     }
 
@@ -264,10 +267,31 @@ public class VendaService {
 
         if (resultado == StatusAvaliacaoProcedencia.Improcedente
                 && venda.getStatus() != StatusVenda.CANCELADA) {
-            estornarSeriaisDaVenda(venda);
             transicionar(venda, StatusVenda.CANCELADA);
+            liberarEstoqueDaVenda(venda);
         }
         return vendaRepository.save(venda);
+    }
+
+    /**
+     * Cancela um carrinho abandonado e devolve as unidades reservadas ao estoque.
+     * Uma venda por transação: trava a venda e confere de novo, porque o vendedor pode ter
+     * mexido nela entre a busca do job e este ponto.
+     *
+     * @return true se a venda foi cancelada; false se já não estava ABERTA ou voltou a ter atividade
+     */
+    @Transactional
+    public boolean expirarCarrinho(Long vendaId, Instant limite) {
+        Venda travada = vendaRepository.buscarPorIdForUpdate(vendaId).orElse(null);
+        if (travada == null || travada.getStatus() != StatusVenda.ABERTA
+                || travada.getAtualizadoEm() == null || !travada.getAtualizadoEm().isBefore(limite)) {
+            return false;
+        }
+        Venda venda = buscarPorId(vendaId);
+        transicionar(venda, StatusVenda.CANCELADA);
+        liberarEstoqueDaVenda(venda);
+        vendaRepository.save(venda);
+        return true;
     }
 
     @Transactional(readOnly = true)
@@ -341,7 +365,7 @@ public class VendaService {
 
     @Transactional
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         // O pagamento não pode ultrapassar o saldo restante (antes só era validado ao finalizar).
@@ -358,13 +382,14 @@ public class VendaService {
                 .parcelas(dto.parcelas() == null ? 1 : dto.parcelas())
                 .build();
         pagamentoVendaRepository.save(pagamento);
+        registrarAtividade(venda);
 
         return buscarPorId(vendaId);
     }
 
     @Transactional
     public Venda removerPagamento(Long vendaId, Long pagamentoId) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         PagamentoVenda pagamento = pagamentoVendaRepository.findById(pagamentoId)
@@ -373,6 +398,7 @@ public class VendaService {
             throw new NegocioException("Esse pagamento nao pertence a essa venda.");
         }
         pagamentoVendaRepository.delete(pagamento);
+        registrarAtividade(venda);
 
         return buscarPorId(vendaId);
     }
@@ -388,22 +414,45 @@ public class VendaService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /** Trava a venda (FOR UPDATE) antes de mexer no carrinho, para não concorrer com a expiração. */
+    private Venda buscarParaEdicao(Long vendaId) {
+        vendaRepository.buscarPorIdForUpdate(vendaId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda"));
+        return buscarPorId(vendaId);
+    }
+
+    /** Pagamento fica em outra tabela: marca a venda como alterada para contar como atividade do carrinho. */
+    private void registrarAtividade(Venda venda) {
+        venda.setAtualizadoEm(Instant.now());
+        vendaRepository.save(venda);
+    }
+
     private void exigirCarrinhoEditavel(Venda venda) {
         if (venda.getStatus() != StatusVenda.ABERTA) {
-            throw new CarrinhoNaoEditavelException(venda.getId());
+            throw new CarrinhoNaoEditavelException(venda.getId(), venda.getStatus());
         }
     }
 
-    private void estornarSeriaisDaVenda(Venda venda) {
+    /** Venda CONCLUIDA: cada unidade reservada pelos itens vira VENDIDO. */
+    private void confirmarEstoqueDaVenda(Venda venda) {
         for (ItemVenda item : venda.getItens()) {
-            estornarEstoqueDoItem(item);
+            if (item.getEstoque() != null) {
+                estoqueService.confirmarVenda(item.getEstoque());
+            }
         }
     }
 
-    /** Devolve ao estoque a linha que o item baixou (volta a DISPONÍVEL). */
-    private void estornarEstoqueDoItem(ItemVenda item) {
+    /** Venda cancelada: devolve ao estoque todas as unidades dos itens. */
+    private void liberarEstoqueDaVenda(Venda venda) {
+        for (ItemVenda item : venda.getItens()) {
+            liberarEstoqueDoItem(item);
+        }
+    }
+
+    /** Devolve ao estoque a linha que o item reservou ou vendeu (volta a DISPONIVEL). */
+    private void liberarEstoqueDoItem(ItemVenda item) {
         if (item.getEstoque() != null) {
-            estoqueService.estornarBaixa(item.getEstoque());
+            estoqueService.liberar(item.getEstoque());
         }
     }
 
