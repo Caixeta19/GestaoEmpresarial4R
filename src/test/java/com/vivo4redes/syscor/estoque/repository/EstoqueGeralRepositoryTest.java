@@ -170,6 +170,27 @@ class EstoqueGeralRepositoryTest {
         assertThat(jdbc.queryForObject("SELECT data_venda FROM tb_estoque_geral WHERE id = ?", Object.class, uAberta)).isNull();
     }
 
+    // ---- V23: codigo_acessorio com marcador de vazio vira NULL
+
+    @Test
+    @DisplayName("V23 limpa codigo_acessorio com marcadores de vazio e mantém códigos reais")
+    void v23LimpaCodigoAcessorioVazio() throws Exception {
+        String[] marcadores = {"''", "\"\"", "'", "\"", "-", "", " '' ", "null", "NULL"};
+        for (int i = 0; i < marcadores.length; i++) {
+            jdbc.update("INSERT INTO tb_estoque_geral (serial, codigo_acessorio) VALUES (?, ?)", "V23M" + i, marcadores[i]);
+        }
+        jdbc.update("INSERT INTO tb_estoque_geral (serial, codigo_acessorio) VALUES ('V23OK', 'ACC123')");
+
+        jdbc.execute(new String(new ClassPathResource("db/migration/V23__limpa_codigo_acessorio_vazio.sql")
+                .getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM tb_estoque_geral WHERE serial LIKE 'V23M%' AND codigo_acessorio IS NOT NULL",
+                Integer.class)).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT codigo_acessorio FROM tb_estoque_geral WHERE serial = 'V23OK'", String.class)).isEqualTo("ACC123");
+    }
+
     private long venda(String status) {
         return jdbc.queryForObject("""
                 INSERT INTO vendas (cliente_id, filial_id, usuario_id, numero_venda, status)
