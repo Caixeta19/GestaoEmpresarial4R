@@ -20,6 +20,7 @@ import com.vivo4redes.syscor.exception.VendaSemItemException;
 import com.vivo4redes.syscor.venda.model.Cliente;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
+import com.vivo4redes.syscor.util.EstoqueUtil;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
 import com.vivo4redes.syscor.venda.model.PagamentoVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
@@ -111,7 +112,7 @@ public class VendaService {
             if (informouSerial) {
                 serialDaBaixa = serialInformado;
             } else {
-                boolean acessorio = escolhida.getCodigoAcessorio() != null && !escolhida.getCodigoAcessorio().isBlank();
+                boolean acessorio = EstoqueUtil.ehAcessorio(escolhida);
                 if (!acessorio) {
                     throw new NegocioException("O item '" + dto.descricaoProduto() + "' exige a leitura de um IMEI/Serial antes de ser adicionado a venda.");
                 }

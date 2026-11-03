@@ -1,5 +1,7 @@
 package com.vivo4redes.syscor.estoque.service;
 
+import com.vivo4redes.syscor.util.EstoqueUtil;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -26,11 +28,10 @@ final class ConversorValores {
     private ConversorValores() {
     }
 
-    /** Texto limpo (espaços colapsados); vazio, "-" e "null" viram null. */
+    /** Texto limpo (espaços colapsados); vazio e marcadores de vazio ('', "", ', ", -, null) viram null. */
     static String texto(String valor) {
-        if (valor == null) return null;
-        String s = valor.trim().replaceAll("\\s+", " ");
-        return (s.isEmpty() || s.equals("-") || s.equalsIgnoreCase("null")) ? null : s;
+        if (EstoqueUtil.textoVazio(valor)) return null;
+        return valor.trim().replaceAll("\\s+", " ");
     }
 
     /** Serial/IMEI: sem espaços e em maiúsculas (mesma regra do inventário SAP). */

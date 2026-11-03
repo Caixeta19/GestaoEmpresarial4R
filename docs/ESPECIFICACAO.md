@@ -148,6 +148,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | --- | --- | --- |
 | RN.23 | `tb_estoque_geral` é a única fonte da verdade (catálogo + unidade + baixa) | V19 |
 | RN.24 | Serial único, normalizado em maiúsculas e sem espaços | `idx_serial_unico`, `EstoqueGeralService` |
+| RN.50 | Na importação, célula de texto com marcador de vazio (`''`, `""`, `'`, `"`, `-`, `null`) é tratada como vazia. Uma linha só é acessório se `codigo_acessorio` tiver valor real; com marcador de vazio, o item é aparelho | `EstoqueUtil.textoVazio` / `ehAcessorio`, `ConversorValores.texto`, V23 |
 | RN.25 | Item nasce `DISPONIVEL` na filial `DP01` | V19 |
 | RN.26 | A baixa usa `SELECT … FOR UPDATE` + `@Version`: duas vendas do mesmo IMEI nunca passam juntas | `EstoqueGeralRepository.findBySerialForUpdate` |
 | RN.27 | Ciclo da unidade no PDV: carrinho `DISPONIVEL → RESERVADO`; venda `CONCLUIDA` `RESERVADO → VENDIDO` com `data_venda`; remoção/cancelamento `RESERVADO`/`VENDIDO → DISPONIVEL` (limpa `data_venda`). `DEFEITO` nunca volta por esse caminho | `EstoqueGeral`, `EstoqueGeralService` |
@@ -264,7 +265,7 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 
 ## 6. Modelo de dados
 
-O schema tem 22 migrations Flyway (V1 a V22) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V23 em diante.
+O schema tem 23 migrations Flyway (V1 a V23) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V24 em diante.
 
 | Tabela | Módulo | Conteúdo | Migrations |
 | --- | --- | --- | --- |
@@ -274,7 +275,7 @@ O schema tem 22 migrations Flyway (V1 a V22) em `src/main/resources/db/migration
 | `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário, total, status, procedência, score | V1–V3, V13 |
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id` | V1, V4, V8, V13, V14, V19, V20 |
 | `pagamentos_venda` | venda | Pagamentos por forma | V8 |
-| `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22 |
+| `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22, V23 |
 | `tb_inventario_execucao` / `tb_inventario_item` | estoque | Execuções e linhas da conciliação SAP | V5 |
 | `tb_tabela_preco_execucao` / `tb_produto_preco_plano` | estoque | Importações da Telefônica e preço por oferta | V6, V19 |
 | `tb_protocolo_documental` | gestao | Protocolo 1:1 com a venda | V9 |

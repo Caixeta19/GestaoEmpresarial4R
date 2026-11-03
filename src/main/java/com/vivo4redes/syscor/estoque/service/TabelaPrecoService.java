@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.estoque.service;
 
 import com.vivo4redes.syscor.estoque.dto.LinhaPrecoDTO;
+import com.vivo4redes.syscor.util.EstoqueUtil;
 import com.vivo4redes.syscor.estoque.dto.response.TabelaPrecoResumoResponseDTO;
 import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
@@ -46,7 +47,7 @@ public class TabelaPrecoService {
         Map<String, List<EstoqueGeral>> porCodigo = new HashMap<>();
         Map<String, List<EstoqueGeral>> porModelo = new HashMap<>();
         for (EstoqueGeral e : estoqueGeralRepository.findAll()) {
-            if (e.getCodigoAcessorio() != null && !e.getCodigoAcessorio().isBlank()) {
+            if (EstoqueUtil.ehAcessorio(e)) {
                 porCodigo.computeIfAbsent(e.getCodigoAcessorio().trim().toUpperCase(Locale.ROOT), k -> new ArrayList<>()).add(e);
             }
             if (e.getModeloComercial() != null && !e.getModeloComercial().isBlank()) {
@@ -177,7 +178,7 @@ public class TabelaPrecoService {
     }
 
     private String skuDe(EstoqueGeral e) {
-        if (e.getCodigoAcessorio() != null && !e.getCodigoAcessorio().isBlank()) {
+        if (EstoqueUtil.ehAcessorio(e)) {
             return e.getCodigoAcessorio();
         }
         return e.getModeloComercial();

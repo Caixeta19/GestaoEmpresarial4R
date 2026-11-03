@@ -3,10 +3,23 @@ package com.vivo4redes.syscor.util;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 
 import java.math.BigDecimal;
+import java.util.Locale;
+import java.util.Set;
 
 public final class EstoqueUtil {
 
+    /**
+     * Valores que planilhas/exportações usam no lugar de célula vazia (o Excel grava '' ou "" quando
+     * a célula tem só aspas). Comparados depois de trim; "null" sem diferenciar maiúsculas.
+     */
+    private static final Set<String> MARCADORES_DE_VAZIO = Set.of("", "''", "\"\"", "'", "\"", "-", "null");
+
     private EstoqueUtil() {
+    }
+
+    /** Texto ausente: null, em branco ou um marcador de vazio ('', "", ', ", -, null). */
+    public static boolean textoVazio(String valor) {
+        return valor == null || MARCADORES_DE_VAZIO.contains(valor.trim().toLowerCase(Locale.ROOT));
     }
 
     /**
@@ -33,8 +46,8 @@ public final class EstoqueUtil {
         return serial.replace("'", "").replaceAll("\\s+", "");
     }
 
-    /** Linha de acessório = tem código de acessório preenchido. */
+    /** Linha de acessório = tem código de acessório preenchido de verdade (marcadores de vazio não contam). */
     public static boolean ehAcessorio(EstoqueGeral e) {
-        return e != null && e.getCodigoAcessorio() != null && !e.getCodigoAcessorio().isBlank();
+        return e != null && !textoVazio(e.getCodigoAcessorio());
     }
 }
