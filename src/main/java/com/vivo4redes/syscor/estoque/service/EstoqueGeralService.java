@@ -305,38 +305,46 @@ public class EstoqueGeralService {
     }
 
     // ======================================================================
-    // 3. PDV: baixa e estorno
+    // 3. PDV: reserva, confirmação e liberação
     // ======================================================================
 
     /**
-     * Baixa uma unidade na venda. Trava a linha (FOR UPDATE), valida que está
-     * DISPONIVEL, marca VENDIDO e carimba {@code data_venda}. Além do lock
-     * pessimista, {@code @Version} protege contra qualquer escrita concorrente
-     * fora desse fluxo (importação, estorno).
+     * Reserva uma unidade para o carrinho. Trava a linha (FOR UPDATE), valida que está
+     * DISPONIVEL e marca RESERVADO. Além do lock pessimista, {@code @Version} protege
+     * contra qualquer escrita concorrente fora desse fluxo (importação, liberação).
      */
     @Transactional
-    public EstoqueGeral baixarNaVenda(String serialInformado) {
+    public EstoqueGeral reservarNaVenda(String serialInformado) {
         String serial = serial(serialInformado);
         if (serial.isBlank()) {
             throw new NegocioException("Informe o IMEI/Serial do item.");
         }
         EstoqueGeral item = repository.findBySerialForUpdate(serial)
                 .orElseThrow(() -> new NegocioException("O IMEI/Serial '" + serial + "' não foi encontrado no estoque."));
-
-        if (!item.disponivelParaVenda()) {
-            throw new NegocioException("O IMEI/Serial '" + serial + "' não está disponível para venda (status atual: "
-                    + item.getStatus() + ").");
-        }
-        item.baixarPorVenda();
+        item.reservar();
         return repository.save(item);
     }
 
-    /** Desfaz a baixa (item removido do carrinho ou venda cancelada/estornada). */
+    /** Venda concluída: a unidade reservada vira VENDIDO (com {@code data_venda}). */
     @Transactional
-    public void estornarBaixa(EstoqueGeral item) {
+    public EstoqueGeral confirmarVenda(EstoqueGeral item) {
+        EstoqueGeral travado = travar(item);
+        travado.confirmarVenda();
+        return repository.save(travado);
+    }
+
+    /** Item removido do carrinho ou venda cancelada: a unidade volta a DISPONIVEL. */
+    @Transactional
+    public void liberar(EstoqueGeral item) {
         if (item == null) return;
-        item.estornarBaixa();
-        repository.save(item);
+        EstoqueGeral travado = travar(item);
+        travado.liberar();
+        repository.save(travado);
+    }
+
+    private EstoqueGeral travar(EstoqueGeral item) {
+        return repository.findByIdForUpdate(item.getId())
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item de estoque"));
     }
 
     // ======================================================================

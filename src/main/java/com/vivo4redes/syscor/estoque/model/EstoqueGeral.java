@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.estoque.model;
 
 import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
+import com.vivo4redes.syscor.exception.NegocioException;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -153,14 +154,34 @@ public class EstoqueGeral {
         return status == StatusEstoque.DISPONIVEL;
     }
 
-    /** DISPONIVEL -> VENDIDO, carimbando a data da venda. */
-    public void baixarPorVenda() {
+    /** Item entrou no carrinho: DISPONIVEL -> RESERVADO. */
+    public void reservar() {
+        if (status != StatusEstoque.DISPONIVEL) {
+            throw new NegocioException("O IMEI/Serial '" + serial + "' não está disponível para venda (status atual: "
+                    + status + ").");
+        }
+        this.status = StatusEstoque.RESERVADO;
+    }
+
+    /** Venda concluída: RESERVADO -> VENDIDO, carimbando a data da venda. */
+    public void confirmarVenda() {
+        if (status != StatusEstoque.RESERVADO) {
+            throw new NegocioException("O IMEI/Serial '" + serial + "' não está reservado para esta venda (status atual: "
+                    + status + ").");
+        }
         this.status = StatusEstoque.VENDIDO;
         this.dataVenda = LocalDateTime.now();
     }
 
-    /** Desfaz a baixa (item removido do carrinho ou venda cancelada). */
-    public void estornarBaixa() {
+    /**
+     * Item removido do carrinho ou venda cancelada: RESERVADO/VENDIDO -> DISPONIVEL.
+     * Já DISPONIVEL não muda nada; DEFEITO nunca volta à venda por este caminho.
+     */
+    public void liberar() {
+        if (status == StatusEstoque.DISPONIVEL) return;
+        if (status == StatusEstoque.DEFEITO) {
+            throw new NegocioException("O IMEI/Serial '" + serial + "' está com DEFEITO e não pode voltar a DISPONIVEL.");
+        }
         this.status = StatusEstoque.DISPONIVEL;
         this.dataVenda = null;
     }

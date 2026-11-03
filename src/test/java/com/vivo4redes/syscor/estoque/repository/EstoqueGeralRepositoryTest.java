@@ -11,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,6 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -142,6 +144,52 @@ class EstoqueGeralRepositoryTest {
         assertThat(iphone.disponivel()).isEqualTo(1L);
         assertThat(iphone.reservado()).isZero();
         assertThat(iphone.defeito()).isZero();
+    }
+
+    // ---- V22: unidades presas em vendas não concluídas voltam a RESERVADO
+
+    @Test
+    @DisplayName("V22 passa a RESERVADO só as unidades VENDIDO de vendas ABERTA/PENDENTE/APROVADA")
+    void v22ConverteSoVendasNaoConcluidas() throws Exception {
+        // FKs de cliente/filial/usuário não interessam aqui: desligadas só nesta transação.
+        jdbc.execute("SET LOCAL session_replication_role = replica");
+
+        long aberta = venda("ABERTA"), pendente = venda("PENDENTE"), aprovada = venda("APROVADA");
+        long concluida = venda("CONCLUIDA"), cancelada = venda("CANCELADA");
+        long uAberta = vendida("V22A", aberta), uPendente = vendida("V22P", pendente), uAprovada = vendida("V22R", aprovada);
+        long uConcluida = vendida("V22C", concluida), uCancelada = vendida("V22X", cancelada);
+
+        jdbc.execute(new String(new ClassPathResource("db/migration/V22__reserva_carrinho.sql")
+                .getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+
+        assertThat(statusDe(uAberta)).isEqualTo("RESERVADO");
+        assertThat(statusDe(uPendente)).isEqualTo("RESERVADO");
+        assertThat(statusDe(uAprovada)).isEqualTo("RESERVADO");
+        assertThat(statusDe(uConcluida)).isEqualTo("VENDIDO");
+        assertThat(statusDe(uCancelada)).isEqualTo("VENDIDO");
+        assertThat(jdbc.queryForObject("SELECT data_venda FROM tb_estoque_geral WHERE id = ?", Object.class, uAberta)).isNull();
+    }
+
+    private long venda(String status) {
+        return jdbc.queryForObject("""
+                INSERT INTO vendas (cliente_id, filial_id, usuario_id, numero_venda, status)
+                VALUES (1, 1, 1, nextval('seq_numero_venda'), ?) RETURNING id
+                """, Long.class, status);
+    }
+
+    private long vendida(String serial, long vendaId) {
+        long id = jdbc.queryForObject("""
+                INSERT INTO tb_estoque_geral (serial, status, data_venda) VALUES (?, 'VENDIDO', now()) RETURNING id
+                """, Long.class, serial);
+        jdbc.update("""
+                INSERT INTO itens_venda (venda_id, categoria, produto_id, descricao_produto, quantidade, valor_unitario, estoque_geral_id)
+                VALUES (?, 'PRODUTO_VIVO', ?, 'Aparelho', 1, 100, ?)
+                """, vendaId, id, id);
+        return id;
+    }
+
+    private String statusDe(long id) {
+        return jdbc.queryForObject("SELECT status FROM tb_estoque_geral WHERE id = ?", String.class, id);
     }
 
     private List<String> seriais(String serial, String termo, String filial) {

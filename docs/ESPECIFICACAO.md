@@ -89,7 +89,7 @@ O front chama a API por REST e recebe a conciliação bancária em tempo real po
 
 &#91;embedded content: máquina de estados da venda · 5 status\]
 
-A baixa do serial acontece ao adicionar o item, e o estorno ao remover o item ou cancelar a venda (ver bug 4 na seção 9).
+O serial fica `RESERVADO` ao adicionar o item e vira `VENDIDO` quando a venda é `CONCLUIDA`; remover o item ou cancelar a venda devolve a unidade a `DISPONIVEL` (bug 4 da seção 9, corrigido).
 
 **Fluxo de autenticação (JWT)**
 
@@ -138,8 +138,8 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.18 | Pagamento não pode exceder o saldo restante da venda | `VendaService.adicionarPagamento` |
 | RN.19 | Finalizar exige ≥ 1 item e soma dos pagamentos igual ao total; a venda vai para `PENDENTE` | `VendaService.finalizar` |
 | RN.20 | Transições válidas ficam no enum `StatusVenda` (diagrama na seção 3); fora delas, `TransicaoStatusInvalidaException` | `StatusVenda` |
-| RN.21 | Cancelar a venda devolve ao estoque todos os seriais baixados | `VendaService.estornarSeriaisDaVenda` |
-| RN.22 | Avaliação de procedência `Improcedente` cancela a venda e estorna o estoque | `VendaService.avaliarProcedencia` |
+| RN.21 | Cancelar a venda (de qualquer status não terminal, inclusive `CONCLUIDA`) devolve a `DISPONIVEL` todas as unidades reservadas ou vendidas; remover o item do carrinho também | `VendaService.liberarEstoqueDaVenda` |
+| RN.22 | Avaliação de procedência `Improcedente` cancela a venda e libera o estoque | `VendaService.avaliarProcedencia` |
 
 **Estoque**
 
@@ -149,7 +149,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.24 | Serial único, normalizado em maiúsculas e sem espaços | `idx_serial_unico`, `EstoqueGeralService` |
 | RN.25 | Item nasce `DISPONIVEL` na filial `DP01` | V19 |
 | RN.26 | A baixa usa `SELECT … FOR UPDATE` + `@Version`: duas vendas do mesmo IMEI nunca passam juntas | `EstoqueGeralRepository.findBySerialForUpdate` |
-| RN.27 | Baixa: `DISPONIVEL → VENDIDO` com `data_venda`; estorno volta a `DISPONIVEL` | `EstoqueGeral` |
+| RN.27 | Ciclo da unidade no PDV: carrinho `DISPONIVEL → RESERVADO`; venda `CONCLUIDA` `RESERVADO → VENDIDO` com `data_venda`; remoção/cancelamento `RESERVADO`/`VENDIDO → DISPONIVEL` (limpa `data_venda`). `DEFEITO` nunca volta por esse caminho | `EstoqueGeral`, `EstoqueGeralService` |
 | RN.28 | Modelo crítico quando o saldo disponível é ≤ estoque mínimo | `EstoqueGeralService.listarAlertas` |
 | RN.29 | Importação do relatório Vivo e da tabela de preços resolve colunas por nome; coluna obrigatória ausente gera erro de negócio, linhas ruins entram na lista de erros sem abortar o lote | `EstoqueGeralService`, `LeitorTabular` |
 
@@ -263,7 +263,7 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 
 ## 6. Modelo de dados
 
-O schema tem 21 migrations Flyway (V1 a V21) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V22 em diante.
+O schema tem 22 migrations Flyway (V1 a V22) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V23 em diante.
 
 | Tabela | Módulo | Conteúdo | Migrations |
 | --- | --- | --- | --- |
@@ -273,7 +273,7 @@ O schema tem 21 migrations Flyway (V1 a V21) em `src/main/resources/db/migration
 | `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário, total, status, procedência, score | V1–V3, V13 |
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id` | V1, V4, V8, V13, V14, V19, V20 |
 | `pagamentos_venda` | venda | Pagamentos por forma | V8 |
-| `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21 |
+| `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22 |
 | `tb_inventario_execucao` / `tb_inventario_item` | estoque | Execuções e linhas da conciliação SAP | V5 |
 | `tb_tabela_preco_execucao` / `tb_produto_preco_plano` | estoque | Importações da Telefônica e preço por oferta | V6, V19 |
 | `tb_protocolo_documental` | gestao | Protocolo 1:1 com a venda | V9 |
@@ -342,7 +342,7 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | POST | `/vendas` | Abrir carrinho (`ABERTA`) |
 | GET | `/vendas` | Listar com filtros (`filialId`, `vendedorId`, `numeroVenda`, `dataInicio`, `dataFim`, `cliente`, `numeroAcesso`, `serialProdutoVivo`, `serialSimcard`, `modeloAcessorio`) |
 | GET / PUT | `/vendas/{id}` | Buscar / atualizar dados iniciais (filial, vendedor, score) |
-| POST | `/vendas/{id}/itens` | Adicionar item (baixa o serial no ato) |
+| POST | `/vendas/{id}/itens` | Adicionar item (reserva o serial; a baixa é na conclusão) |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item (estorna o serial) |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
 | DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |
@@ -403,7 +403,7 @@ O backend está funcional nos sete módulos, mas o README está atrasado em rela
 | Módulo | Pacote | O que existe | O que falta |
 | --- | --- | --- | --- |
 | Segurança | `security` | JWT (60 min), login, troca de senha no primeiro acesso, CORS por `app.cors.allowed-origins`, cadeia separada para webhooks | Perfis/RBAC, bloqueio por tentativas, refresh token, endpoint `/auth/me` |
-| Venda | `venda` | Carrinho completo, pagamentos, máquina de estados, reautenticação, procedência, filtros | Edição/inativação de cliente, filial e usuário; baixa de estoque só na conclusão (decisão pendente) |
+| Venda | `venda` | Carrinho completo, pagamentos, máquina de estados, reautenticação, procedência, filtros | Edição/inativação de cliente, filial e usuário; expiração de carrinhos abandonados |
 | Estoque | `estoque` | Estoque geral unificado, importações Vivo/preços/SAP/Telefônica, consolidado e alertas | Transferência entre filiais, movimentação manual (avaria, devolução), histórico de movimentos |
 | Documental | `gestao` | Protocolo 1:1 com a venda | Anexos (S3), fila de pendências GED |
 | Financeiro | `financeiro` | Caixa, conciliação bancária por webhook com SSE, remuneração variável, `TituloFinanceiroService` | Controller de títulos (criar, listar, baixar, reabrir), contas a receber, relatórios |
@@ -425,7 +425,7 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 | 1 | Enum `StatusEstoque` tem `DEFEITO`, mas o `CHECK` da V19 aceita `AVARIADO` | `StatusEstoque.java` x `chk_estoque_geral_status` | ✅ **Corrigido (V21).** `CHECK` aceita `DEFEITO`; linhas `AVARIADO` foram convertidas |
 | 2 | Sem RBAC: qualquer token válido acessa financeiro, importações e cadastro de usuário | `UsuarioDetailsService.papel()` já gera `ROLE_<CARGO>` (ex.: GERENTE DE ÁREA → `ROLE_GERENTE_DE_AREA`), mas nenhuma rota usa `hasRole` | Levantar os cargos com `SELECT DISTINCT cargo FROM usuarios`, montar a matriz cargo × rota e aplicar `@EnableMethodSecurity` + `@PreAuthorize` |
 | 3 | Webhook do BB autentica comparando o parâmetro `hmac` com um segredo, mas o BB autentica por **mTLS com certificado A1** e não envia segredo | `BancoDoBrasilAdapter.autenticar` | Exigir certificado de cliente do BB: terminar o mTLS no proxy/load balancer (ou `server.ssl.client-auth=need` no Tomcat), validar a cadeia da AC do BB, repassar o subject do certificado ao app e checar no `BancoDoBrasilAdapter`; manter allowlist de IP e remover o `hmac` |
-| 4 | O carrinho baixa o serial para `VENDIDO` no momento em que o item entra, antes de a venda concluir | `VendaService.adicionarItem` chama `baixarNaVenda` | **Decidido:** `RESERVADO` ao adicionar, `VENDIDO` ao concluir, volta a `DISPONIVEL` ao remover/cancelar; expirar carrinhos abandonados |
+| 4 | O carrinho baixa o serial para `VENDIDO` no momento em que o item entra, antes de a venda concluir | `VendaService.adicionarItem` chama `baixarNaVenda` | ✅ **Corrigido (V22).** `RESERVADO` ao adicionar, `VENDIDO` ao concluir, volta a `DISPONIVEL` ao remover/cancelar. **A fazer:** expirar carrinhos abandonados |
 | 5 | `DocumentoInvalidoException` e `RecursoNaoEncontradoException` estendem `RuntimeException` (têm handler próprio, ok); o README diz o contrário | `exception/` | Atualizar README |
 | 6 | Login com usuário inexistente após autenticar lança `RuntimeException` genérica (500) | `AuthController.login` | Lançar `AutenticacaoInvalidaException` |
 | 7 | `alterar-senha` não confere `senhaAtual` | `AuthController.alterarSenha` | Validar com `passwordEncoder.matches` antes de trocar |
@@ -454,7 +454,7 @@ A ordem segue o backlog do produto (Épico 0 → Clientes → Estoque → Vendas
    - Editar e inativar cliente, filial e usuário (`PUT`, `PATCH /{id}/inativar`, soft delete).
    - LGPD: revogação de consentimento e anonimização sob pedido.
 4. **Estoque e Vendas (Épicos 2 e 3)**
-   - Implementar reserva no carrinho (`RESERVADO`) com baixa em `CONCLUIDA` (bug 4) e expiração de carrinhos abandonados.
+   - ✅ Reserva no carrinho (`RESERVADO`) com baixa em `CONCLUIDA` (bug 4). A fazer: expiração de carrinhos abandonados.
    - Transferência entre filiais e histórico de movimentação do serial.
 5. **Financeiro (Épico 1)**
    - Controller de títulos (`/financeiro/titulos`: criar, listar, baixar, reabrir) sobre o `TituloFinanceiroService` existente.
@@ -498,7 +498,7 @@ A venda é a primeira fase. Ela só fica utilizável no PDV depois de corrigir a
 
 1. V1 (busca por IMEI) — correção pequena, destrava o PDV.
 2. V21: `DEFEITO` no `CHECK` + V5.
-3. Reserva no carrinho: `RESERVADO` ao adicionar, `VENDIDO` ao concluir (bug 4).
+3. ✅ Reserva no carrinho: `RESERVADO` ao adicionar, `VENDIDO` ao concluir (bug 4). Em seguida: expiração de carrinhos abandonados.
 4. V2, V3 e V4: preço pela tabela vigente.
 5. Testes de `VendaService` e `EstoqueGeralService` cobrindo RN.11 a RN.27.
 
@@ -523,7 +523,7 @@ Java 21, Spring Boot 3.3.4, PostgreSQL 16, Flyway, RabbitMQ, JWT (jjwt), Lombok,
 - Erro de negócio = exceção que estende BusinessException (vira 422 no GlobalExceptionHandler).
 - Schema só via Flyway: nunca edite V1..V20; crie a próxima versão (V21+). ddl-auto continua validate.
 - Enum Java e CHECK do banco precisam ter exatamente os mesmos literais.
-- Toda baixa de serial passa por EstoqueGeralService (FOR UPDATE + @Version).
+- Toda reserva/baixa de serial passa por EstoqueGeralService (FOR UPDATE + @Version).
 - Valores monetários em BigDecimal, comparados com compareTo.
 - Segredos só por variável de ambiente.
 - Mensagens de erro e nomes de domínio em português.

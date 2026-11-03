@@ -34,9 +34,9 @@ diferente, e nada conversa entre si.
 
 A solução: um ERP modular onde a venda é o centro. Um vendedor abre um carrinho
 (`ABERTA`), adiciona itens de categorias diferentes (produto físico, serviço Vivo,
-acessório, recarga), registra pagamentos e finaliza. A finalização baixa o serial do
-estoque, e a partir daí a venda alimenta o protocolo documental e os KPIs do painel
-executivo.
+acessório, recarga), registra pagamentos e finaliza. Cada item reserva o serial no
+estoque (`RESERVADO`) e a conclusão da venda o baixa (`VENDIDO`); a partir daí a
+venda alimenta o protocolo documental e os KPIs do painel executivo.
 
 O modelo mental inteiro cabe em duas frases:
 
@@ -288,7 +288,7 @@ Front (syscor-frontend)         API Spring Boot                       Banco
       |                               |                                  |
       |-- PATCH .../finalizar ------->|-- valida ≥1 item                 |
       |                               |-- valida transição de status     |
-      |                               |-- (baixa serial no estoque)      |
+      |                               |-- (CONCLUIDA: RESERVADO->VENDIDO)|
       |                               |-- UPDATE status = CONCLUIDA ---->|
       |                               |                                  |
       |-- PUT /api/documental/        |                                  |
