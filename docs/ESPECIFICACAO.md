@@ -89,7 +89,7 @@ O front chama a API por REST e recebe a conciliação bancária em tempo real po
 
 &#91;embedded content: máquina de estados da venda · 5 status\]
 
-O serial fica `RESERVADO` ao adicionar o item e vira `VENDIDO` quando a venda é `CONCLUIDA`; remover o item ou cancelar a venda devolve a unidade a `DISPONIVEL` (bug 4 da seção 9, corrigido).
+O serial fica `RESERVADO` ao adicionar o item e vira `VENDIDO` quando a venda é `CONCLUIDA`; remover o item ou cancelar a venda devolve a unidade a `DISPONIVEL` (bug 4 da seção 9, corrigido). Carrinho parado por mais de 24h é cancelado automaticamente (RN.49).
 
 **Fluxo de autenticação (JWT)**
 
@@ -140,6 +140,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.20 | Transições válidas ficam no enum `StatusVenda` (diagrama na seção 3); fora delas, `TransicaoStatusInvalidaException` | `StatusVenda` |
 | RN.21 | Cancelar a venda (de qualquer status não terminal, inclusive `CONCLUIDA`) devolve a `DISPONIVEL` todas as unidades reservadas ou vendidas; remover o item do carrinho também | `VendaService.liberarEstoqueDaVenda` |
 | RN.22 | Avaliação de procedência `Improcedente` cancela a venda e libera o estoque | `VendaService.avaliarProcedencia` |
+| RN.49 | Carrinho (`ABERTA`) sem atividade há mais de `syscor.carrinho.expiracao` (padrão 24h) é cancelado automaticamente e libera as unidades reservadas. Conta como atividade qualquer mudança na venda (itens, dados iniciais, pagamentos). Edição do carrinho e expiração travam a venda (`FOR UPDATE`) para não concorrerem | `ExpiracaoCarrinhoScheduler`, `VendaService.expirarCarrinho` |
 
 **Estoque**
 
@@ -234,7 +235,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RNF.07 | Fuso fixo `America/Sao_Paulo` | Feito |
 | RNF.08 | Upload máximo de 25 MB | Feito |
 | RNF.09 | Conformidade LGPD: consentimento, minimização e direito de exclusão | Parcial |
-| RNF.10 | Cobertura de testes de serviço e integração (hoje só `contextLoads`) | A fazer |
+| RNF.10 | Cobertura de testes de serviço e integração (estoque e venda cobertos; demais módulos a fazer) | Em andamento |
 | RNF.11 | Rate limit nos endpoints de importação | A fazer |
 | RNF.12 | Documentação OpenAPI (springdoc já no `pom.xml`) | Feito |
 
@@ -425,7 +426,7 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 | 1 | Enum `StatusEstoque` tem `DEFEITO`, mas o `CHECK` da V19 aceita `AVARIADO` | `StatusEstoque.java` x `chk_estoque_geral_status` | ✅ **Corrigido (V21).** `CHECK` aceita `DEFEITO`; linhas `AVARIADO` foram convertidas |
 | 2 | Sem RBAC: qualquer token válido acessa financeiro, importações e cadastro de usuário | `UsuarioDetailsService.papel()` já gera `ROLE_<CARGO>` (ex.: GERENTE DE ÁREA → `ROLE_GERENTE_DE_AREA`), mas nenhuma rota usa `hasRole` | Levantar os cargos com `SELECT DISTINCT cargo FROM usuarios`, montar a matriz cargo × rota e aplicar `@EnableMethodSecurity` + `@PreAuthorize` |
 | 3 | Webhook do BB autentica comparando o parâmetro `hmac` com um segredo, mas o BB autentica por **mTLS com certificado A1** e não envia segredo | `BancoDoBrasilAdapter.autenticar` | Exigir certificado de cliente do BB: terminar o mTLS no proxy/load balancer (ou `server.ssl.client-auth=need` no Tomcat), validar a cadeia da AC do BB, repassar o subject do certificado ao app e checar no `BancoDoBrasilAdapter`; manter allowlist de IP e remover o `hmac` |
-| 4 | O carrinho baixa o serial para `VENDIDO` no momento em que o item entra, antes de a venda concluir | `VendaService.adicionarItem` chama `baixarNaVenda` | ✅ **Corrigido (V22).** `RESERVADO` ao adicionar, `VENDIDO` ao concluir, volta a `DISPONIVEL` ao remover/cancelar. **A fazer:** expirar carrinhos abandonados |
+| 4 | O carrinho baixa o serial para `VENDIDO` no momento em que o item entra, antes de a venda concluir | `VendaService.adicionarItem` chama `baixarNaVenda` | ✅ **Corrigido (V22 + RN.49).** `RESERVADO` ao adicionar, `VENDIDO` ao concluir, volta a `DISPONIVEL` ao remover/cancelar; carrinho parado por mais de 24h é cancelado automaticamente |
 | 5 | `DocumentoInvalidoException` e `RecursoNaoEncontradoException` estendem `RuntimeException` (têm handler próprio, ok); o README diz o contrário | `exception/` | Atualizar README |
 | 6 | Login com usuário inexistente após autenticar lança `RuntimeException` genérica (500) | `AuthController.login` | Lançar `AutenticacaoInvalidaException` |
 | 7 | `alterar-senha` não confere `senhaAtual` | `AuthController.alterarSenha` | Validar com `passwordEncoder.matches` antes de trocar |
@@ -454,7 +455,7 @@ A ordem segue o backlog do produto (Épico 0 → Clientes → Estoque → Vendas
    - Editar e inativar cliente, filial e usuário (`PUT`, `PATCH /{id}/inativar`, soft delete).
    - LGPD: revogação de consentimento e anonimização sob pedido.
 4. **Estoque e Vendas (Épicos 2 e 3)**
-   - ✅ Reserva no carrinho (`RESERVADO`) com baixa em `CONCLUIDA` (bug 4). A fazer: expiração de carrinhos abandonados.
+   - ✅ Reserva no carrinho (`RESERVADO`) com baixa em `CONCLUIDA` (bug 4) e expiração de carrinhos abandonados após 24h (RN.49).
    - Transferência entre filiais e histórico de movimentação do serial.
 5. **Financeiro (Épico 1)**
    - Controller de títulos (`/financeiro/titulos`: criar, listar, baixar, reabrir) sobre o `TituloFinanceiroService` existente.
@@ -498,7 +499,7 @@ A venda é a primeira fase. Ela só fica utilizável no PDV depois de corrigir a
 
 1. V1 (busca por IMEI) — correção pequena, destrava o PDV.
 2. V21: `DEFEITO` no `CHECK` + V5.
-3. ✅ Reserva no carrinho: `RESERVADO` ao adicionar, `VENDIDO` ao concluir (bug 4). Em seguida: expiração de carrinhos abandonados.
+3. ✅ Reserva no carrinho: `RESERVADO` ao adicionar, `VENDIDO` ao concluir (bug 4), com expiração de carrinhos abandonados após 24h (RN.49).
 4. V2, V3 e V4: preço pela tabela vigente.
 5. Testes de `VendaService` e `EstoqueGeralService` cobrindo RN.11 a RN.27.
 

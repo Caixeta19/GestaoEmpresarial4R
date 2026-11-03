@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -80,7 +81,7 @@ public class VendaService {
 
     @Transactional
     public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         // Serviço (plano) entra com valor 0 e sem produto: a cobrança é na fatura da operadora.
@@ -172,7 +173,7 @@ public class VendaService {
 
     @Transactional
     public Venda removerItem(Long vendaId, Long itemId) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         // Item inexistente agora é erro (antes era ignorado em silêncio).
@@ -272,6 +273,27 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
+    /**
+     * Cancela um carrinho abandonado e devolve as unidades reservadas ao estoque.
+     * Uma venda por transação: trava a venda e confere de novo, porque o vendedor pode ter
+     * mexido nela entre a busca do job e este ponto.
+     *
+     * @return true se a venda foi cancelada; false se já não estava ABERTA ou voltou a ter atividade
+     */
+    @Transactional
+    public boolean expirarCarrinho(Long vendaId, Instant limite) {
+        Venda travada = vendaRepository.buscarPorIdForUpdate(vendaId).orElse(null);
+        if (travada == null || travada.getStatus() != StatusVenda.ABERTA
+                || travada.getAtualizadoEm() == null || !travada.getAtualizadoEm().isBefore(limite)) {
+            return false;
+        }
+        Venda venda = buscarPorId(vendaId);
+        transicionar(venda, StatusVenda.CANCELADA);
+        liberarEstoqueDaVenda(venda);
+        vendaRepository.save(venda);
+        return true;
+    }
+
     @Transactional(readOnly = true)
     public Venda buscarPorId(Long id) {
         return vendaRepository.buscarComDetalhesPorId(id)
@@ -343,7 +365,7 @@ public class VendaService {
 
     @Transactional
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         // O pagamento não pode ultrapassar o saldo restante (antes só era validado ao finalizar).
@@ -360,13 +382,14 @@ public class VendaService {
                 .parcelas(dto.parcelas() == null ? 1 : dto.parcelas())
                 .build();
         pagamentoVendaRepository.save(pagamento);
+        registrarAtividade(venda);
 
         return buscarPorId(vendaId);
     }
 
     @Transactional
     public Venda removerPagamento(Long vendaId, Long pagamentoId) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
         PagamentoVenda pagamento = pagamentoVendaRepository.findById(pagamentoId)
@@ -375,6 +398,7 @@ public class VendaService {
             throw new NegocioException("Esse pagamento nao pertence a essa venda.");
         }
         pagamentoVendaRepository.delete(pagamento);
+        registrarAtividade(venda);
 
         return buscarPorId(vendaId);
     }
@@ -390,9 +414,22 @@ public class VendaService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /** Trava a venda (FOR UPDATE) antes de mexer no carrinho, para não concorrer com a expiração. */
+    private Venda buscarParaEdicao(Long vendaId) {
+        vendaRepository.buscarPorIdForUpdate(vendaId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Venda"));
+        return buscarPorId(vendaId);
+    }
+
+    /** Pagamento fica em outra tabela: marca a venda como alterada para contar como atividade do carrinho. */
+    private void registrarAtividade(Venda venda) {
+        venda.setAtualizadoEm(Instant.now());
+        vendaRepository.save(venda);
+    }
+
     private void exigirCarrinhoEditavel(Venda venda) {
         if (venda.getStatus() != StatusVenda.ABERTA) {
-            throw new CarrinhoNaoEditavelException(venda.getId());
+            throw new CarrinhoNaoEditavelException(venda.getId(), venda.getStatus());
         }
     }
 

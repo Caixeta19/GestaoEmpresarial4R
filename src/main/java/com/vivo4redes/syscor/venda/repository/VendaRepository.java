@@ -4,7 +4,9 @@ import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -33,6 +35,23 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
     @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "itens"})
     @Query("select v from Venda v where v.id = :id")
     Optional<Venda> buscarComDetalhesPorId(@Param("id") Long id);
+
+    /**
+     * Trava a linha da venda (SELECT ... FOR UPDATE) para serializar edição do carrinho e expiração.
+     * Sem @EntityGraph de propósito: o PostgreSQL não aceita FOR UPDATE no lado opcional de um LEFT JOIN.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select v from Venda v where v.id = :id")
+    Optional<Venda> buscarPorIdForUpdate(@Param("id") Long id);
+
+    /** Carrinhos (ABERTA) sem atividade desde antes de {@code limite}, mais antigos primeiro. */
+    @Query("""
+        select v.id from Venda v
+        where v.status = com.vivo4redes.syscor.venda.enums.StatusVenda.ABERTA
+          and v.atualizadoEm < :limite
+        order by v.atualizadoEm
+        """)
+    List<Long> buscarIdsCarrinhosAbandonados(@Param("limite") Instant limite);
 
     @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "itens"})
     @Query("select distinct v from Venda v order by v.criadoEm desc")

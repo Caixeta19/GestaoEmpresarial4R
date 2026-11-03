@@ -172,6 +172,7 @@ class VendaServiceReservaTest {
     private Venda venda(StatusVenda status) {
         Venda venda = Venda.builder().id(1L).status(status).build();
         lenient().when(vendaRepository.buscarComDetalhesPorId(1L)).thenReturn(Optional.of(venda));
+        lenient().when(vendaRepository.buscarPorIdForUpdate(1L)).thenReturn(Optional.of(venda));
         return venda;
     }
 

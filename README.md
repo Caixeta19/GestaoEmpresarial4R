@@ -617,6 +617,8 @@ docker compose -f Docker-compose.yml up --build
 | `WHATSAPP_PHONE_NUMBER_ID` | Sim, para disparar mailing | ID do número na Graph API |
 | `WHATSAPP_ACCESS_TOKEN` | Sim, para disparar mailing | Token de acesso da Graph API |
 | `WHATSAPP_WABA_ID` | Sim, para disparar mailing | ID da WhatsApp Business Account |
+| `SYSCOR_CARRINHO_EXPIRACAO` | Não (padrão `24h`) | Tempo sem atividade para cancelar um carrinho `ABERTA` e liberar o estoque reservado (formato `Duration`: `30m`, `24h`, `2d`) |
+| `SYSCOR_CARRINHO_VERIFICACAO_MS` | Não (padrão `300000`) | Intervalo, em ms, entre as verificações do job de expiração |
 
 Sem as três variáveis do WhatsApp, a aplicação sobe normalmente — o disparo de
 campanha que falha com `NegocioException` no momento do envio, não no boot.
