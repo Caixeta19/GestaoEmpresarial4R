@@ -143,10 +143,17 @@ CANCELADA → (terminal, sem saída)
 
 ### Tabela de preços
 
-- Cada importação da planilha da Telefônica vira uma `TabelaPrecoExecucao` (cabeçalho +
-  totalizadores) e uma linha `ProdutoPrecoPlano` por combinação produto × oferta.
-- Quando o "Nome Comercial" da planilha não resolve para nenhum SKU do catálogo,
-  `produto` fica `null` e `encontrado = false` — a linha não é descartada, fica marcada.
+- Cada upload da planilha da Telefônica vira uma `TabelaPrecoExecucao`; a mais recente é a
+  **vigente**. A importação é toda numa transação (se falhar, a vigente continua a anterior).
+- O parser localiza abas, blocos (`TABELA REGULAR`/`TABELA RENOVA`) e colunas pelo texto do
+  cabeçalho e grava, por execução: `tb_preco_item` (Nome Comercial × tabela × grupo do plano:
+  preço cheio, PIX e 13x–21x), `tb_plano_vivo` (aba PLANOS) e `tb_produto_vivo` (aba PRODUTOS).
+- O preço do item na venda é calculado no backend (`PrecoVigenteService`) por produto + grupo
+  do plano + tabela + forma de pagamento; o `valorUnitario` do front é ignorado para aparelho e
+  acessório. Sem preço na vigente → 422.
+- `valor_venda` do estoque é a referência `REGULAR`/`PRE` cheia, atualizada no upload e ao
+  importar estoque novo (só `DISPONIVEL`/`RESERVADO`; `VENDIDO` não muda).
+- **`tb_produto_preco_plano` deixou de ser usada na V24 e será removida numa migration futura.**
 
 ### Protocolo documental
 
@@ -509,11 +516,14 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/produtos` | Cadastrar produto |
 | GET | `/produtos/{id}` | Buscar produto |
 | GET | `/produtos` | Listar produtos |
-| POST | `/produtos/precos/importar-telefonica` | Importar tabela de preços da Telefônica (multipart) |
-| GET | `/produtos/precos/execucoes/{execucaoId}` | Buscar resumo de uma importação de preços |
-| GET | `/produtos/precos/produtos/{produtoId}` | Listar preços de um produto |
-| GET | `/produtos/precos/ofertas` | Listar ofertas de comunicação disponíveis |
-| GET | `/produtos/precos` | Listar produtos por oferta (`?oferta=`) |
+| POST | `/produtos/precos/importar-telefonica` | Importar tabela de preços da Telefônica (multipart `arquivo`); devolve o relatório da importação |
+| GET | `/produtos/precos/vigente` | Execução vigente: vigência, data da importação e totais |
+| GET | `/produtos/precos/planos?busca=&disponivelAlta=` | Planos da vigente (combo "Plano Ativo / Linha") |
+| GET | `/produtos/precos/item?estoqueId=&plano=&tabela=&pagamento=&parcelas=` | Preço de uma unidade do estoque (422 se sem preço) |
+| GET | `/produtos/precos/execucoes/{execucaoId}` | **Deprecado** — use `/vigente` |
+| GET | `/produtos/precos/produtos/{produtoId}` | **Deprecado** — use `/item`. Agora devolve os preços REGULAR da unidade por grupo do plano |
+| GET | `/produtos/precos/ofertas` | **Deprecado** — use `/planos`. Agora devolve os grupos de plano com preço (`PRE`, `VIVO_V`...) |
+| GET | `/produtos/precos?oferta=` | **Deprecado** — use `/item`. `oferta` = grupo do plano; `produtoId` vem nulo |
 | PUT | `/documental/protocolos/{vendaId}` | Salvar/atualizar protocolo documental da venda |
 | GET | `/documental/protocolos/{vendaId}` | Buscar protocolo por venda |
 | GET | `/documental/protocolos` | Buscar por número de protocolo GED |
@@ -619,6 +629,7 @@ docker compose -f Docker-compose.yml up --build
 | `WHATSAPP_WABA_ID` | Sim, para disparar mailing | ID da WhatsApp Business Account |
 | `SYSCOR_CARRINHO_EXPIRACAO` | Não (padrão `24h`) | Tempo sem atividade para cancelar um carrinho `ABERTA` e liberar o estoque reservado (formato `Duration`: `30m`, `24h`, `2d`) |
 | `SYSCOR_CARRINHO_VERIFICACAO_MS` | Não (padrão `300000`) | Intervalo, em ms, entre as verificações do job de expiração |
+| `SYSCOR_PRECO_CHIP` | Não (padrão `13.00`) | Preço fixo do chip (`syscor.precos.chip`); o PVP do aparelho não inclui o chip |
 
 Sem as três variáveis do WhatsApp, a aplicação sobe normalmente — o disparo de
 campanha que falha com `NegocioException` no momento do envio, não no boot.
