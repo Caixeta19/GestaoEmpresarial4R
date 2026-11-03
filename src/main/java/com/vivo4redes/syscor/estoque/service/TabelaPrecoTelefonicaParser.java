@@ -1,8 +1,15 @@
 package com.vivo4redes.syscor.estoque.service;
 
-import com.vivo4redes.syscor.estoque.dto.LinhaPrecoDTO;
+import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
+import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaPlano;
+import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaPreco;
+import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaProduto;
 import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.util.TextoUtil;
 import org.apache.poi.ss.usermodel.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -10,218 +17,416 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.text.Normalizer;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Lê a planilha de preço enviada pela Telefônica (export manual diário) e
- * extrai, por aba, o preço da TABELA REGULAR por (produto, oferta de
- * comunicação/plano) — sem forma de pagamento (PIX/parcelas ficam de fora,
- * por decisão de escopo) e sem TABELA RENOVA (deferida).
+ * Lê a planilha de preços da Telefônica (.xlsx, várias abas).
  * <p>
- * Cada aba de preço só tem "Nome Comercial" como identificador — a
- * correlação com o Cod_Sap (nosso SKU) vem da aba PRODUTOS, que funciona
- * como um dicionário Nome Comercial → Cod_Sap.
+ * Tudo é localizado pelo texto do cabeçalho (normalizado: sem acento, minúsculas, espaços colapsados),
+ * nunca por posição fixa — as colunas mudam entre entregas.
+ * <ul>
+ *   <li>ÍNDICE: vigência ("Vigência a partir de").</li>
+ *   <li>PLANOS e PRODUTOS (obrigatórias): plano -> grupo de preço; Cod_Sap -> Nome Comercial.</li>
+ *   <li>SMARTPHONES e ELETRÔNICOS_LP_Conectados: blocos TABELA REGULAR e TABELA RENOVA (linha acima do
+ *       cabeçalho); em cada bloco, por grupo do plano: preço cheio, PIX e Vivo Pay, 13x–21x. Outros blocos
+ *       (TABELA ANTERIOR...) e colunas como "Oferta de Comunicação" e "DESCONTO" são ignorados.</li>
+ *   <li>ELETRÔNICOS_LP_Não Conectados, VITRINE e SMARTPHONES_Demo: sem plano (SEM_PLANO / REGULAR).</li>
+ * </ul>
  */
 @Component
 public class TabelaPrecoTelefonicaParser {
 
-    /** Nome da aba -> rótulo salvo em ProdutoPrecoPlano.categoriaPlanilha. Fora dessa lista, a aba é ignorada. */
-    private static final Map<String, String> ABAS_DE_PRECO = Map.of(
-            "SMARTPHONES", "SMARTPHONES",
-            "ELETRÔNICOS_LP_Conectados", "ELETRONICOS_CONECTADOS",
-            "ELETRÔNICOS_LP_Não Conectados", "ELETRONICOS_NAO_CONECTADOS",
-            "VITRINE", "VITRINE",
-            "SMARTPHONES_Demo", "SMARTPHONES_DEMO"
-    );
+    private static final Logger log = LoggerFactory.getLogger(TabelaPrecoTelefonicaParser.class);
 
-    private static final Set<String> ALIASES_PRECO = Set.of("pre", "pvp", "pvp base", "pvd");
-    private static final Pattern PADRAO_VIGENCIA = Pattern.compile("(\\d{2}/\\d{2}/\\d{4})");
+    private static final String ABA_INDICE = "indice";
+    private static final String ABA_PLANOS = "planos";
+    private static final String ABA_PRODUTOS = "produtos";
+    private static final List<String> ABAS_COM_PLANO = List.of("smartphones", "eletronicos_lp_conectados");
+    private static final List<String> ABAS_SEM_PLANO = List.of("eletronicos_lp_nao conectados", "vitrine", "smartphones_demo");
+
+    private static final String COL_NOME_COMERCIAL = "nome comercial";
+    private static final String COL_PIX = "pix e vivo pay";
+    private static final List<String> COLS_PRECO_SEM_PLANO = List.of("pvp base", "pvp", "pvd");
+    private static final Pattern COL_PARCELA = Pattern.compile("^(\\d{1,2})\\s*x$");
+    private static final int PRIMEIRA_PARCELA_A_PARTE = 13;
+    private static final int ULTIMA_PARCELA = 21;
+
+    private static final Pattern DATA = Pattern.compile("(\\d{2}/\\d{2}/\\d{4})");
+    private static final DateTimeFormatter DD_MM_YYYY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final int LINHAS_VARRIDAS_NO_CABECALHO = 10;
+
+    private final DataFormatter formatter = new DataFormatter();
 
     public ResultadoParseTabelaPreco parsear(MultipartFile arquivo) {
         if (arquivo == null || arquivo.isEmpty()) {
             throw new NegocioException("Envie a planilha de preço da Telefônica (.xlsx).");
         }
-
         try (InputStream is = arquivo.getInputStream(); Workbook wb = WorkbookFactory.create(is)) {
-            DataFormatter formatter = new DataFormatter();
-
-            Map<String, Set<String>> indiceSku = parsearIndiceProdutos(wb, formatter);
-            String vigencia = null;
-            List<LinhaPrecoDTO> linhas = new ArrayList<>();
-
-            for (Map.Entry<String, String> abaAlvo : ABAS_DE_PRECO.entrySet()) {
-                Sheet sheet = wb.getSheet(abaAlvo.getKey());
-                if (sheet == null) {
-                    continue; // aba opcional ausente nessa entrega específica — segue sem quebrar
-                }
-                if (vigencia == null) {
-                    vigencia = extrairVigencia(sheet, formatter);
-                }
-                linhas.addAll(parsearAbaDePreco(sheet, abaAlvo.getValue(), formatter));
-            }
-
-            if (linhas.isEmpty()) {
-                throw new NegocioException("Nenhuma linha de preço foi encontrada nas abas esperadas (" +
-                        String.join(", ", ABAS_DE_PRECO.keySet()) + ").");
-            }
-
-            return new ResultadoParseTabelaPreco(indiceSku, linhas, vigencia);
-        } catch (IOException e) {
+            return parsear(wb);
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof NegocioException ne) throw ne;
             throw new NegocioException("Não foi possível ler a planilha enviada: " + e.getMessage());
         }
     }
 
-    // ------------------------------------------------------------ aba PRODUTOS (dicionário SKU)
+    ResultadoParseTabelaPreco parsear(Workbook wb) {
+        Sheet planos = aba(wb, ABA_PLANOS)
+                .orElseThrow(() -> new NegocioException("A planilha não tem a aba PLANOS."));
+        Sheet produtos = aba(wb, ABA_PRODUTOS)
+                .orElseThrow(() -> new NegocioException("A planilha não tem a aba PRODUTOS."));
 
-    private Map<String, Set<String>> parsearIndiceProdutos(Workbook wb, DataFormatter formatter) {
-        Sheet sheet = wb.getSheet("PRODUTOS");
-        if (sheet == null) {
-            throw new NegocioException("A aba 'PRODUTOS' (Cod_Sap x Nome Comercial) não foi encontrada na planilha — ela é obrigatória para resolver o SKU.");
-        }
+        LocalDate vigencia = aba(wb, ABA_INDICE).map(this::lerVigencia).orElse(null);
+        List<LinhaPlano> linhasPlano = lerPlanos(planos);
+        List<LinhaProduto> linhasProduto = lerProdutos(produtos);
 
-        int linhaCabecalho = localizarLinhaCabecalho(sheet, formatter, "cod_sap");
-        Row headerRow = sheet.getRow(linhaCabecalho);
-
-        Integer idxCodSap = null, idxNomeComercial = null;
-        for (int c = 0; c < headerRow.getLastCellNum(); c++) {
-            String nome = normalizar(formatter.formatCellValue(headerRow.getCell(c)));
-            if (nome.equals("cod_sap") || nome.equals("cod sap") || nome.equals("codsap")) idxCodSap = c;
-            if (nome.equals("nome comercial")) idxNomeComercial = c;
+        List<LinhaPreco> precos = new ArrayList<>();
+        Map<String, Integer> linhasPorAba = new LinkedHashMap<>();
+        for (String nome : ABAS_COM_PLANO) {
+            aba(wb, nome).ifPresent(s -> linhasPorAba.put(s.getSheetName(), lerAbaComPlano(s, precos)));
         }
-        if (idxCodSap == null || idxNomeComercial == null) {
-            throw new NegocioException("Não encontrei as colunas Cod_Sap e/ou Nome Comercial na aba PRODUTOS.");
+        for (String nome : ABAS_SEM_PLANO) {
+            aba(wb, nome).ifPresent(s -> linhasPorAba.put(s.getSheetName(), lerAbaSemPlano(s, precos)));
         }
-
-        Map<String, Set<String>> indice = new HashMap<>();
-        for (int r = linhaCabecalho + 1; r <= sheet.getLastRowNum(); r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
-            String codSap = valorTexto(row, idxCodSap, formatter);
-            String nomeComercial = valorTexto(row, idxNomeComercial, formatter);
-            if (codSap.isBlank() || nomeComercial.isBlank()) continue;
-            indice.computeIfAbsent(normalizar(nomeComercial), k -> new HashSet<>()).add(codSap);
+        if (precos.isEmpty()) {
+            throw new NegocioException("Nenhum preço foi encontrado nas abas SMARTPHONES, ELETRÔNICOS, VITRINE ou Demo.");
         }
-        return indice;
+        return new ResultadoParseTabelaPreco(vigencia, precos, linhasPlano, linhasProduto, linhasPorAba);
     }
 
-    // ------------------------------------------------------------ abas de preço
+    // ------------------------------------------------------------------ ÍNDICE
 
-    private List<LinhaPrecoDTO> parsearAbaDePreco(Sheet sheet, String categoriaPlanilha, DataFormatter formatter) {
-        int linhaCabecalho = localizarLinhaCabecalho(sheet, formatter, "nome comercial");
-        int limiteColunaExclusivo = localizarLimiteTabelaRegular(sheet, linhaCabecalho, formatter);
-
-        Row headerRow = sheet.getRow(linhaCabecalho);
-        Integer idxNomeComercial = null, idxOferta = null, idxPreco = null;
-        int ultimaColuna = Math.min(headerRow.getLastCellNum(), limiteColunaExclusivo);
-
-        for (int c = 0; c < ultimaColuna; c++) {
-            String nomeCol = normalizar(formatter.formatCellValue(headerRow.getCell(c)));
-            if (nomeCol.equals("nome comercial") && idxNomeComercial == null) idxNomeComercial = c;
-            if (nomeCol.equals("oferta de comunicacao") && idxOferta == null) idxOferta = c;
-            if (ALIASES_PRECO.contains(nomeCol) && idxPreco == null) idxPreco = c;
-        }
-
-        if (idxNomeComercial == null || idxPreco == null) {
-            throw new NegocioException("Não encontrei as colunas de Nome Comercial e/ou preço (PRÉ/PVP/PVD) na aba '"
-                    + sheet.getSheetName() + "' dentro do bloco TABELA REGULAR.");
-        }
-
-        List<LinhaPrecoDTO> linhas = new ArrayList<>();
-        for (int r = linhaCabecalho + 1; r <= sheet.getLastRowNum(); r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
-
-            String nomeComercial = valorTexto(row, idxNomeComercial, formatter);
-            if (nomeComercial.isBlank()) continue;
-
-            BigDecimal preco = valorNumerico(row, idxPreco, formatter);
-            if (preco == null) continue;
-
-            String oferta = idxOferta == null ? null : valorTexto(row, idxOferta, formatter);
-            if (oferta != null && (oferta.isBlank() || oferta.equals("-"))) oferta = null;
-
-            linhas.add(new LinhaPrecoDTO(nomeComercial, categoriaPlanilha, oferta, preco));
-        }
-        return linhas;
-    }
-
-    /** Localiza a linha (0-based) cujo texto de alguma célula, normalizado, é igual a `marcador`. */
-    private int localizarLinhaCabecalho(Sheet sheet, DataFormatter formatter, String marcador) {
-        int limiteVarredura = Math.min(sheet.getLastRowNum(), sheet.getFirstRowNum() + 10);
-        for (int r = sheet.getFirstRowNum(); r <= limiteVarredura; r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
+    private LocalDate lerVigencia(Sheet sheet) {
+        for (Row row : sheet) {
             for (Cell cell : row) {
-                if (normalizar(formatter.formatCellValue(cell)).equals(marcador)) {
-                    return r;
-                }
-            }
-        }
-        throw new NegocioException("Não encontrei a linha de cabeçalho ('" + marcador + "') na aba " + sheet.getSheetName() + ".");
-    }
-
-    /** Colunas do bloco TABELA REGULAR terminam onde começa RENOVA/ANTERIOR/tabela por bandeira de cartão. */
-    private int localizarLimiteTabelaRegular(Sheet sheet, int linhaCabecalho, DataFormatter formatter) {
-        int limite = Integer.MAX_VALUE;
-        for (int r = sheet.getFirstRowNum(); r < linhaCabecalho; r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
-            for (Cell cell : row) {
-                String texto = normalizar(formatter.formatCellValue(cell));
-                if (texto.contains("renova") || texto.contains("anterior")
-                        || texto.contains("cartao") || texto.contains("cartoes")) {
-                    limite = Math.min(limite, cell.getColumnIndex());
-                }
-            }
-        }
-        return limite;
-    }
-
-    private String extrairVigencia(Sheet sheet, DataFormatter formatter) {
-        int limiteVarredura = Math.min(sheet.getLastRowNum(), sheet.getFirstRowNum() + 3);
-        for (int r = sheet.getFirstRowNum(); r <= limiteVarredura; r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
-            for (Cell cell : row) {
-                String texto = formatter.formatCellValue(cell);
-                if (texto != null && normalizar(texto).contains("vigencia")) {
-                    Matcher m = PADRAO_VIGENCIA.matcher(texto);
-                    if (m.find()) return m.group(1);
+                String texto = texto(cell);
+                if (!TextoUtil.normalizar(texto).contains("vigencia a partir de")) continue;
+                LocalDate naPropriaCelula = dataNoTexto(texto);
+                if (naPropriaCelula != null) return naPropriaCelula;
+                // Valor na célula à direita (a primeira preenchida).
+                for (int c = cell.getColumnIndex() + 1; c <= row.getLastCellNum(); c++) {
+                    LocalDate data = data(row.getCell(c));
+                    if (data != null) return data;
                 }
             }
         }
         return null;
     }
 
-    // ------------------------------------------------------------ utilitários
-
-    private String valorTexto(Row row, int idx, DataFormatter formatter) {
-        Cell cell = row.getCell(idx);
-        return cell == null ? "" : formatter.formatCellValue(cell).trim();
+    private LocalDate data(Cell cell) {
+        if (cell == null) return null;
+        if (cell.getCellType() == CellType.NUMERIC && DateUtil.isCellDateFormatted(cell)) {
+            return cell.getLocalDateTimeCellValue().toLocalDate();
+        }
+        return dataNoTexto(texto(cell));
     }
 
-    private BigDecimal valorNumerico(Row row, int idx, DataFormatter formatter) {
-        Cell cell = row.getCell(idx);
-        if (cell == null) return null;
-        if (cell.getCellType() == CellType.NUMERIC) {
-            return BigDecimal.valueOf(cell.getNumericCellValue()).setScale(2, RoundingMode.HALF_UP);
-        }
-        String texto = formatter.formatCellValue(cell).trim();
-        if (texto.isBlank()) return null;
-        texto = texto.replace("R$", "").trim().replace(".", "").replace(",", ".");
+    private LocalDate dataNoTexto(String texto) {
+        Matcher m = DATA.matcher(texto == null ? "" : texto);
+        if (!m.find()) return null;
         try {
-            return new BigDecimal(texto).setScale(2, RoundingMode.HALF_UP);
-        } catch (NumberFormatException e) {
+            return LocalDate.parse(m.group(1), DD_MM_YYYY);
+        } catch (DateTimeParseException e) {
             return null;
         }
     }
 
-    private String normalizar(String texto) {
-        if (texto == null) return "";
-        String semAcento = Normalizer.normalize(texto, Normalizer.Form.NFD).replaceAll("\\p{M}", "");
-        return semAcento.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    // ------------------------------------------------------------------ PLANOS
+
+    private List<LinhaPlano> lerPlanos(Sheet sheet) {
+        Cabecalho cab = cabecalho(sheet, "grupamento atual")
+                .orElseThrow(() -> new NegocioException("Aba PLANOS sem a coluna 'GRUPAMENTO ATUAL'."));
+        int colNome = cab.exigir("nome do plano cliente sistema"::equals, "PLANOS", "NOME DO PLANO CLIENTE SISTEMA");
+        int colGrupo = cab.coluna("grupamento atual"::equals);
+        int colTipo = cab.coluna("tipo de plano"::equals);
+        int colSistema = cab.coluna("sistema"::equals);
+        int colCodSistema = cab.coluna("cod sistema"::equals);
+        int colCodSap = cab.coluna(h -> h.startsWith("cod sap"));
+
+        List<LinhaPlano> planos = new ArrayList<>();
+        for (int r = cab.linha() + 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            String nome = texto(row, colNome);
+            if (nome.isBlank()) continue;
+            Optional<GrupoPlano> grupo = GrupoPlano.deRotulo(texto(row, colGrupo));
+            if (grupo.isEmpty()) {
+                log.warn("Plano '{}' com GRUPAMENTO ATUAL desconhecido ('{}') — ignorado.", nome, texto(row, colGrupo));
+                continue;
+            }
+            String tipo = TextoUtil.normalizar(texto(row, colTipo));
+            boolean disponivelAlta = tipo.contains("alta") || tipo.contains("migracao");
+            planos.add(new LinhaPlano(nome, vazioComoNull(texto(row, colSistema)), vazioComoNull(texto(row, colCodSistema)),
+                    vazioComoNull(texto(row, colCodSap)), grupo.get(), disponivelAlta));
+        }
+        return planos;
+    }
+
+    // ------------------------------------------------------------------ PRODUTOS
+
+    private List<LinhaProduto> lerProdutos(Sheet sheet) {
+        Cabecalho cab = cabecalho(sheet, "cod_sap")
+                .orElseThrow(() -> new NegocioException("Aba PRODUTOS sem a coluna 'Cod_Sap'."));
+        int colCodSap = cab.coluna("cod_sap"::equals);
+        int colNome = cab.exigir(COL_NOME_COMERCIAL::equals, "PRODUTOS", "Nome Comercial");
+        int colDescricao = cab.coluna("descricao_sap"::equals);
+        int colModelo = cab.coluna(h -> h.startsWith("modelo"));
+        int colCor = cab.coluna("cor"::equals);
+        int colCategoria = cab.coluna("categoria"::equals);
+
+        List<LinhaProduto> produtos = new ArrayList<>();
+        for (int r = cab.linha() + 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            String codSap = texto(row, colCodSap);
+            String nome = texto(row, colNome);
+            if (codSap.isBlank() || nome.isBlank()) continue;
+            produtos.add(new LinhaProduto(codSap, vazioComoNull(texto(row, colDescricao)), vazioComoNull(texto(row, colModelo)),
+                    vazioComoNull(texto(row, colCor)), nome, vazioComoNull(texto(row, colCategoria))));
+        }
+        return produtos;
+    }
+
+    // ------------------------------------------------------------------ abas com plano
+
+    /** Bloco de preços (TABELA REGULAR/RENOVA) e, dentro dele, as colunas de cada grupo do plano. */
+    private record Bloco(TabelaPreco tabela, Map<GrupoPlano, ColunasGrupo> grupos) {
+    }
+
+    private record ColunasGrupo(int preco, Integer pix, Map<Integer, Integer> parcelas) {
+    }
+
+    private int lerAbaComPlano(Sheet sheet, List<LinhaPreco> destino) {
+        Optional<Cabecalho> cabOpt = cabecalho(sheet, COL_NOME_COMERCIAL);
+        if (cabOpt.isEmpty() || cabOpt.get().linha() == 0) {
+            log.warn("Aba '{}' sem cabeçalho 'Nome Comercial' com a linha de blocos acima — ignorada.", sheet.getSheetName());
+            return 0;
+        }
+        Cabecalho cab = cabOpt.get();
+        int colNome = cab.coluna(COL_NOME_COMERCIAL::equals);
+        List<Bloco> blocos = localizarBlocos(sheet.getRow(cab.linha() - 1), cab);
+
+        int itens = 0;
+        for (int r = cab.linha() + 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            String nome = texto(row, colNome);
+            if (nome.isBlank()) continue;
+            boolean algumPreco = false;
+            for (Bloco bloco : blocos) {
+                for (Map.Entry<GrupoPlano, ColunasGrupo> g : bloco.grupos().entrySet()) {
+                    LinhaPreco linha = linhaPreco(row, sheet.getSheetName(), bloco.tabela(), g.getKey(), nome, g.getValue());
+                    if (linha != null) {
+                        destino.add(linha);
+                        algumPreco = true;
+                    }
+                }
+            }
+            if (algumPreco) itens++;
+        }
+        return itens;
+    }
+
+    /**
+     * Na linha de blocos, cada "TABELA X" começa um bloco que vai até o próximo "TABELA ...".
+     * Só REGULAR e RENOVA são lidos; TABELA ANTERIOR e os demais encerram o bloco anterior e são ignorados.
+     */
+    private List<Bloco> localizarBlocos(Row linhaBlocos, Cabecalho cab) {
+        if (linhaBlocos == null) return List.of();
+        List<int[]> marcadores = new ArrayList<>(); // {coluna, tabela.ordinal() ou -1}
+        for (Cell cell : linhaBlocos) {
+            String t = TextoUtil.normalizar(texto(cell));
+            if (!t.startsWith("tabela")) continue;
+            int tabela = t.startsWith("tabela regular") ? TabelaPreco.REGULAR.ordinal()
+                    : t.startsWith("tabela renova") ? TabelaPreco.RENOVA.ordinal() : -1;
+            marcadores.add(new int[]{cell.getColumnIndex(), tabela});
+        }
+        marcadores.sort(Comparator.comparingInt(m -> m[0]));
+
+        List<Bloco> blocos = new ArrayList<>();
+        for (int i = 0; i < marcadores.size(); i++) {
+            int tabela = marcadores.get(i)[1];
+            if (tabela < 0) continue;
+            int inicio = marcadores.get(i)[0];
+            int fim = i + 1 < marcadores.size() ? marcadores.get(i + 1)[0] : cab.ultimaColuna() + 1;
+            blocos.add(new Bloco(TabelaPreco.values()[tabela], gruposNoIntervalo(cab, inicio, fim)));
+        }
+        return blocos;
+    }
+
+    /** Dentro de [inicio, fim): coluna do grupo = preço cheio; seguintes até o próximo grupo = PIX e parcelas. */
+    private Map<GrupoPlano, ColunasGrupo> gruposNoIntervalo(Cabecalho cab, int inicio, int fim) {
+        Map<GrupoPlano, ColunasGrupo> grupos = new LinkedHashMap<>();
+        GrupoPlano atual = null;
+        int colPreco = -1;
+        Integer colPix = null;
+        Map<Integer, Integer> parcelas = new TreeMap<>();
+        for (int c = inicio; c < fim; c++) {
+            String h = cab.titulo(c);
+            Optional<GrupoPlano> grupo = GrupoPlano.deRotulo(h).filter(g -> g != GrupoPlano.SEM_PLANO);
+            if (grupo.isPresent()) {
+                if (atual != null) grupos.putIfAbsent(atual, new ColunasGrupo(colPreco, colPix, parcelas));
+                atual = grupo.get();
+                colPreco = c;
+                colPix = null;
+                parcelas = new TreeMap<>();
+            } else if (atual != null) {
+                if (h.equals(COL_PIX)) {
+                    colPix = c;
+                } else {
+                    Integer n = numeroDaParcela(h);
+                    if (n != null && n >= PRIMEIRA_PARCELA_A_PARTE && n <= ULTIMA_PARCELA) parcelas.put(n, c);
+                }
+            }
+        }
+        if (atual != null) grupos.putIfAbsent(atual, new ColunasGrupo(colPreco, colPix, parcelas));
+        return grupos;
+    }
+
+    // ------------------------------------------------------------------ abas sem plano
+
+    private int lerAbaSemPlano(Sheet sheet, List<LinhaPreco> destino) {
+        Optional<Cabecalho> cabOpt = cabecalho(sheet, COL_NOME_COMERCIAL);
+        if (cabOpt.isEmpty()) {
+            log.warn("Aba '{}' sem cabeçalho 'Nome Comercial' — ignorada.", sheet.getSheetName());
+            return 0;
+        }
+        Cabecalho cab = cabOpt.get();
+        int colNome = cab.coluna(COL_NOME_COMERCIAL::equals);
+        int colPreco = -1;
+        for (String alias : COLS_PRECO_SEM_PLANO) {
+            colPreco = cab.coluna(alias::equals);
+            if (colPreco >= 0) break;
+        }
+        if (colPreco < 0) {
+            log.warn("Aba '{}' sem coluna de preço (PVP Base/PVP/PVD) — ignorada.", sheet.getSheetName());
+            return 0;
+        }
+        Integer colPix = cab.coluna(COL_PIX::equals) >= 0 ? cab.coluna(COL_PIX::equals) : null;
+        Map<Integer, Integer> parcelas = new TreeMap<>();
+        for (int c = colPreco + 1; c <= cab.ultimaColuna(); c++) {
+            Integer n = numeroDaParcela(cab.titulo(c));
+            if (n != null && n >= PRIMEIRA_PARCELA_A_PARTE && n <= ULTIMA_PARCELA) parcelas.put(n, c);
+        }
+        ColunasGrupo colunas = new ColunasGrupo(colPreco, colPix, parcelas);
+
+        int itens = 0;
+        for (int r = cab.linha() + 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            String nome = texto(row, colNome);
+            if (nome.isBlank()) continue;
+            LinhaPreco linha = linhaPreco(row, sheet.getSheetName(), TabelaPreco.REGULAR, GrupoPlano.SEM_PLANO, nome, colunas);
+            if (linha != null) {
+                destino.add(linha);
+                itens++;
+            }
+        }
+        return itens;
+    }
+
+    // ------------------------------------------------------------------ linha de preço
+
+    /** null quando não há preço cheio numérico (linha pulada). */
+    private LinhaPreco linhaPreco(Row row, String aba, TabelaPreco tabela, GrupoPlano grupo, String nome, ColunasGrupo cols) {
+        BigDecimal preco = numero(row.getCell(cols.preco()));
+        if (preco == null) return null;
+        BigDecimal pix = cols.pix() == null ? null : numero(row.getCell(cols.pix()));
+        Map<Integer, BigDecimal> parcelas = new TreeMap<>();
+        cols.parcelas().forEach((n, c) -> {
+            BigDecimal v = numero(row.getCell(c));
+            if (v != null) parcelas.put(n, v);
+        });
+        return new LinhaPreco(aba, tabela, grupo, nome.trim(), preco, pix, parcelas.isEmpty() ? null : parcelas);
+    }
+
+    // ------------------------------------------------------------------ cabeçalho
+
+    /** Linha de cabeçalho: coluna -> título normalizado. */
+    private record Cabecalho(int linha, Map<Integer, String> titulos) {
+        int coluna(Predicate<String> criterio) {
+            return titulos.entrySet().stream().filter(e -> criterio.test(e.getValue()))
+                    .mapToInt(Map.Entry::getKey).min().orElse(-1);
+        }
+
+        int exigir(Predicate<String> criterio, String aba, String nomeColuna) {
+            int c = coluna(criterio);
+            if (c < 0) throw new NegocioException("Aba " + aba + " sem a coluna '" + nomeColuna + "'.");
+            return c;
+        }
+
+        String titulo(int coluna) {
+            return titulos.getOrDefault(coluna, "");
+        }
+
+        int ultimaColuna() {
+            return titulos.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1);
+        }
+    }
+
+    /** Primeira linha (entre as iniciais) que tem uma célula com o título-âncora informado. */
+    private Optional<Cabecalho> cabecalho(Sheet sheet, String ancora) {
+        int limite = Math.min(sheet.getLastRowNum(), sheet.getFirstRowNum() + LINHAS_VARRIDAS_NO_CABECALHO);
+        for (int r = Math.max(sheet.getFirstRowNum(), 0); r <= limite; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            Map<Integer, String> titulos = new LinkedHashMap<>();
+            for (Cell cell : row) {
+                String t = TextoUtil.normalizar(texto(cell));
+                if (!t.isEmpty()) titulos.put(cell.getColumnIndex(), t);
+            }
+            if (titulos.containsValue(ancora)) return Optional.of(new Cabecalho(r, titulos));
+        }
+        return Optional.empty();
+    }
+
+    // ------------------------------------------------------------------ utilitários
+
+    /** Aba pelo nome normalizado ("ÍNDICE" = "indice", "ELETRÔNICOS_LP_Não Conectados" = "eletronicos_lp_nao conectados"). */
+    private Optional<Sheet> aba(Workbook wb, String nomeNormalizado) {
+        for (Sheet s : wb) {
+            if (TextoUtil.normalizar(s.getSheetName()).equals(nomeNormalizado)) return Optional.of(s);
+        }
+        return Optional.empty();
+    }
+
+    private Integer numeroDaParcela(String titulo) {
+        Matcher m = COL_PARCELA.matcher(titulo);
+        return m.matches() ? Integer.valueOf(m.group(1)) : null;
+    }
+
+    private String texto(Row row, int coluna) {
+        return coluna < 0 || row == null ? "" : texto(row.getCell(coluna));
+    }
+
+    private String texto(Cell cell) {
+        return cell == null ? "" : formatter.formatCellValue(cell).trim();
+    }
+
+    private String vazioComoNull(String texto) {
+        return ConversorValores.texto(texto);
+    }
+
+    /**
+     * Número da célula em BigDecimal(2, HALF_UP). Célula numérica (ou fórmula numérica) usa a representação decimal
+     * exata do valor gravado; texto ("3059.1", "R$ 12.909,00") passa por ConversorValores.decimal. Não numérico -> null.
+     */
+    private BigDecimal numero(Cell cell) {
+        if (cell == null) return null;
+        CellType tipo = cell.getCellType() == CellType.FORMULA ? cell.getCachedFormulaResultType() : cell.getCellType();
+        if (tipo == CellType.NUMERIC) {
+            return new BigDecimal(Double.toString(cell.getNumericCellValue())).setScale(2, RoundingMode.HALF_UP);
+        }
+        if (tipo != CellType.STRING) return null;
+        try {
+            return ConversorValores.decimal(cell.getStringCellValue());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

@@ -25,6 +25,15 @@ public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long
 
     List<EstoqueGeral> findByStatus(StatusEstoque status);
 
+    List<EstoqueGeral> findByStatusIn(java.util.Collection<StatusEstoque> status);
+
+    /** Chaves de modelo de todo o estoque (qualquer status), para contar itens da planilha sem estoque. */
+    @Query("select distinct e.modeloComercial from EstoqueGeral e where e.modeloComercial is not null")
+    List<String> modelosDistintos();
+
+    @Query("select distinct e.codigoAcessorio from EstoqueGeral e where e.codigoAcessorio is not null")
+    List<String> codigosAcessorioDistintos();
+
     List<EstoqueGeral> findBySerialInAndStatusNot(List<String> seriais, StatusEstoque status);
 
     // 2. Buscas por modelo

@@ -2,6 +2,7 @@ package com.vivo4redes.syscor.estoque.controller;
 
 import com.vivo4redes.syscor.estoque.dto.response.ProdutoComPrecoResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.ProdutoPrecoPlanoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.ImportacaoTabelaPrecoResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.TabelaPrecoResumoResponseDTO;
 import com.vivo4redes.syscor.estoque.service.TabelaPrecoService;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +23,7 @@ public class TabelaPrecoController {
     private final TabelaPrecoService tabelaPrecoService;
 
     @PostMapping(value = "/importar-telefonica", consumes = "multipart/form-data")
-    public ResponseEntity<TabelaPrecoResumoResponseDTO> importar(@RequestParam("arquivo") MultipartFile arquivo) {
+    public ResponseEntity<ImportacaoTabelaPrecoResponseDTO> importar(@RequestParam("arquivo") MultipartFile arquivo) {
         var resumo = tabelaPrecoService.importar(arquivo);
         return ResponseEntity.status(HttpStatus.CREATED).body(resumo);
     }
