@@ -346,10 +346,9 @@ public class EstoqueGeralService {
     /** Carrega, para a tela de venda, as unidades DISPONIVEL filtradas por trecho de serial/modelo/marca/código. */
     @Transactional(readOnly = true)
     public List<EstoqueDisponivelResponseDTO> buscarDisponiveis(String busca, String filial, int limite) {
-        String termo = busca == null ? "" : busca.trim();
         String filialFiltro = filial == null ? "" : filial.trim();
         int tamanho = Math.min(Math.max(limite, 1), LIMITE_MAXIMO_BUSCA);
-        return repository.buscarDisponiveis(StatusEstoque.DISPONIVEL, termo, filialFiltro, PageRequest.of(0, tamanho))
+        return buscarPorFiltro(busca, filialFiltro, tamanho)
                 .stream().map(EstoqueDisponivelResponseDTO::from).toList();
     }
 
@@ -370,13 +369,22 @@ public class EstoqueGeralService {
     /** Catálogo para o PDV: unidades DISPONIVEL, com busca livre e filtro opcional de categoria. */
     @Transactional(readOnly = true)
     public List<ProdutoResponseDTO> listarCatalogo(String busca, CategoriaItemVenda categoria) {
-        String termo = busca == null ? "" : busca.trim();
-        return repository.buscarDisponiveis(StatusEstoque.DISPONIVEL, termo, "", PageRequest.of(0, LIMITE_MAXIMO_BUSCA))
+        return buscarPorFiltro(busca, "", LIMITE_MAXIMO_BUSCA)
                 .stream()
                 .filter(e -> categoria == null
                         || (e.getCategoria() != null && e.getCategoria().equalsIgnoreCase(categoria.name())))
                 .map(ProdutoResponseDTO::from)
                 .toList();
+    }
+
+    /**
+     * Unidades DISPONIVEL pelo termo do PDV: o serial é comparado já normalizado (sem espaços,
+     * maiúsculas), e o texto original (com trim) é usado para modelo/marca/código de acessório.
+     */
+    private List<EstoqueGeral> buscarPorFiltro(String busca, String filial, int tamanho) {
+        String termo = busca == null ? "" : busca.trim();
+        return repository.buscarDisponiveisPorFiltro(
+                StatusEstoque.DISPONIVEL, serial(termo), termo, filial, PageRequest.of(0, tamanho));
     }
 
     @Transactional(readOnly = true)
