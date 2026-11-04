@@ -5,5 +5,7 @@ public enum FormaPagamento {
     CARTAO_DEBITO,
     PIX,
     DINHEIRO,
-    BOLETO
+    BOLETO,
+    /** Voucher do fabricante (com código). Junto com o Desconto fabricante, liga a TABELA RENOVA. */
+    VOUCHER
 }

@@ -17,10 +17,12 @@ public record PrecoItemResponseDTO(
         BigDecimal precoPix,
         Map<Integer, BigDecimal> parcelas,
         BigDecimal valorAplicado,
-        LocalDate vigencia
+        LocalDate vigencia,
+        /** Desconto do fabricante já embutido no preço (só quando a tabela usada é RENOVA). */
+        BigDecimal descontoFabricante
 ) {
     public static PrecoItemResponseDTO from(PrecoCalculado p) {
         return new PrecoItemResponseDTO(p.nomeComercial(), p.tabela(), p.grupoPlano(), p.preco(), p.precoPix(),
-                p.parcelas(), p.valorAplicado(), p.vigencia());
+                p.parcelas(), p.valorAplicado(), p.vigencia(), p.descontoFabricante());
     }
 }

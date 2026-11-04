@@ -35,6 +35,10 @@ public class PagamentoVenda {
     @Builder.Default
     private Integer parcelas = 1;
 
+    /** Código do voucher (só na forma VOUCHER). */
+    @Column(name = "codigo_voucher", length = 60)
+    private String codigoVoucher;
+
     @Column(name = "criado_em", nullable = false, updatable = false)
     @Builder.Default
     private Instant criadoEm = Instant.now();

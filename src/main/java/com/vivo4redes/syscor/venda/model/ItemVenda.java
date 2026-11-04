@@ -143,6 +143,10 @@ public class ItemVenda {
     @Column(name = "parcelas")
     private Integer parcelas;
 
+    /** Desconto do fabricante já embutido no preço Renova (null quando o item está na REGULAR). */
+    @Column(name = "desconto_fabricante", precision = 12, scale = 2)
+    private BigDecimal descontoFabricante;
+
     public BigDecimal getValorTotalItem() {
         return valorUnitario.multiply(quantidade).setScale(2, java.math.RoundingMode.HALF_UP);
     }
