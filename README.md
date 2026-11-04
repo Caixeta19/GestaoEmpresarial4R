@@ -58,7 +58,7 @@ estado não-terminal. Só é possível adicionar ou remover item enquanto a vend
   cálculo automático de valor total a partir dos itens
 - Cadastro de cliente (PF/PJ) com validação de CPF/CNPJ e e-mail/telefone
 - Cadastro de filial e de usuário/vendedor (com reautenticação por senha na venda)
-- Registro de pagamentos por venda, com múltiplas formas (cartão, PIX, dinheiro, boleto)
+- Registro de pagamentos por venda, com múltiplas formas (cartão, PIX, dinheiro, boleto, voucher)
 - Transição de status da venda com validação de máquina de estados
 - Avaliação de procedência da venda (BKO) pós-conclusão
 - Controle de estoque serializado por IMEI/serial, com status `DISPONIVEL` /
@@ -154,6 +154,21 @@ CANCELADA → (terminal, sem saída)
 - `valor_venda` do estoque é a referência `REGULAR`/`PRE` cheia, atualizada no upload e ao
   importar estoque novo (só `DISPONIVEL`/`RESERVADO`; `VENDIDO` não muda).
 - **`tb_produto_preco_plano` deixou de ser usada na V24 e será removida numa migration futura.**
+
+### Renova (V25)
+
+- Todo item entra pela **TABELA REGULAR**. O aparelho (PRODUTO_VIVO com preço por plano) passa para a
+  **TABELA RENOVA** quando a venda tem **Desconto fabricante + Voucher**: o vendedor lança o pagamento
+  `VOUCHER` (valor + `codigoVoucher`) e liga o Renova com `PATCH /vendas/{id}/renova { "ativo": true }`.
+- Sem voucher lançado o Renova é recusado (422); remover o último voucher desliga o Renova e os
+  aparelhos voltam para a Regular. Acessório, chip, serviço e itens `SEM_PLANO` não mudam.
+- O bloco Renova não tem o grupo PRÉ: aparelho em plano pré-pago/sem plano → 422 "Renova não
+  disponível para plano pré-pago.". Produto sem linha Renova fica no preço Regular do mesmo grupo.
+- A coluna `DESCONTO` do bloco Renova é gravada em `tb_preco_item.desconto_fabricante`. O preço Renova
+  **já tem** esse desconto: o `descontoFabricante` da venda (soma dos aparelhos na Renova) é só
+  controle/conciliação e não abate o total de novo. O voucher entra na soma dos pagamentos.
+- Ao reprecificar, os pagamentos não são mexidos: se passarem do novo total, a resposta traz `saldo`
+  negativo e `aviso`, e a venda só finaliza depois do ajuste.
 
 ### Protocolo documental
 
@@ -497,7 +512,8 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/vendas/{id}/itens` | Adicionar item ao carrinho |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item do carrinho |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
-| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |
+| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento (remover o último voucher desliga o Renova) |
+| PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo }`; exige voucher) |
 | GET | `/vendas/{id}/resumo` | Resumo do carrinho (totais, saldo) |
 | PATCH | `/vendas/{id}/finalizar` | Finalizar venda |
 | PATCH | `/vendas/{id}/status` | Avançar status da venda |
