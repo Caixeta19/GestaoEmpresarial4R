@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.venda.model;
 
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
@@ -74,6 +75,19 @@ public class Venda {
     @Builder.Default
     private BigDecimal valorTotal = BigDecimal.ZERO;
 
+    /** Renova ligado (Desconto fabricante + Voucher): aparelhos com preço por plano vão para a TABELA RENOVA. */
+    @Column(name = "renova", nullable = false)
+    @Builder.Default
+    private boolean renova = false;
+
+    /**
+     * Soma do desconto do fabricante dos aparelhos na RENOVA. Só controle/conciliação: o preço Renova já tem o
+     * desconto, então ele não abate o total de novo. Sempre recalculado a partir dos itens.
+     */
+    @Column(name = "desconto_fabricante", nullable = false, precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal descontoFabricante = BigDecimal.ZERO;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
@@ -104,6 +118,11 @@ public class Venda {
     public void recalcularValorTotal() {
         this.valorTotal = itens.stream()
                 .map(ItemVenda::getValorTotalItem)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        this.descontoFabricante = itens.stream()
+                .filter(i -> i.getTabelaAplicada() == TabelaPreco.RENOVA && i.getDescontoFabricante() != null)
+                .map(i -> i.getDescontoFabricante().multiply(i.getQuantidade()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, java.math.RoundingMode.HALF_UP);
     }

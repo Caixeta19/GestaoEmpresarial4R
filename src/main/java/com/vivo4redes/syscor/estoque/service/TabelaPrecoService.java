@@ -130,12 +130,13 @@ public class TabelaPrecoService {
 
     private void gravarPrecos(Long execucaoId, List<LinhaPreco> precos) {
         String sql = """
-                INSERT INTO tb_preco_item (execucao_id, aba, tabela, grupo_plano, nome_comercial, chave_nome, preco, preco_pix, parcelas)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                INSERT INTO tb_preco_item (execucao_id, aba, tabela, grupo_plano, nome_comercial, chave_nome, preco, preco_pix,
+                                           parcelas, desconto_fabricante)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
                 """;
         emLotes(sql, precos, p -> new Object[]{execucaoId, truncar(p.aba(), 60), p.tabela().name(), p.grupo().name(),
                 truncar(p.nomeComercial(), 200), truncar(TextoUtil.chave(p.nomeComercial()), 200),
-                p.preco(), p.precoPix(), json(p.parcelas())});
+                p.preco(), p.precoPix(), json(p.parcelas()), p.descontoFabricante()});
     }
 
     private <T> void emLotes(String sql, List<T> linhas, java.util.function.Function<T, Object[]> parametros) {

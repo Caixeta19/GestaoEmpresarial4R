@@ -32,7 +32,15 @@ public record VendaResponseDTO(
         BigDecimal valorTotal,
         StatusVenda status,
         StatusAvaliacaoProcedencia avaliacaoProcedencia,
-        Instant criadoEm
+        Instant criadoEm,
+        /** Renova ligado (aparelhos com preço por plano na TABELA RENOVA). */
+        boolean renova,
+        /** Soma do desconto do fabricante dos aparelhos na Renova (controle; já embutido no total). */
+        BigDecimal descontoFabricante,
+        /** valorTotal − soma dos pagamentos. Negativo quando os pagamentos passam do total. */
+        BigDecimal saldo,
+        /** Aviso para a tela (ex.: pagamentos acima do total depois de reprecificar); null quando não há. */
+        String aviso
 ) {
     public record ItemDTO(
             Long id, CategoriaItemVenda categoria, Long produtoId, String descricaoProduto,
@@ -43,7 +51,8 @@ public record VendaResponseDTO(
             String numeroAcesso, String sistemaOrigem, String numOrdemNext, String numSolicitacaoGed,
             String simcard3g, String simcard4g, Boolean clientePossuiSimcard, Boolean simcardDoado,
             BigDecimal descontoChip, BigDecimal valorChip, Boolean serialConfirmado,
-            GrupoPlano grupoPlano, TabelaPreco tabelaAplicada, FormaPagamento formaPagamento, Integer parcelas
+            GrupoPlano grupoPlano, TabelaPreco tabelaAplicada, FormaPagamento formaPagamento, Integer parcelas,
+            TabelaPreco tabelaPrecoAplicada, BigDecimal descontoFabricante
     ) {
         static ItemDTO from(ItemVenda i) {
             return new ItemDTO(
@@ -55,14 +64,15 @@ public record VendaResponseDTO(
                     i.getNumeroAcesso(), i.getSistemaOrigem(), i.getNumOrdemNext(), i.getNumSolicitacaoGed(),
                     i.getSimcard3g(), i.getSimcard4g(), i.getClientePossuiSimcard(), i.getSimcardDoado(),
                     i.getDescontoChip(), i.getValorChip(), i.getSerialConfirmado(),
-                    i.getGrupoPlano(), i.getTabelaAplicada(), i.getFormaPagamento(), i.getParcelas()
+                    i.getGrupoPlano(), i.getTabelaAplicada(), i.getFormaPagamento(), i.getParcelas(),
+                    i.getTabelaAplicada(), i.getDescontoFabricante()
             );
         }
     }
 
-    public record PagamentoDTO(Long id, FormaPagamento forma, BigDecimal valor, Integer parcelas) {
+    public record PagamentoDTO(Long id, FormaPagamento forma, BigDecimal valor, Integer parcelas, String codigoVoucher) {
         static PagamentoDTO from(PagamentoVenda p) {
-            return new PagamentoDTO(p.getId(), p.getForma(), p.getValor(), p.getParcelas());
+            return new PagamentoDTO(p.getId(), p.getForma(), p.getValor(), p.getParcelas(), p.getCodigoVoucher());
         }
     }
 
@@ -71,6 +81,14 @@ public record VendaResponseDTO(
     }
 
     public static VendaResponseDTO from(Venda v, List<PagamentoVenda> pagamentos) {
+        BigDecimal pago = pagamentos.stream().map(PagamentoVenda::getValor).reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal total = v.getValorTotal() == null ? BigDecimal.ZERO : v.getValorTotal();
+        BigDecimal saldo = total.subtract(pago).setScale(2, java.math.RoundingMode.HALF_UP);
+        String aviso = saldo.signum() < 0
+                ? "Os pagamentos (" + pago + ") passam do total da venda (" + total + ") em " + saldo.negate()
+                  + ". Remova ou ajuste um pagamento antes de finalizar."
+                : null;
         return new VendaResponseDTO(
                 v.getId(),
                 v.getNumeroVenda(),
@@ -88,7 +106,11 @@ public record VendaResponseDTO(
                 v.getValorTotal(),
                 v.getStatus(),
                 v.getAvaliacaoProcedencia(),
-                v.getCriadoEm()
+                v.getCriadoEm(),
+                v.isRenova(),
+                v.getDescontoFabricante(),
+                saldo,
+                aviso
         );
     }
 }

@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -51,7 +52,7 @@ class VendaServicePrecoTest {
     @Mock private EstoqueGeralService estoqueService;
     @Mock private PagamentoVendaRepository pagamentoVendaRepository;
     @Mock private PrecoVigenteService precoVigenteService;
-    @Mock private ResolvedorTabela resolvedorTabela;
+    @Spy private ResolvedorTabela resolvedorTabela = new ResolvedorTabela();
 
     @InjectMocks
     private VendaService service;
@@ -71,27 +72,26 @@ class VendaServicePrecoTest {
     }
 
     @Test
-    @DisplayName("valorUnitario do front é ignorado: vale o preço da tabela vigente para plano, tabela e pagamento")
+    @DisplayName("valorUnitario do front é ignorado: vale o preço REGULAR da tabela vigente, mesmo em troca de aparelho")
     void valorDoFrontIgnorado() {
-        when(resolvedorTabela.resolver("Troca de aparelho")).thenReturn(TabelaPreco.RENOVA);
-        when(precoVigenteService.calcular(aparelho, "Vivo V Ilimitado", TabelaPreco.RENOVA, FormaPagamento.PIX, null))
-                .thenReturn(preco(TabelaPreco.RENOVA, GrupoPlano.VIVO_V, "8550.00"));
+        when(precoVigenteService.calcular(aparelho, "Vivo V Ilimitado", TabelaPreco.REGULAR, FormaPagamento.PIX, null))
+                .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.VIVO_V, "9134.10"));
 
         service.adicionarItem(1L, aparelho("1.00").plano("Vivo V Ilimitado").tipoServico("Troca de aparelho")
                 .formaPagamento(FormaPagamento.PIX).build());
 
         ItemVenda item = venda.getItens().get(0);
-        assertThat(item.getValorUnitario()).isEqualByComparingTo("8550.00");
+        assertThat(item.getValorUnitario()).isEqualByComparingTo("9134.10");
         assertThat(item.getGrupoPlano()).isEqualTo(GrupoPlano.VIVO_V);
-        assertThat(item.getTabelaAplicada()).isEqualTo(TabelaPreco.RENOVA);
+        assertThat(item.getTabelaAplicada()).isEqualTo(TabelaPreco.REGULAR);
         assertThat(item.getFormaPagamento()).isEqualTo(FormaPagamento.PIX);
-        assertThat(venda.getValorTotal()).isEqualByComparingTo("8550.00");
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("9134.10");
+        verify(precoVigenteService, never()).calcular(any(), any(), org.mockito.ArgumentMatchers.eq(TabelaPreco.RENOVA), any(), any());
     }
 
     @Test
     @DisplayName("Aparelho sem valorUnitario no request também é aceito (o preço vem da tabela)")
     void semValorDoFront() {
-        when(resolvedorTabela.resolver(null)).thenReturn(TabelaPreco.REGULAR);
         when(precoVigenteService.calcular(aparelho, null, TabelaPreco.REGULAR, null, null))
                 .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.PRE, "12909.00"));
 
@@ -103,7 +103,6 @@ class VendaServicePrecoTest {
     @Test
     @DisplayName("Item sem preço na tabela vigente é recusado (422) antes de reservar a unidade")
     void semPrecoNaoReserva() {
-        when(resolvedorTabela.resolver(null)).thenReturn(TabelaPreco.REGULAR);
         when(precoVigenteService.calcular(aparelho, null, TabelaPreco.REGULAR, null, null))
                 .thenThrow(new NegocioException("Item sem preço na tabela vigente (iPhone 17 Pro Max 512GB)."));
 
@@ -117,7 +116,6 @@ class VendaServicePrecoTest {
     @Test
     @DisplayName("Chip usa o preço fixo de configuração, não o valor do front")
     void chipFixo() {
-        when(resolvedorTabela.resolver(null)).thenReturn(TabelaPreco.REGULAR);
         when(precoVigenteService.calcular(aparelho, null, TabelaPreco.REGULAR, null, null))
                 .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.PRE, "12909.00"));
         when(precoVigenteService.precoChip()).thenReturn(new BigDecimal("13.00"));
@@ -166,6 +164,6 @@ class VendaServicePrecoTest {
     private static PrecoCalculado preco(TabelaPreco tabela, GrupoPlano grupo, String valor) {
         BigDecimal v = new BigDecimal(valor);
         return new PrecoCalculado(1L, LocalDate.of(2026, 11, 1), "iPhone 17 Pro Max 512GB", tabela, grupo,
-                v, v, null, null, null, v);
+                v, v, null, null, null, v, null);
     }
 }

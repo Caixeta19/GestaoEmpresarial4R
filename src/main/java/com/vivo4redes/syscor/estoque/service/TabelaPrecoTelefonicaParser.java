@@ -34,8 +34,9 @@ import java.util.regex.Pattern;
  *   <li>ÍNDICE: vigência ("Vigência a partir de").</li>
  *   <li>PLANOS e PRODUTOS (obrigatórias): plano -> grupo de preço; Cod_Sap -> Nome Comercial.</li>
  *   <li>SMARTPHONES e ELETRÔNICOS_LP_Conectados: blocos TABELA REGULAR e TABELA RENOVA (linha acima do
- *       cabeçalho); em cada bloco, por grupo do plano: preço cheio, PIX e Vivo Pay, 13x–21x. Outros blocos
- *       (TABELA ANTERIOR...) e colunas como "Oferta de Comunicação" e "DESCONTO" são ignorados.</li>
+ *       cabeçalho); em cada bloco, por grupo do plano: preço cheio, PIX e Vivo Pay, 13x–21x. No bloco Renova a
+ *       coluna DESCONTO (valor único por produto, já aplicado nos preços Renova) vira o desconto do fabricante.
+ *       Outros blocos (TABELA ANTERIOR...) e a coluna "Oferta de Comunicação" são ignorados.</li>
  *   <li>ELETRÔNICOS_LP_Não Conectados, VITRINE e SMARTPHONES_Demo: sem plano (SEM_PLANO / REGULAR).</li>
  * </ul>
  */
@@ -195,7 +196,7 @@ public class TabelaPrecoTelefonicaParser {
     // ------------------------------------------------------------------ abas com plano
 
     /** Bloco de preços (TABELA REGULAR/RENOVA) e, dentro dele, as colunas de cada grupo do plano. */
-    private record Bloco(TabelaPreco tabela, Map<GrupoPlano, ColunasGrupo> grupos) {
+    private record Bloco(TabelaPreco tabela, Map<GrupoPlano, ColunasGrupo> grupos, Integer colDesconto) {
     }
 
     private record ColunasGrupo(int preco, Integer pix, Map<Integer, Integer> parcelas) {
@@ -219,8 +220,9 @@ public class TabelaPrecoTelefonicaParser {
             if (nome.isBlank()) continue;
             boolean algumPreco = false;
             for (Bloco bloco : blocos) {
+                BigDecimal desconto = descontoFabricante(row, bloco);
                 for (Map.Entry<GrupoPlano, ColunasGrupo> g : bloco.grupos().entrySet()) {
-                    LinhaPreco linha = linhaPreco(row, sheet.getSheetName(), bloco.tabela(), g.getKey(), nome, g.getValue());
+                    LinhaPreco linha = linhaPreco(row, sheet.getSheetName(), bloco.tabela(), g.getKey(), nome, g.getValue(), desconto);
                     if (linha != null) {
                         destino.add(linha);
                         algumPreco = true;
@@ -254,9 +256,27 @@ public class TabelaPrecoTelefonicaParser {
             if (tabela < 0) continue;
             int inicio = marcadores.get(i)[0];
             int fim = i + 1 < marcadores.size() ? marcadores.get(i + 1)[0] : cab.ultimaColuna() + 1;
-            blocos.add(new Bloco(TabelaPreco.values()[tabela], gruposNoIntervalo(cab, inicio, fim)));
+            TabelaPreco t = TabelaPreco.values()[tabela];
+            Integer colDesconto = t == TabelaPreco.RENOVA ? colunaDesconto(cab, inicio, fim) : null;
+            blocos.add(new Bloco(t, gruposNoIntervalo(cab, inicio, fim), colDesconto));
         }
         return blocos;
+    }
+
+    /** Coluna DESCONTO dentro do bloco Renova (coluna única, antes dos grupos); null se não houver. */
+    private Integer colunaDesconto(Cabecalho cab, int inicio, int fim) {
+        for (int c = inicio; c < fim; c++) {
+            if (cab.titulo(c).startsWith("desconto")) return c;
+        }
+        return null;
+    }
+
+    /** Desconto do fabricante da linha no bloco Renova: vazio ou não numérico = 0 (preço Renova = Regular). */
+    private BigDecimal descontoFabricante(Row row, Bloco bloco) {
+        if (bloco.tabela() != TabelaPreco.RENOVA) return null;
+        if (bloco.colDesconto() == null) return BigDecimal.ZERO.setScale(2);
+        BigDecimal v = numero(row.getCell(bloco.colDesconto()));
+        return v == null ? BigDecimal.ZERO.setScale(2) : v;
     }
 
     /** Dentro de [inicio, fim): coluna do grupo = preço cheio; seguintes até o próximo grupo = PIX e parcelas. */
@@ -321,7 +341,7 @@ public class TabelaPrecoTelefonicaParser {
             if (row == null) continue;
             String nome = texto(row, colNome);
             if (nome.isBlank()) continue;
-            LinhaPreco linha = linhaPreco(row, sheet.getSheetName(), TabelaPreco.REGULAR, GrupoPlano.SEM_PLANO, nome, colunas);
+            LinhaPreco linha = linhaPreco(row, sheet.getSheetName(), TabelaPreco.REGULAR, GrupoPlano.SEM_PLANO, nome, colunas, null);
             if (linha != null) {
                 destino.add(linha);
                 itens++;
@@ -333,7 +353,8 @@ public class TabelaPrecoTelefonicaParser {
     // ------------------------------------------------------------------ linha de preço
 
     /** null quando não há preço cheio numérico (linha pulada). */
-    private LinhaPreco linhaPreco(Row row, String aba, TabelaPreco tabela, GrupoPlano grupo, String nome, ColunasGrupo cols) {
+    private LinhaPreco linhaPreco(Row row, String aba, TabelaPreco tabela, GrupoPlano grupo, String nome, ColunasGrupo cols,
+                                  BigDecimal descontoFabricante) {
         BigDecimal preco = numero(row.getCell(cols.preco()));
         if (preco == null) return null;
         BigDecimal pix = cols.pix() == null ? null : numero(row.getCell(cols.pix()));
@@ -342,7 +363,8 @@ public class TabelaPrecoTelefonicaParser {
             BigDecimal v = numero(row.getCell(c));
             if (v != null) parcelas.put(n, v);
         });
-        return new LinhaPreco(aba, tabela, grupo, nome.trim(), preco, pix, parcelas.isEmpty() ? null : parcelas);
+        return new LinhaPreco(aba, tabela, grupo, nome.trim(), preco, pix, parcelas.isEmpty() ? null : parcelas,
+                descontoFabricante);
     }
 
     // ------------------------------------------------------------------ cabeçalho

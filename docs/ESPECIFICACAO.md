@@ -302,7 +302,7 @@ O schema tem 24 migrations Flyway (V1 a V24) em `src/main/resources/db/migration
 | --- | --- |
 | `StatusVenda` | ABERTA, PENDENTE, APROVADA, CONCLUIDA, CANCELADA |
 | `CategoriaItemVenda` | PRODUTO\_VIVO, SERVICO\_VIVO, ACESSORIO, RECARGA |
-| `FormaPagamento` | CARTAO\_CREDITO, CARTAO\_DEBITO, PIX, DINHEIRO, BOLETO |
+| `FormaPagamento` | CARTAO\_CREDITO, CARTAO\_DEBITO, PIX, DINHEIRO, BOLETO, VOUCHER (com `codigo_voucher`, V25) |
 | `StatusAvaliacaoProcedencia` | Improcedente, Procedente, Em\_avaliacao\_pelo\_BKO, Nao\_avaliado |
 | `StatusScoreCliente` | NAO\_REALIZADA, CONSULTANDO, APROVADO, REPROVADO |
 | `TipoPessoa` | FISICA, JURIDICA |
@@ -350,7 +350,8 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | POST | `/vendas/{id}/itens` | Adicionar item (reserva o serial; a baixa é na conclusão) |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item (estorna o serial) |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
-| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |
+| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento (remover o último voucher desliga o Renova) |
+| PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo }`; exige voucher) |
 | GET | `/vendas/{id}/resumo` | Totais e saldo do carrinho |
 | PATCH | `/vendas/{id}/finalizar` | Finalizar (exige reautenticação) |
 | PATCH | `/vendas/{id}/status` | Avançar status (exige reautenticação) |
@@ -499,10 +500,11 @@ A venda é a primeira fase. Ela só fica utilizável no PDV depois de corrigir a
 O preço de um aparelho depende de: produto (Nome Comercial) + grupo do plano do cliente + tabela (Regular/Renova) + forma de pagamento.
 
 1. Cada upload da tabela da Telefônica cria uma nova execução; a mais recente é a **vigente**.
-2. Estoque → Nome Comercial: `codigo_acessorio` presente em PRODUTOS.Cod_Sap usa aquele nome; senão, o `modelo_comercial` normalizado. Plano → grupo pelo `GRUPAMENTO ATUAL` da aba PLANOS (nome, COD SISTEMA ou COD SAP); sem plano/pré-pago = `PRE`. Tabela `RENOVA` quando o `tipoServico` indica troca de aparelho ("troca"/"renova"), senão `REGULAR` (`ResolvedorTabela`). Itens que só existem nas abas sem plano usam `SEM_PLANO`/`REGULAR`. Pagamento: PIX → `preco_pix`; crédito até 12x, débito, dinheiro → `preco`; 13x–21x → `parcelas`. Chip com preço fixo `syscor.precos.chip` (13,00). A "Oferta de Comunicação" da planilha não entra no cálculo.
+2. Estoque → Nome Comercial: `codigo_acessorio` presente em PRODUTOS.Cod_Sap usa aquele nome; senão, o `modelo_comercial` normalizado. Plano → grupo pelo `GRUPAMENTO ATUAL` da aba PLANOS (nome, COD SISTEMA ou COD SAP); sem plano/pré-pago = `PRE`. Tabela: todo item entra pela `REGULAR`; o aparelho com preço por plano vai para a `RENOVA` quando a venda está com o Renova ligado (`ResolvedorTabela`, ver regra 6). Itens que só existem nas abas sem plano usam `SEM_PLANO`/`REGULAR`. Pagamento: PIX → `preco_pix`; crédito até 12x, débito, dinheiro → `preco`; 13x–21x → `parcelas`. Chip com preço fixo `syscor.precos.chip` (13,00). A "Oferta de Comunicação" da planilha não entra no cálculo.
 3. `valor_venda` (referência) = preço `REGULAR`/`PRE` cheio da vigente, atualizado a cada upload em todas as unidades `DISPONIVEL` e `RESERVADO` e ao importar estoque novo; unidades `VENDIDO` não mudam (guardam o preço da época, também em `itens_venda`).
 4. Unidade sem preço na tabela vigente não pode ser vendida: `adicionarItem` responde 422 "Item sem preço na tabela vigente (<nome comercial>)."
 5. O upload devolve `estoqueSemPreco` (modelos do estoque sem preço) e `planilhaSemEstoque` (itens da planilha sem estoque), para correção do cadastro. A importação é toda numa transação: se falhar, a vigente continua a anterior.
+6. **Renova (V25, decisão de 04/11/2026):** o aparelho passa para a `RENOVA` com Desconto fabricante + Voucher. O vendedor lança o pagamento `VOUCHER` (valor + código) e chama `PATCH /vendas/{id}/renova`; sem voucher → 422; remover o último voucher desliga o Renova. Só aparelho com preço por plano muda (acessório, chip, serviço e `SEM_PLANO` não). Pré-pago não tem Renova → 422 "Renova não disponível para plano pré-pago.". A coluna `DESCONTO` do bloco Renova vai para `tb_preco_item.desconto_fabricante`; o preço Renova já tem o desconto, então `vendas.desconto_fabricante` (soma dos aparelhos na Renova) é só controle e não abate o total. A resposta da venda traz `renova`, `descontoFabricante`, `saldo` e `aviso` (pagamentos acima do total após reprecificar).
 
 **Ordem de execução no Claude Code**
 

@@ -6,6 +6,7 @@ import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.RenovaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.response.VendaResponseDTO;
@@ -92,6 +93,14 @@ public class VendaController {
     public ResponseEntity<VendaResponseDTO> removerPagamento(
             @PathVariable Long id, @PathVariable Long pagamentoId) {
         var venda = vendaService.removerPagamento(id, pagamentoId);
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    /** Liga/desliga a TABELA RENOVA (exige voucher lançado) e devolve a venda reprecificada. */
+    @PatchMapping("/{id}/renova")
+    public ResponseEntity<VendaResponseDTO> aplicarRenova(
+            @PathVariable Long id, @Valid @RequestBody RenovaRequestDTO dto) {
+        var venda = vendaService.aplicarRenova(id, dto.ativo());
         return ResponseEntity.ok(responder(venda));
     }
 

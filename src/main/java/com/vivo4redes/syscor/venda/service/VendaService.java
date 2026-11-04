@@ -9,7 +9,10 @@ import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
+import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.exception.CarrinhoNaoEditavelException;
@@ -123,8 +126,7 @@ public class VendaService {
             EstoqueGeral escolhida = estoqueService.buscarPorId(dto.produtoId());
             if (precoPelaTabela) {
                 // Antes da reserva: item sem preço na tabela vigente é recusado (422) sem prender a unidade.
-                preco = precoVigenteService.calcular(escolhida, dto.plano(), resolvedorTabela.resolver(dto.tipoServico()),
-                        dto.formaPagamento(), dto.parcelas());
+                preco = precoNaTabela(venda, dto.categoria(), escolhida, dto.plano(), dto.formaPagamento(), dto.parcelas());
             }
             String serialDaBaixa;
             if (informouSerial) {
@@ -188,6 +190,7 @@ public class VendaService {
                 .tabelaAplicada(preco == null ? null : preco.tabela())
                 .formaPagamento(preco == null ? null : dto.formaPagamento())
                 .parcelas(preco == null ? null : dto.parcelas())
+                .descontoFabricante(preco == null ? null : preco.descontoFabricante())
                 .build();
 
         venda.adicionarItem(item);
@@ -255,6 +258,9 @@ public class VendaService {
             throw new VendaSemItemException();
         }
 
+        if (venda.isRenova() && !temVoucher(vendaId)) {
+            throw new NegocioException("Venda com Renova precisa de um pagamento por voucher.");
+        }
         BigDecimal totalPago = somarPagamentos(vendaId);
         if (totalPago.compareTo(venda.getValorTotal()) != 0) {
             throw new NegocioException("A soma dos pagamentos (" + totalPago
@@ -399,11 +405,18 @@ public class VendaService {
                     + venda.getValorTotal().subtract(jaPago) + ").");
         }
 
+        boolean voucher = dto.forma() == FormaPagamento.VOUCHER;
+        String codigoVoucher = dto.codigoVoucher() == null ? "" : dto.codigoVoucher().trim();
+        if (voucher && codigoVoucher.isEmpty()) {
+            throw new NegocioException("Informe o código do voucher.");
+        }
+
         PagamentoVenda pagamento = PagamentoVenda.builder()
                 .venda(venda)
                 .forma(dto.forma())
                 .valor(dto.valor())
-                .parcelas(dto.parcelas() == null ? 1 : dto.parcelas())
+                .parcelas(voucher || dto.parcelas() == null ? 1 : dto.parcelas())
+                .codigoVoucher(voucher ? codigoVoucher : null)
                 .build();
         pagamentoVendaRepository.save(pagamento);
         registrarAtividade(venda);
@@ -422,9 +435,41 @@ public class VendaService {
             throw new NegocioException("Esse pagamento nao pertence a essa venda.");
         }
         pagamentoVendaRepository.delete(pagamento);
+        pagamentoVendaRepository.flush();
+        // Sem voucher não há Renova: os aparelhos voltam para a REGULAR.
+        if (venda.isRenova() && pagamento.getForma() == FormaPagamento.VOUCHER && !temVoucher(vendaId)) {
+            venda.setRenova(false);
+            reprecificarAparelhos(venda);
+        }
         registrarAtividade(venda);
 
         return buscarPorId(vendaId);
+    }
+
+    /**
+     * Liga/desliga a TABELA RENOVA nos aparelhos da venda e reprecifica.
+     * Ligar exige um pagamento por voucher e ao menos um aparelho com preço por plano; aparelho em plano
+     * pré-pago recusa o Renova (422). Os pagamentos não são alterados: se passarem do novo total, a resposta
+     * traz o aviso e a venda só finaliza depois do ajuste.
+     */
+    @Transactional
+    public Venda aplicarRenova(Long vendaId, boolean ativo) {
+        Venda venda = buscarParaEdicao(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        if (ativo) {
+            if (!temVoucher(vendaId)) {
+                throw new NegocioException("Lance o voucher na aba Pagamento antes de aplicar o Renova.");
+            }
+            boolean temAparelho = venda.getItens().stream()
+                    .anyMatch(i -> i.getEstoque() != null && resolvedorTabela.elegivelRenova(i.getCategoria(), i.getGrupoPlano()));
+            if (!temAparelho) {
+                throw new NegocioException("A venda não tem aparelho com preço por plano para aplicar o Renova.");
+            }
+        }
+        venda.setRenova(ativo);
+        reprecificarAparelhos(venda);
+        return vendaRepository.save(venda);
     }
 
     @Transactional(readOnly = true)
@@ -436,6 +481,39 @@ public class VendaService {
         return listarPagamentos(vendaId).stream()
                 .map(PagamentoVenda::getValor)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private boolean temVoucher(Long vendaId) {
+        return listarPagamentos(vendaId).stream().anyMatch(p -> p.getForma() == FormaPagamento.VOUCHER);
+    }
+
+    /**
+     * Preço do item na tabela vigente: primeiro na REGULAR; se a venda está com Renova e o item é elegível
+     * (aparelho com preço por plano), na RENOVA.
+     */
+    private PrecoCalculado precoNaTabela(Venda venda, CategoriaItemVenda categoria, EstoqueGeral unidade, String plano,
+                                         FormaPagamento forma, Integer parcelas) {
+        PrecoCalculado regular = precoVigenteService.calcular(unidade, plano, TabelaPreco.REGULAR, forma, parcelas);
+        TabelaPreco tabela = resolvedorTabela.resolver(venda.isRenova(), categoria, regular.grupoPlano());
+        return tabela == TabelaPreco.REGULAR ? regular
+                : precoVigenteService.calcular(unidade, plano, tabela, forma, parcelas);
+    }
+
+    /** Recalcula o preço dos aparelhos com preço por plano (Renova ligado/desligado) e o total da venda. */
+    private void reprecificarAparelhos(Venda venda) {
+        for (ItemVenda item : venda.getItens()) {
+            if (item.getCategoria() != CategoriaItemVenda.PRODUTO_VIVO || item.getEstoque() == null
+                    || item.getGrupoPlano() == null || item.getGrupoPlano() == GrupoPlano.SEM_PLANO) {
+                continue;
+            }
+            PrecoCalculado preco = precoNaTabela(venda, item.getCategoria(), item.getEstoque(), item.getPlano(),
+                    item.getFormaPagamento(), item.getParcelas());
+            item.setValorUnitario(preco.valorAplicado());
+            item.setTabelaAplicada(preco.tabela());
+            item.setGrupoPlano(preco.grupoPlano());
+            item.setDescontoFabricante(preco.descontoFabricante());
+        }
+        venda.recalcularValorTotal();
     }
 
     /** Aparelho/acessório: preço da tabela vigente. Serviço: 0. Recarga: valor informado. */

@@ -49,7 +49,7 @@ class TabelaPrecoTelefonicaParserTest {
     }
 
     @Test
-    @DisplayName("Bloco Renova ignora a coluna DESCONTO e lê os grupos")
+    @DisplayName("Bloco Renova lê a coluna DESCONTO como desconto do fabricante e os grupos sem deslocar")
     void blocoRenova() {
         ResultadoParseTabelaPreco r = parser.parsear(arquivo(0));
 
@@ -60,6 +60,10 @@ class TabelaPrecoTelefonicaParserTest {
         assertThat(renovaVivoV.preco()).isEqualByComparingTo("9500.00");
         assertThat(renovaVivoV.parcelas()).containsOnlyKeys(13);
         assertThat(r.precos()).noneMatch(p -> p.preco().compareTo(new BigDecimal("909.00")) == 0);
+        // DESCONTO é coluna única do bloco Renova: vira o desconto do fabricante das linhas RENOVA.
+        assertThat(renovaPre.descontoFabricante()).isEqualByComparingTo("909.00");
+        assertThat(renovaVivoV.descontoFabricante()).isEqualByComparingTo("909.00");
+        assertThat(preco(r, IPHONE, TabelaPreco.REGULAR, GrupoPlano.VIVO_V).orElseThrow().descontoFabricante()).isNull();
     }
 
     @Test

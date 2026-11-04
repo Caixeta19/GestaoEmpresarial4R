@@ -4,6 +4,9 @@ import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService;
 import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
+import com.vivo4redes.syscor.estoque.service.PrecoCalculado;
+import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
@@ -23,6 +26,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -51,7 +55,7 @@ class VendaServiceReservaTest {
     @Mock private EstoqueGeralService estoqueService;
     @Mock private PagamentoVendaRepository pagamentoVendaRepository;
     @Mock private PrecoVigenteService precoVigenteService;
-    @Mock private ResolvedorTabela resolvedorTabela;
+    @Spy private ResolvedorTabela resolvedorTabela = new ResolvedorTabela();
 
     @InjectMocks
     private VendaService service;
@@ -70,6 +74,9 @@ class VendaServiceReservaTest {
         Venda venda = venda(StatusVenda.ABERTA);
         when(estoqueService.buscarPorId(10L)).thenReturn(unidade);
         when(estoqueService.reservarNaVenda("356789012345678")).thenReturn(unidade);
+        BigDecimal preco = new BigDecimal("1299.00");
+        when(precoVigenteService.calcular(unidade, null, TabelaPreco.REGULAR, null, null)).thenReturn(new PrecoCalculado(
+                1L, null, "Galaxy A15", TabelaPreco.REGULAR, GrupoPlano.PRE, preco, preco, null, null, null, preco, null));
 
         service.adicionarItem(1L, ItemVendaRequestDTO.builder()
                 .categoria(CategoriaItemVenda.PRODUTO_VIVO)

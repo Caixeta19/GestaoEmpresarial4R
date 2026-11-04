@@ -83,7 +83,8 @@ public class PrecoVigenteService {
      * <ol>
      *   <li>Nome Comercial pelo Cod_Sap (código de acessório) ou pelo modelo normalizado.</li>
      *   <li>Grupo pelo plano do cliente (aba PLANOS); sem plano -> PRE.</li>
-     *   <li>Tabela informada (ver {@link ResolvedorTabela}).</li>
+     *   <li>Tabela informada (ver {@link ResolvedorTabela}). RENOVA não existe para PRE (422); produto sem linha
+     *       Renova fica no preço REGULAR do mesmo grupo.</li>
      *   <li>Item que só existe nas abas sem plano: SEM_PLANO / REGULAR, qualquer que seja o plano.</li>
      *   <li>Pagamento: PIX -> preço PIX; crédito em 13x–21x -> total da parcela; demais -> preço cheio.</li>
      * </ol>
@@ -100,16 +101,27 @@ public class PrecoVigenteService {
         String nomeExibido = item.getModeloComercial() != null ? item.getModeloComercial() : chave;
         GrupoPlano grupo = grupoDoPlano(plano, execucaoId);
         TabelaPreco tabelaPedida = tabela == null ? TabelaPreco.REGULAR : tabela;
+        if (tabelaPedida == TabelaPreco.RENOVA && grupo == GrupoPlano.PRE) {
+            // O bloco Renova da planilha não tem o grupo PRÉ.
+            throw new NegocioException("Renova não disponível para plano pré-pago.");
+        }
 
-        PrecoItem preco = precoItemRepository.buscar(execucaoId, chave, tabelaPedida, List.of(grupo)).stream().findFirst()
+        Optional<PrecoItem> pedido = precoItemRepository.buscar(execucaoId, chave, tabelaPedida, List.of(grupo)).stream().findFirst();
+        if (pedido.isEmpty() && tabelaPedida == TabelaPreco.RENOVA) {
+            pedido = precoItemRepository.buscar(execucaoId, chave, TabelaPreco.REGULAR, List.of(grupo)).stream().findFirst();
+        }
+        PrecoItem preco = pedido
                 .or(() -> precoItemRepository.buscar(execucaoId, chave, TabelaPreco.REGULAR, List.of(GrupoPlano.SEM_PLANO))
                         .stream().findFirst())
                 .orElseThrow(() -> new NegocioException("Item sem preço na tabela vigente (" + nomeExibido + ")."));
 
         BigDecimal valor = valorParaPagamento(preco, formaPagamento, numeroParcelas).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal desconto = preco.getTabela() != TabelaPreco.RENOVA ? null
+                : (preco.getDescontoFabricante() == null ? BigDecimal.ZERO : preco.getDescontoFabricante())
+                        .setScale(2, RoundingMode.HALF_UP);
         return new PrecoCalculado(execucaoId, execucao.getVigenciaEm(), preco.getNomeComercial(), preco.getTabela(),
                 preco.getGrupoPlano(), preco.getPreco(), preco.getPrecoPix(), preco.getParcelas(),
-                formaPagamento, numeroParcelas, valor);
+                formaPagamento, numeroParcelas, valor, desconto);
     }
 
     /** Regra 1, consultando os produtos gravados da execução. */

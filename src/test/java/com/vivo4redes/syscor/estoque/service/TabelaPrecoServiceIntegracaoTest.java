@@ -13,6 +13,7 @@ import com.vivo4redes.syscor.estoque.repository.PrecoItemRepository;
 import com.vivo4redes.syscor.estoque.repository.ProdutoVivoRepository;
 import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
 import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
@@ -176,21 +177,35 @@ class TabelaPrecoServiceIntegracaoTest {
     }
 
     @Test
-    @DisplayName("Renova x Regular, com a tabela decidida pelo ResolvedorTabela")
+    @DisplayName("Renova x Regular: Renova traz o desconto do fabricante; pré-pago recusa; sem linha Renova fica na Regular")
     void renovaXRegular() {
         EstoqueGeral iphone = unidade("IP-1", IPHONE, null, StatusEstoque.DISPONIVEL);
+        EstoqueGeral galaxy = unidade("GA-1", GALAXY, null, StatusEstoque.DISPONIVEL);
         service.importar(arquivo(0));
 
-        TabelaPreco troca = resolvedor.resolver("Troca de aparelho");
-        TabelaPreco novo = resolvedor.resolver("Alta de linha");
-        assertThat(troca).isEqualTo(TabelaPreco.RENOVA);
-        assertThat(novo).isEqualTo(TabelaPreco.REGULAR);
-        assertThat(precoVigente.calcular(iphone, PLANO_VIVO_V, troca, null, null).valorAplicado())
-                .isEqualByComparingTo("9500.00");
-        assertThat(precoVigente.calcular(iphone, PLANO_VIVO_V, novo, null, null).valorAplicado())
-                .isEqualByComparingTo("10149.00");
-        assertThat(precoVigente.calcular(iphone, PLANO_PRE, troca, FormaPagamento.PIX, null).valorAplicado())
-                .isEqualByComparingTo("10800.00");
+        // Decisão de 04/11/2026: Renova só com o Renova da venda ligado e para aparelho com preço por plano.
+        assertThat(resolvedor.resolver(true, CategoriaItemVenda.PRODUTO_VIVO, GrupoPlano.VIVO_V)).isEqualTo(TabelaPreco.RENOVA);
+        assertThat(resolvedor.resolver(false, CategoriaItemVenda.PRODUTO_VIVO, GrupoPlano.VIVO_V)).isEqualTo(TabelaPreco.REGULAR);
+        assertThat(resolvedor.resolver(true, CategoriaItemVenda.ACESSORIO, GrupoPlano.SEM_PLANO)).isEqualTo(TabelaPreco.REGULAR);
+        assertThat(resolvedor.resolver(true, CategoriaItemVenda.PRODUTO_VIVO, GrupoPlano.SEM_PLANO)).isEqualTo(TabelaPreco.REGULAR);
+
+        PrecoCalculado renova = precoVigente.calcular(iphone, PLANO_VIVO_V, TabelaPreco.RENOVA, null, null);
+        assertThat(renova.tabela()).isEqualTo(TabelaPreco.RENOVA);
+        assertThat(renova.valorAplicado()).isEqualByComparingTo("9500.00");
+        assertThat(renova.descontoFabricante()).isEqualByComparingTo("909.00");
+
+        PrecoCalculado regular = precoVigente.calcular(iphone, PLANO_VIVO_V, TabelaPreco.REGULAR, null, null);
+        assertThat(regular.valorAplicado()).isEqualByComparingTo("10149.00");
+        assertThat(regular.descontoFabricante()).isNull();
+
+        assertThatThrownBy(() -> precoVigente.calcular(iphone, PLANO_PRE, TabelaPreco.RENOVA, FormaPagamento.PIX, null))
+                .isInstanceOf(NegocioException.class).hasMessage("Renova não disponível para plano pré-pago.");
+
+        // O Galaxy não tem linha no Renova: fica no preço Regular do mesmo grupo.
+        PrecoCalculado semRenova = precoVigente.calcular(galaxy, PLANO_VIVO_V, TabelaPreco.RENOVA, null, null);
+        assertThat(semRenova.tabela()).isEqualTo(TabelaPreco.REGULAR);
+        assertThat(semRenova.valorAplicado()).isEqualByComparingTo("999.00");
+        assertThat(semRenova.descontoFabricante()).isNull();
     }
 
     @Test
@@ -226,8 +241,8 @@ class TabelaPrecoServiceIntegracaoTest {
         // O plano existe (CONTROLE ALTO VALOR), mas a planilha não tem esse grupo para o iPhone.
         assertThatThrownBy(() -> precoVigente.calcular(iphone, PLANO_CONTROLE, TabelaPreco.REGULAR, null, null))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("sem preço na tabela vigente");
-        // O Galaxy não tem preço no Renova.
-        assertThatThrownBy(() -> precoVigente.calcular(galaxy, PLANO_PRE, TabelaPreco.RENOVA, null, null))
+        // O Galaxy não tem o grupo CONTROLE ALTO VALOR, nem na Regular.
+        assertThatThrownBy(() -> precoVigente.calcular(galaxy, PLANO_CONTROLE, TabelaPreco.RENOVA, null, null))
                 .isInstanceOf(NegocioException.class).hasMessageContaining(GALAXY);
         assertThatThrownBy(() -> precoVigente.calcular(iphone, "Plano Que Não Existe", TabelaPreco.REGULAR, null, null))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("não encontrado");

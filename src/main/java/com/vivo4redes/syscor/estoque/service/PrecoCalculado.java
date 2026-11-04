@@ -15,6 +15,7 @@ import java.util.Map;
  * @param grupoPlano    grupo efetivamente usado (SEM_PLANO para itens das abas sem plano)
  * @param valorAplicado valor do item para a forma de pagamento: PIX -> preço PIX; 13x–21x -> total da parcela;
  *                      demais -> preço cheio
+ * @param descontoFabricante desconto do fabricante já embutido no preço Renova (null quando a tabela usada é REGULAR)
  */
 public record PrecoCalculado(
         Long execucaoId,
@@ -27,6 +28,7 @@ public record PrecoCalculado(
         Map<Integer, BigDecimal> parcelas,
         FormaPagamento formaPagamento,
         Integer numeroParcelas,
-        BigDecimal valorAplicado
+        BigDecimal valorAplicado,
+        BigDecimal descontoFabricante
 ) {
 }
