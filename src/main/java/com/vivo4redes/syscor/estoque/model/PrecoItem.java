@@ -59,4 +59,8 @@ public class PrecoItem {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "parcelas", columnDefinition = "jsonb")
     private Map<Integer, BigDecimal> parcelas;
+
+    /** Coluna DESCONTO do bloco Renova: desconto do fabricante já aplicado no preço Renova (null em REGULAR). */
+    @Column(name = "desconto_fabricante", precision = 12, scale = 2)
+    private BigDecimal descontoFabricante;
 }

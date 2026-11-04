@@ -26,8 +26,10 @@ record ResultadoParseTabelaPreco(
 ) {
 
     /** Preço cheio (2x a 12x), PIX/Vivo Pay e total de 13x a 21x (só as parcelas presentes). */
+    /** {@code descontoFabricante}: coluna DESCONTO do bloco TABELA RENOVA (null nas linhas REGULAR). */
     record LinhaPreco(String aba, TabelaPreco tabela, GrupoPlano grupo, String nomeComercial,
-                      BigDecimal preco, BigDecimal precoPix, Map<Integer, BigDecimal> parcelas) {
+                      BigDecimal preco, BigDecimal precoPix, Map<Integer, BigDecimal> parcelas,
+                      BigDecimal descontoFabricante) {
     }
 
     record LinhaPlano(String nomePlano, String sistema, String codSistema, String codSap,
