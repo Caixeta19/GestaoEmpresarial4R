@@ -9,20 +9,26 @@ import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
-import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.venda.dto.response.PagamentoIncompativelDTO;
+import com.vivo4redes.syscor.venda.dto.response.SimulacaoPagamentoDTO;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
+import com.vivo4redes.syscor.venda.enums.TipoPagamento;
 import com.vivo4redes.syscor.exception.CarrinhoNaoEditavelException;
 import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.PagamentosIncompativeisException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.VendaSemItemException;
 import com.vivo4redes.syscor.venda.model.Cliente;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento.ComposicaoVenda;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento.TotalVenda;
 import com.vivo4redes.syscor.estoque.service.EstoqueGeralService;
 import com.vivo4redes.syscor.estoque.service.PrecoCalculado;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService;
@@ -37,8 +43,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 @Service
@@ -128,7 +137,7 @@ public class VendaService {
             EstoqueGeral escolhida = estoqueService.buscarPorId(dto.produtoId());
             if (precoPelaTabela) {
                 // Antes da reserva: item sem preço na tabela vigente é recusado (422) sem prender a unidade.
-                preco = precoNaTabela(venda, dto.categoria(), escolhida, dto.plano());
+                preco = precoNaTabela(venda, venda.getCondicaoPagamento(), dto.categoria(), escolhida, dto.plano());
             }
             String serialDaBaixa;
             if (informouSerial) {
@@ -196,7 +205,7 @@ public class VendaService {
                 .build();
 
         venda.adicionarItem(item);
-        venda.recalcularValorTotal();
+        reprecificar(venda);
         return vendaRepository.save(venda);
     }
 
@@ -214,7 +223,7 @@ public class VendaService {
         liberarEstoqueDoItem(itemRemovido);
 
         venda.removerItem(itemId);
-        venda.recalcularValorTotal();
+        reprecificar(venda);
         return vendaRepository.save(venda);
     }
 
@@ -400,9 +409,13 @@ public class VendaService {
         Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
-        // O pagamento não pode ultrapassar o saldo restante (antes só era validado ao finalizar).
+        CondicaoPagamento condicao = venda.getCondicaoPagamento();
+        int parcelas = dto.parcelas() == null ? 1 : dto.parcelas();
+        exigirFormaAceita(condicao, dto.forma(), parcelas);
+
+        // O pagamento não pode ultrapassar o saldo restante. No parcelado a entrada muda o total: confere depois.
         BigDecimal jaPago = somarPagamentos(vendaId);
-        if (jaPago.add(dto.valor()).compareTo(venda.getValorTotal()) > 0) {
+        if (!condicao.parcelado() && jaPago.add(dto.valor()).compareTo(venda.getValorTotal()) > 0) {
             throw new NegocioException("O pagamento excede o saldo restante da venda ("
                     + venda.getValorTotal().subtract(jaPago) + ").");
         }
@@ -417,10 +430,17 @@ public class VendaService {
                 .venda(venda)
                 .forma(dto.forma())
                 .valor(dto.valor())
-                .parcelas(voucher || dto.parcelas() == null ? 1 : dto.parcelas())
+                .parcelas(voucher ? 1 : parcelas)
+                .tipo(tipoDaLinha(condicao))
                 .codigoVoucher(voucher ? codigoVoucher : null)
                 .build();
         pagamentoVendaRepository.save(pagamento);
+        reprecificar(venda);
+        BigDecimal entrada = somarEntradas(listarPagamentos(vendaId));
+        if (condicao.parcelado() && entrada.compareTo(venda.getValorTotal()) > 0) {
+            throw new NegocioException("A entrada (" + entrada + ") passa do total da venda ("
+                    + venda.getValorTotal() + ").");
+        }
         registrarAtividade(venda);
 
         return buscarPorId(vendaId);
@@ -441,8 +461,8 @@ public class VendaService {
         // Sem voucher não há Renova: os aparelhos voltam para a REGULAR.
         if (venda.isRenova() && pagamento.getForma() == FormaPagamento.VOUCHER && !temVoucher(vendaId)) {
             venda.setRenova(false);
-            reprecificarAparelhos(venda);
         }
+        reprecificar(venda);
         registrarAtividade(venda);
 
         return buscarPorId(vendaId);
@@ -470,23 +490,84 @@ public class VendaService {
             }
         }
         venda.setRenova(ativo);
-        reprecificarAparelhos(venda);
+        reprecificar(venda);
         return vendaRepository.save(venda);
     }
 
     /**
      * Troca a condição de pagamento e reprecifica os aparelhos e acessórios com preço de tabela. Chip, serviço e
-     * recarga não mudam. Os pagamentos não são alterados: se passarem do novo total, a resposta traz o aviso e a
-     * venda só finaliza depois do ajuste.
+     * recarga não mudam. Linha que a nova condição não aceita recusa a troca (422, com a lista do que remover). As
+     * compatíveis trocam de tipo; a FINANCIADO acompanha o novo parcelado e é apagada ao sair dele. Se os pagamentos
+     * passarem do novo total, a resposta traz o aviso e a venda só finaliza depois do ajuste.
      */
     @Transactional
     public Venda definirCondicaoPagamento(Long vendaId, CondicaoPagamento condicao) {
         Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
+        List<PagamentoVenda> digitadas = listarPagamentos(vendaId).stream().filter(digitada()).toList();
+        List<PagamentoIncompativelDTO> incompativeis = digitadas.stream()
+                .filter(p -> !condicao.aceita(p.getForma(), p.getParcelas()))
+                .map(PagamentoIncompativelDTO::from)
+                .toList();
+        if (!incompativeis.isEmpty()) {
+            throw new PagamentosIncompativeisException(condicao, incompativeis);
+        }
+
         venda.setCondicaoPagamento(condicao);
-        reprecificar(venda, this::temPrecoDeTabela);
+        for (PagamentoVenda linha : digitadas) {
+            linha.setTipo(tipoDaLinha(condicao));
+        }
+        pagamentoVendaRepository.saveAll(digitadas);
+        reprecificar(venda);
         return vendaRepository.save(venda);
+    }
+
+    /** No parcelado, cria a linha FINANCIADO com o saldo; se ela já existe, só atualiza o valor. */
+    @Transactional
+    public Venda financiar(Long vendaId) {
+        Venda venda = buscarParaEdicao(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        CondicaoPagamento condicao = venda.getCondicaoPagamento();
+        if (!condicao.parcelado()) {
+            throw new NegocioException("Só há saldo financiado nas condições de 13x a 21x.");
+        }
+        reprecificar(venda);
+
+        List<PagamentoVenda> linhas = listarPagamentos(vendaId);
+        BigDecimal saldo = venda.getValorTotal().subtract(somarEntradas(linhas));
+        if (saldo.signum() <= 0) {
+            throw new NegocioException("A venda não tem saldo para financiar.");
+        }
+        if (linhas.stream().noneMatch(digitada().negate())) {
+            pagamentoVendaRepository.save(PagamentoVenda.builder()
+                    .venda(venda)
+                    .forma(FormaPagamento.CARTAO_CREDITO)
+                    .valor(saldo)
+                    .parcelas(condicao.parcelas())
+                    .tipo(TipoPagamento.FINANCIADO)
+                    .build());
+        }
+        registrarAtividade(venda);
+
+        return buscarPorId(vendaId);
+    }
+
+    /** Total da venda em cada condição, com as entradas lançadas que a condição aceita. */
+    @Transactional(readOnly = true)
+    public List<SimulacaoPagamentoDTO> simularPagamento(Long vendaId) {
+        Venda venda = buscarPorId(vendaId);
+        List<PagamentoVenda> digitadas = listarPagamentos(vendaId).stream().filter(digitada()).toList();
+
+        return Arrays.stream(CondicaoPagamento.values()).map(condicao -> {
+            BigDecimal entrada = somarEntradas(digitadas.stream()
+                    .filter(p -> condicao.aceita(p.getForma(), p.getParcelas())).toList());
+            TotalVenda total = CalculadoraCondicaoPagamento.totalDaVenda(
+                    condicao, composicao(venda, condicao, (item, preco) -> { }), entrada);
+            return new SimulacaoPagamentoDTO(condicao, total.total(), condicao.parcelas(),
+                    total.valorParcela(), total.ajuste());
+        }).toList();
     }
 
     @Transactional(readOnly = true)
@@ -500,27 +581,48 @@ public class VendaService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /** Soma das linhas lançadas pelo vendedor, que abatem a base dos juros no parcelado. */
+    private BigDecimal somarEntradas(List<PagamentoVenda> linhas) {
+        return linhas.stream()
+                .filter(digitada())
+                .map(PagamentoVenda::getValor)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** Linha lançada pelo vendedor: tudo menos a FINANCIADO, que é do backend. */
+    private Predicate<PagamentoVenda> digitada() {
+        return p -> p.getTipo() != TipoPagamento.FINANCIADO;
+    }
+
+    private TipoPagamento tipoDaLinha(CondicaoPagamento condicao) {
+        return condicao.parcelado() ? TipoPagamento.ENTRADA : TipoPagamento.PAGAMENTO;
+    }
+
+    private void exigirFormaAceita(CondicaoPagamento condicao, FormaPagamento forma, int parcelas) {
+        if (condicao.aceita(forma, parcelas)) return;
+        if (condicao.parcelado() && forma == FormaPagamento.CARTAO_CREDITO) {
+            throw new NegocioException("Em " + condicao + " o crédito é o saldo financiado, criado pelo sistema: "
+                    + "lance só as entradas e use o financiamento.");
+        }
+        throw new NegocioException("A condição " + condicao + " não aceita " + forma + " em " + parcelas + "x.");
+    }
+
     private boolean temVoucher(Long vendaId) {
         return listarPagamentos(vendaId).stream().anyMatch(p -> p.getForma() == FormaPagamento.VOUCHER);
     }
 
     /**
-     * Preço do item na tabela vigente, pela condição de pagamento da venda: primeiro na REGULAR; se a venda está
-     * com Renova e o item é elegível (aparelho com preço por plano), na RENOVA.
+     * Preço do item na tabela vigente, pela condição de pagamento: primeiro na REGULAR; se a venda está com Renova e
+     * o item é elegível (aparelho com preço por plano), na RENOVA.
      */
-    private PrecoCalculado precoNaTabela(Venda venda, CategoriaItemVenda categoria, EstoqueGeral unidade, String plano) {
-        FormaPagamento forma = venda.getCondicaoPagamento().formaPagamento();
-        Integer parcelas = venda.getCondicaoPagamento().numeroParcelas();
+    private PrecoCalculado precoNaTabela(Venda venda, CondicaoPagamento condicao, CategoriaItemVenda categoria,
+                                         EstoqueGeral unidade, String plano) {
+        FormaPagamento forma = condicao.formaPagamento();
+        Integer parcelas = condicao.numeroParcelas();
         PrecoCalculado regular = precoVigenteService.calcular(unidade, plano, TabelaPreco.REGULAR, forma, parcelas);
         TabelaPreco tabela = resolvedorTabela.resolver(venda.isRenova(), categoria, regular.grupoPlano());
         return tabela == TabelaPreco.REGULAR ? regular
                 : precoVigenteService.calcular(unidade, plano, tabela, forma, parcelas);
-    }
-
-    /** Recalcula o preço dos aparelhos com preço por plano (Renova ligado/desligado) e o total da venda. */
-    private void reprecificarAparelhos(Venda venda) {
-        reprecificar(venda, item -> temPrecoDeTabela(item) && item.getCategoria() == CategoriaItemVenda.PRODUTO_VIVO
-                && item.getGrupoPlano() != GrupoPlano.SEM_PLANO);
     }
 
     /** Aparelho ou acessório precificado pela tabela da Telefônica (grupo do plano gravado ao adicionar). */
@@ -529,19 +631,71 @@ public class VendaService {
                 && item.getEstoque() != null && item.getGrupoPlano() != null;
     }
 
-    private void reprecificar(Venda venda, Predicate<ItemVenda> filtro) {
+    /**
+     * Toda mudança em itens, Renova, condição ou entrada passa por aqui: preço dos itens de tabela, composição do
+     * total da venda e valor da linha FINANCIADO. O item fica no preço da condição sem entrada; a redução dos juros
+     * pela entrada aparece só no total da venda.
+     */
+    private void reprecificar(Venda venda) {
         CondicaoPagamento condicao = venda.getCondicaoPagamento();
-        for (ItemVenda item : venda.getItens()) {
-            if (!filtro.test(item)) continue;
-            PrecoCalculado preco = precoNaTabela(venda, item.getCategoria(), item.getEstoque(), item.getPlano());
+        ComposicaoVenda composicao = composicao(venda, condicao, (item, preco) -> {
             item.setValorUnitario(preco.valorAplicado());
             item.setTabelaAplicada(preco.tabela());
             item.setGrupoPlano(preco.grupoPlano());
             item.setDescontoFabricante(preco.descontoFabricante());
             item.setFormaPagamento(condicao.formaPagamento());
             item.setParcelas(condicao.numeroParcelas());
-        }
+        });
         venda.recalcularValorTotal();
+
+        List<PagamentoVenda> linhas = listarPagamentos(venda.getId());
+        TotalVenda total = CalculadoraCondicaoPagamento.totalDaVenda(condicao, composicao, somarEntradas(linhas));
+        venda.setValorItens(composicao.valorItens());
+        venda.setValorTotal(total.total());
+        venda.setAjusteCondicao(total.ajuste());
+        venda.setValorParcela(total.valorParcela());
+        atualizarFinanciado(linhas, condicao, total.financiado());
+    }
+
+    /** O que compõe o total da venda numa condição; {@code aoPrecificar} recebe cada item de tabela. */
+    private ComposicaoVenda composicao(Venda venda, CondicaoPagamento condicao,
+                                       BiConsumer<ItemVenda, PrecoCalculado> aoPrecificar) {
+        BigDecimal cheio = BigDecimal.ZERO;
+        BigDecimal naCondicao = BigDecimal.ZERO;
+        BigDecimal desconto = BigDecimal.ZERO;
+        BigDecimal semTabela = BigDecimal.ZERO;
+        for (ItemVenda item : venda.getItens()) {
+            semTabela = semTabela.add(item.getValorChipCobrado());
+            if (!temPrecoDeTabela(item)) {
+                semTabela = semTabela.add(item.getValorTotalItem());
+                continue;
+            }
+            PrecoCalculado preco = precoNaTabela(venda, condicao, item.getCategoria(), item.getEstoque(), item.getPlano());
+            aoPrecificar.accept(item, preco);
+            cheio = cheio.add(vezesQuantidade(preco.preco(), item));
+            naCondicao = naCondicao.add(vezesQuantidade(preco.valorAplicado(), item));
+            if (preco.descontoFabricante() != null) {
+                desconto = desconto.add(vezesQuantidade(preco.descontoFabricante(), item));
+            }
+        }
+        return new ComposicaoVenda(cheio, naCondicao, desconto, semTabela);
+    }
+
+    private BigDecimal vezesQuantidade(BigDecimal valor, ItemVenda item) {
+        return valor.multiply(item.getQuantidade()).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** Acompanha o saldo e o número de parcelas; sem saldo ou fora do parcelado, a linha é apagada. */
+    private void atualizarFinanciado(List<PagamentoVenda> linhas, CondicaoPagamento condicao, BigDecimal financiado) {
+        linhas.stream().filter(digitada().negate()).findFirst().ifPresent(linha -> {
+            if (financiado.signum() > 0) {
+                linha.setValor(financiado);
+                linha.setParcelas(condicao.parcelas());
+                pagamentoVendaRepository.save(linha);
+            } else {
+                pagamentoVendaRepository.delete(linha);
+            }
+        });
     }
 
     /** Aparelho/acessório: preço da tabela vigente. Serviço: 0. Recarga: valor informado. */

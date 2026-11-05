@@ -10,6 +10,7 @@ import com.vivo4redes.syscor.venda.dto.request.PagamentoVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.RenovaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.response.SimulacaoPagamentoDTO;
 import com.vivo4redes.syscor.venda.dto.response.VendaResponseDTO;
 import com.vivo4redes.syscor.venda.model.Venda;
 import com.vivo4redes.syscor.venda.service.VendaService;
@@ -109,8 +110,20 @@ public class VendaController {
     @PatchMapping("/{id}/condicao-pagamento")
     public ResponseEntity<VendaResponseDTO> definirCondicaoPagamento(
             @PathVariable Long id, @Valid @RequestBody CondicaoPagamentoRequestDTO dto) {
-        var venda = vendaService.definirCondicaoPagamento(id, dto.condicaoPagamento());
+        var venda = vendaService.definirCondicaoPagamento(id, dto.condicao());
         return ResponseEntity.ok(responder(venda));
+    }
+
+    /** Total da venda em cada condição, para mostrar ao cliente. */
+    @GetMapping("/{id}/simulacao-pagamento")
+    public ResponseEntity<List<SimulacaoPagamentoDTO>> simularPagamento(@PathVariable Long id) {
+        return ResponseEntity.ok(vendaService.simularPagamento(id));
+    }
+
+    /** No parcelado, cria ou atualiza a linha FINANCIADO com o saldo. */
+    @PostMapping("/{id}/financiar")
+    public ResponseEntity<VendaResponseDTO> financiar(@PathVariable Long id) {
+        return ResponseEntity.ok(responder(vendaService.financiar(id)));
     }
 
     @GetMapping("/{id}/resumo")

@@ -2,13 +2,13 @@ package com.vivo4redes.syscor.venda.dto.response;
 
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
-import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
+import com.vivo4redes.syscor.venda.enums.TipoPagamento;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
 import com.vivo4redes.syscor.venda.model.PagamentoVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
@@ -46,8 +46,12 @@ public record VendaResponseDTO(
         CondicaoPagamento condicaoPagamento,
         /** Maior número de parcelas da condição: 1 no PIX, 12 em A_VISTA e n em PARCELADO_n. */
         int parcelasCondicao,
-        /** valorTotal ÷ parcelasCondicao. */
-        BigDecimal valorParcela
+        /** Financiado ÷ n em PARCELADO_n; valorTotal ÷ parcelasCondicao nas demais. */
+        BigDecimal valorParcela,
+        /** Soma no preço cheio, sem juros nem desconto PIX. */
+        BigDecimal valorItens,
+        /** valorTotal − valorItens: negativo = desconto PIX, positivo = juros. */
+        BigDecimal ajusteCondicao
 ) {
     public record ItemDTO(
             Long id, CategoriaItemVenda categoria, Long produtoId, String descricaoProduto,
@@ -77,9 +81,11 @@ public record VendaResponseDTO(
         }
     }
 
-    public record PagamentoDTO(Long id, FormaPagamento forma, BigDecimal valor, Integer parcelas, String codigoVoucher) {
+    public record PagamentoDTO(Long id, FormaPagamento forma, BigDecimal valor, Integer parcelas, String codigoVoucher,
+                               TipoPagamento tipo) {
         static PagamentoDTO from(PagamentoVenda p) {
-            return new PagamentoDTO(p.getId(), p.getForma(), p.getValor(), p.getParcelas(), p.getCodigoVoucher());
+            return new PagamentoDTO(p.getId(), p.getForma(), p.getValor(), p.getParcelas(), p.getCodigoVoucher(),
+                    p.getTipo());
         }
     }
 
@@ -120,7 +126,9 @@ public record VendaResponseDTO(
                 aviso,
                 v.getCondicaoPagamento(),
                 v.getCondicaoPagamento().parcelas(),
-                CalculadoraCondicaoPagamento.valorParcela(total, v.getCondicaoPagamento().parcelas())
+                v.getValorParcela(),
+                v.getValorItens(),
+                v.getAjusteCondicao()
         );
     }
 }
