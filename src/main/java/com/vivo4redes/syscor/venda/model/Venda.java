@@ -2,6 +2,7 @@ package com.vivo4redes.syscor.venda.model;
 
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
@@ -87,6 +88,12 @@ public class Venda {
     @Column(name = "desconto_fabricante", nullable = false, precision = 12, scale = 2)
     @Builder.Default
     private BigDecimal descontoFabricante = BigDecimal.ZERO;
+
+    /** Escolhida na aba Pagamento; define o preço dos aparelhos e acessórios com preço de tabela. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "condicao_pagamento", nullable = false, length = 20)
+    @Builder.Default
+    private CondicaoPagamento condicaoPagamento = CondicaoPagamento.A_VISTA;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

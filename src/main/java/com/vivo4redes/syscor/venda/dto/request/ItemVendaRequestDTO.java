@@ -65,10 +65,10 @@ public record ItemVendaRequestDTO(
         BigDecimal valorChip,
         Boolean serialConfirmado,
 
-        /** Forma de pagamento usada no preço do item (PIX -> preço PIX; crédito em 13x–21x -> parcela). Opcional: preço cheio. */
+        /** Ignorado: o preço do item segue a condição de pagamento da venda. Mantido até o syscor-frontend migrar. */
         FormaPagamento formaPagamento,
 
-        /** Número de parcelas no crédito (1 a 21). Opcional. */
+        /** Ignorado: o preço do item segue a condição de pagamento da venda. Mantido até o syscor-frontend migrar. */
         @Min(value = 1, message = "parcelas deve ser no mínimo 1")
         @Max(value = 21, message = "parcelas deve ser no máximo 21")
         Integer parcelas

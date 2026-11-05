@@ -10,6 +10,7 @@ import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
@@ -27,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -74,11 +76,11 @@ class VendaServicePrecoTest {
     @Test
     @DisplayName("valorUnitario do front é ignorado: vale o preço REGULAR da tabela vigente, mesmo em troca de aparelho")
     void valorDoFrontIgnorado() {
+        venda.setCondicaoPagamento(CondicaoPagamento.PIX);
         when(precoVigenteService.calcular(aparelho, "Vivo V Ilimitado", TabelaPreco.REGULAR, FormaPagamento.PIX, null))
                 .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.VIVO_V, "9134.10"));
 
-        service.adicionarItem(1L, aparelho("1.00").plano("Vivo V Ilimitado").tipoServico("Troca de aparelho")
-                .formaPagamento(FormaPagamento.PIX).build());
+        service.adicionarItem(1L, aparelho("1.00").plano("Vivo V Ilimitado").tipoServico("Troca de aparelho").build());
 
         ItemVenda item = venda.getItens().get(0);
         assertThat(item.getValorUnitario()).isEqualByComparingTo("9134.10");
@@ -164,6 +166,6 @@ class VendaServicePrecoTest {
     private static PrecoCalculado preco(TabelaPreco tabela, GrupoPlano grupo, String valor) {
         BigDecimal v = new BigDecimal(valor);
         return new PrecoCalculado(1L, LocalDate.of(2026, 11, 1), "iPhone 17 Pro Max 512GB", tabela, grupo,
-                v, v, null, null, null, v, null);
+                v, v, null, null, null, v, null, List.of());
     }
 }

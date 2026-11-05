@@ -76,7 +76,7 @@ class VendaServiceReservaTest {
         when(estoqueService.reservarNaVenda("356789012345678")).thenReturn(unidade);
         BigDecimal preco = new BigDecimal("1299.00");
         when(precoVigenteService.calcular(unidade, null, TabelaPreco.REGULAR, null, null)).thenReturn(new PrecoCalculado(
-                1L, null, "Galaxy A15", TabelaPreco.REGULAR, GrupoPlano.PRE, preco, preco, null, null, null, preco, null));
+                1L, null, "Galaxy A15", TabelaPreco.REGULAR, GrupoPlano.PRE, preco, preco, null, null, null, preco, null, java.util.List.of()));
 
         service.adicionarItem(1L, ItemVendaRequestDTO.builder()
                 .categoria(CategoriaItemVenda.PRODUTO_VIVO)

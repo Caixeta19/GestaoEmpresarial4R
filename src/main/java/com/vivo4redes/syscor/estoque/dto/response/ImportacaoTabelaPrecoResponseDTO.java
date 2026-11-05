@@ -22,6 +22,8 @@ public record ImportacaoTabelaPrecoResponseDTO(
         int unidadesAtualizadas,
         List<String> estoqueSemPreco,
         int planilhaSemEstoque,
+        /** PIX e 13x–21x da planilha que diferem da fórmula em mais de R$ 0,01 (a planilha prevalece). */
+        List<DivergenciaCondicaoDTO> divergenciasCondicao,
         // ---- formato antigo (deprecado)
         String nomeArquivo,
         String vigenciaEm,

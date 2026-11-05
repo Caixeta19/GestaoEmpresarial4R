@@ -2,6 +2,7 @@ package com.vivo4redes.syscor.venda.controller;
 
 import com.vivo4redes.syscor.venda.dto.ResumoCarrinhoDTO;
 import com.vivo4redes.syscor.venda.dto.request.AvaliacaoProcedenciaRequestDTO;
+import com.vivo4redes.syscor.venda.dto.request.CondicaoPagamentoRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.DadosIniciaisVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
@@ -101,6 +102,14 @@ public class VendaController {
     public ResponseEntity<VendaResponseDTO> aplicarRenova(
             @PathVariable Long id, @Valid @RequestBody RenovaRequestDTO dto) {
         var venda = vendaService.aplicarRenova(id, dto.ativo());
+        return ResponseEntity.ok(responder(venda));
+    }
+
+    /** Troca a condição de pagamento e devolve a venda reprecificada. */
+    @PatchMapping("/{id}/condicao-pagamento")
+    public ResponseEntity<VendaResponseDTO> definirCondicaoPagamento(
+            @PathVariable Long id, @Valid @RequestBody CondicaoPagamentoRequestDTO dto) {
+        var venda = vendaService.definirCondicaoPagamento(id, dto.condicaoPagamento());
         return ResponseEntity.ok(responder(venda));
     }
 
