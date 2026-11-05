@@ -2,7 +2,9 @@ package com.vivo4redes.syscor.venda.dto.response;
 
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
@@ -40,7 +42,12 @@ public record VendaResponseDTO(
         /** valorTotal − soma dos pagamentos. Negativo quando os pagamentos passam do total. */
         BigDecimal saldo,
         /** Aviso para a tela (ex.: pagamentos acima do total depois de reprecificar); null quando não há. */
-        String aviso
+        String aviso,
+        CondicaoPagamento condicaoPagamento,
+        /** Maior número de parcelas da condição: 1 no PIX, 12 em A_VISTA e n em PARCELADO_n. */
+        int parcelasCondicao,
+        /** valorTotal ÷ parcelasCondicao. */
+        BigDecimal valorParcela
 ) {
     public record ItemDTO(
             Long id, CategoriaItemVenda categoria, Long produtoId, String descricaoProduto,
@@ -110,7 +117,10 @@ public record VendaResponseDTO(
                 v.isRenova(),
                 v.getDescontoFabricante(),
                 saldo,
-                aviso
+                aviso,
+                v.getCondicaoPagamento(),
+                v.getCondicaoPagamento().parcelasMaximas(),
+                CalculadoraCondicaoPagamento.valorParcela(total, v.getCondicaoPagamento().parcelasMaximas())
         );
     }
 }

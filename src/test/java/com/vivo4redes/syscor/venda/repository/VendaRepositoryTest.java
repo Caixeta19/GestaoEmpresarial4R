@@ -1,5 +1,7 @@
 package com.vivo4redes.syscor.venda.repository;
 
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
+import com.vivo4redes.syscor.venda.model.Venda;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -7,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -17,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @Testcontainers
@@ -50,6 +54,21 @@ class VendaRepositoryTest {
         venda("CANCELADA", limite.minus(Duration.ofDays(2)));
 
         assertThat(repository.buscarIdsCarrinhosAbandonados(limite)).containsExactly(abertaAntiga, abertaParada);
+    }
+
+    @Test
+    @DisplayName("V26: condição padrão A_VISTA e CHECK igual aos literais do enum")
+    void condicaoPagamentoNoBanco() {
+        jdbc.execute("SET LOCAL session_replication_role = replica");
+        long id = venda("ABERTA", Instant.parse("2026-11-02T12:00:00Z"));
+
+        assertThat(repository.findById(id)).get()
+                .extracting(Venda::getCondicaoPagamento).isEqualTo(CondicaoPagamento.A_VISTA);
+        for (CondicaoPagamento condicao : CondicaoPagamento.values()) {
+            assertThat(jdbc.update("UPDATE vendas SET condicao_pagamento = ? WHERE id = ?", condicao.name(), id)).isEqualTo(1);
+        }
+        assertThatThrownBy(() -> jdbc.update("UPDATE vendas SET condicao_pagamento = 'PARCELADO_22' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     /**

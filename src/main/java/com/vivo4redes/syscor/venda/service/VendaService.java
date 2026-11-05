@@ -12,6 +12,7 @@ import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
@@ -38,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Predicate;
 
 @Service
 public class VendaService {
@@ -126,7 +128,7 @@ public class VendaService {
             EstoqueGeral escolhida = estoqueService.buscarPorId(dto.produtoId());
             if (precoPelaTabela) {
                 // Antes da reserva: item sem preço na tabela vigente é recusado (422) sem prender a unidade.
-                preco = precoNaTabela(venda, dto.categoria(), escolhida, dto.plano(), dto.formaPagamento(), dto.parcelas());
+                preco = precoNaTabela(venda, dto.categoria(), escolhida, dto.plano());
             }
             String serialDaBaixa;
             if (informouSerial) {
@@ -188,8 +190,8 @@ public class VendaService {
                 .serialConfirmado(dto.serialConfirmado())
                 .grupoPlano(preco == null ? null : preco.grupoPlano())
                 .tabelaAplicada(preco == null ? null : preco.tabela())
-                .formaPagamento(preco == null ? null : dto.formaPagamento())
-                .parcelas(preco == null ? null : dto.parcelas())
+                .formaPagamento(preco == null ? null : venda.getCondicaoPagamento().formaPagamento())
+                .parcelas(preco == null ? null : venda.getCondicaoPagamento().numeroParcelas())
                 .descontoFabricante(preco == null ? null : preco.descontoFabricante())
                 .build();
 
@@ -472,6 +474,21 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
+    /**
+     * Troca a condição de pagamento e reprecifica os aparelhos e acessórios com preço de tabela. Chip, serviço e
+     * recarga não mudam. Os pagamentos não são alterados: se passarem do novo total, a resposta traz o aviso e a
+     * venda só finaliza depois do ajuste.
+     */
+    @Transactional
+    public Venda definirCondicaoPagamento(Long vendaId, CondicaoPagamento condicao) {
+        Venda venda = buscarParaEdicao(vendaId);
+        exigirCarrinhoEditavel(venda);
+
+        venda.setCondicaoPagamento(condicao);
+        reprecificar(venda, this::temPrecoDeTabela);
+        return vendaRepository.save(venda);
+    }
+
     @Transactional(readOnly = true)
     public List<PagamentoVenda> listarPagamentos(Long vendaId) {
         return pagamentoVendaRepository.findByVendaIdOrderByIdAsc(vendaId);
@@ -488,11 +505,12 @@ public class VendaService {
     }
 
     /**
-     * Preço do item na tabela vigente: primeiro na REGULAR; se a venda está com Renova e o item é elegível
-     * (aparelho com preço por plano), na RENOVA.
+     * Preço do item na tabela vigente, pela condição de pagamento da venda: primeiro na REGULAR; se a venda está
+     * com Renova e o item é elegível (aparelho com preço por plano), na RENOVA.
      */
-    private PrecoCalculado precoNaTabela(Venda venda, CategoriaItemVenda categoria, EstoqueGeral unidade, String plano,
-                                         FormaPagamento forma, Integer parcelas) {
+    private PrecoCalculado precoNaTabela(Venda venda, CategoriaItemVenda categoria, EstoqueGeral unidade, String plano) {
+        FormaPagamento forma = venda.getCondicaoPagamento().formaPagamento();
+        Integer parcelas = venda.getCondicaoPagamento().numeroParcelas();
         PrecoCalculado regular = precoVigenteService.calcular(unidade, plano, TabelaPreco.REGULAR, forma, parcelas);
         TabelaPreco tabela = resolvedorTabela.resolver(venda.isRenova(), categoria, regular.grupoPlano());
         return tabela == TabelaPreco.REGULAR ? regular
@@ -501,17 +519,27 @@ public class VendaService {
 
     /** Recalcula o preço dos aparelhos com preço por plano (Renova ligado/desligado) e o total da venda. */
     private void reprecificarAparelhos(Venda venda) {
+        reprecificar(venda, item -> temPrecoDeTabela(item) && item.getCategoria() == CategoriaItemVenda.PRODUTO_VIVO
+                && item.getGrupoPlano() != GrupoPlano.SEM_PLANO);
+    }
+
+    /** Aparelho ou acessório precificado pela tabela da Telefônica (grupo do plano gravado ao adicionar). */
+    private boolean temPrecoDeTabela(ItemVenda item) {
+        return (item.getCategoria() == CategoriaItemVenda.PRODUTO_VIVO || item.getCategoria() == CategoriaItemVenda.ACESSORIO)
+                && item.getEstoque() != null && item.getGrupoPlano() != null;
+    }
+
+    private void reprecificar(Venda venda, Predicate<ItemVenda> filtro) {
+        CondicaoPagamento condicao = venda.getCondicaoPagamento();
         for (ItemVenda item : venda.getItens()) {
-            if (item.getCategoria() != CategoriaItemVenda.PRODUTO_VIVO || item.getEstoque() == null
-                    || item.getGrupoPlano() == null || item.getGrupoPlano() == GrupoPlano.SEM_PLANO) {
-                continue;
-            }
-            PrecoCalculado preco = precoNaTabela(venda, item.getCategoria(), item.getEstoque(), item.getPlano(),
-                    item.getFormaPagamento(), item.getParcelas());
+            if (!filtro.test(item)) continue;
+            PrecoCalculado preco = precoNaTabela(venda, item.getCategoria(), item.getEstoque(), item.getPlano());
             item.setValorUnitario(preco.valorAplicado());
             item.setTabelaAplicada(preco.tabela());
             item.setGrupoPlano(preco.grupoPlano());
             item.setDescontoFabricante(preco.descontoFabricante());
+            item.setFormaPagamento(condicao.formaPagamento());
+            item.setParcelas(condicao.numeroParcelas());
         }
         venda.recalcularValorTotal();
     }
