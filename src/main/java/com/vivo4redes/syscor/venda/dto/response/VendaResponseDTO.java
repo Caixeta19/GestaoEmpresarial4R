@@ -119,8 +119,8 @@ public record VendaResponseDTO(
                 saldo,
                 aviso,
                 v.getCondicaoPagamento(),
-                v.getCondicaoPagamento().parcelasMaximas(),
-                CalculadoraCondicaoPagamento.valorParcela(total, v.getCondicaoPagamento().parcelasMaximas())
+                v.getCondicaoPagamento().parcelas(),
+                CalculadoraCondicaoPagamento.valorParcela(total, v.getCondicaoPagamento().parcelas())
         );
     }
 }

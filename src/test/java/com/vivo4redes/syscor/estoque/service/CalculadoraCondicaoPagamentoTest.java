@@ -1,6 +1,8 @@
 package com.vivo4redes.syscor.estoque.service;
 
 import com.vivo4redes.syscor.estoque.dto.response.OpcaoPagamentoDTO;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento.ComposicaoVenda;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento.TotalVenda;
 import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento.ValoresCondicao;
 import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import org.junit.jupiter.api.DisplayName;
@@ -82,6 +84,94 @@ class CalculadoraCondicaoPagamentoTest {
     void semFator() {
         assertThatThrownBy(() -> CalculadoraCondicaoPagamento.totalParcelado(REGULAR, 12, null))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("Venda Regular sem entrada: PIX, à vista e 21x, com o ajuste de cada condição")
+    void vendaRegular() {
+        TotalVenda pix = total(CondicaoPagamento.PIX, regular("10079.10", "0.00"), "0.00");
+        TotalVenda aVista = total(CondicaoPagamento.A_VISTA, regular("11199.00", "0.00"), "0.00");
+        TotalVenda parcelado = total(CondicaoPagamento.PARCELADO_21, regular("12581.12", "0.00"), "0.00");
+
+        assertThat(pix.total()).isEqualByComparingTo("10079.10");
+        assertThat(pix.ajuste()).isEqualByComparingTo("-1119.90");
+        assertThat(aVista.total()).isEqualByComparingTo("11199.00");
+        assertThat(aVista.ajuste()).isEqualByComparingTo("0.00");
+        assertThat(parcelado.total()).isEqualByComparingTo("12581.12");
+        assertThat(parcelado.ajuste()).isEqualByComparingTo("1382.12");
+        assertThat(parcelado.financiado()).isEqualByComparingTo("12581.12");
+        assertThat(parcelado.valorParcela()).isEqualByComparingTo("599.10");
+    }
+
+    @Test
+    @DisplayName("Venda Renova sem entrada: PIX, à vista e 21x de R$ 12.081,12")
+    void vendaRenovaSemEntrada() {
+        assertThat(total(CondicaoPagamento.PIX, renova("9579.10"), "0.00").total()).isEqualByComparingTo("9579.10");
+        assertThat(total(CondicaoPagamento.A_VISTA, renova("10699.00"), "0.00").total()).isEqualByComparingTo("10699.00");
+        assertThat(total(CondicaoPagamento.PARCELADO_21, renova("12081.12"), "0.00").total()).isEqualByComparingTo("12081.12");
+    }
+
+    @Test
+    @DisplayName("Renova 21x com voucher de R$ 500: o voucher é entrada e o total cai para R$ 12.019,41")
+    void vendaRenovaComVoucher() {
+        TotalVenda t = total(CondicaoPagamento.PARCELADO_21, renova("12081.12"), "500.00");
+
+        assertThat(t.total()).isEqualByComparingTo("12019.41");
+        assertThat(t.financiado()).isEqualByComparingTo("11519.41");
+    }
+
+    @Test
+    @DisplayName("Entrada de R$ 2.000 em 21x: juros só sobre o financiado")
+    void entrada() {
+        TotalVenda t = total(CondicaoPagamento.PARCELADO_21, regular("12581.12", "0.00"), "2000.00");
+
+        assertThat(t.financiado()).isEqualByComparingTo("10334.29");
+        assertThat(t.total()).isEqualByComparingTo("12334.29");
+        assertThat(t.valorParcela()).isEqualByComparingTo("492.11");
+    }
+
+    @Test
+    @DisplayName("Item sem tabela não tem juros nem desconto PIX, com e sem entrada")
+    void semTabela() {
+        assertThat(total(CondicaoPagamento.PIX, regular("10079.10", "33.00"), "0.00").total()).isEqualByComparingTo("10112.10");
+        assertThat(total(CondicaoPagamento.PARCELADO_21, regular("12581.12", "33.00"), "0.00").total()).isEqualByComparingTo("12614.12");
+
+        TotalVenda t = total(CondicaoPagamento.PARCELADO_21, regular("12581.12", "33.00"), "2000.00");
+        assertThat(t.total()).isEqualByComparingTo("12367.29");
+        assertThat(t.financiado()).isEqualByComparingTo("10367.29");
+        assertThat(t.ajuste()).isEqualByComparingTo("1135.29");
+    }
+
+    @Test
+    @DisplayName("Entrada acima da base de tabela: sem juros, e o excesso abate os itens sem tabela")
+    void entradaAcimaDaBase() {
+        TotalVenda t = total(CondicaoPagamento.PARCELADO_21, regular("12581.12", "33.00"), "11210.00");
+
+        assertThat(t.total()).isEqualByComparingTo("11232.00");
+        assertThat(t.ajuste()).isEqualByComparingTo("0.00");
+        assertThat(t.financiado()).isEqualByComparingTo("22.00");
+    }
+
+    @Test
+    @DisplayName("Entrada só conta no parcelado")
+    void entradaForaDoParcelado() {
+        TotalVenda t = total(CondicaoPagamento.A_VISTA, regular("11199.00", "0.00"), "2000.00");
+
+        assertThat(t.total()).isEqualByComparingTo("11199.00");
+        assertThat(t.financiado()).isEqualByComparingTo("0.00");
+        assertThat(t.valorParcela()).isEqualByComparingTo("933.25");
+    }
+
+    private static TotalVenda total(CondicaoPagamento condicao, ComposicaoVenda venda, String entrada) {
+        return CalculadoraCondicaoPagamento.totalDaVenda(condicao, venda, new BigDecimal(entrada));
+    }
+
+    private static ComposicaoVenda regular(String naCondicao, String semTabela) {
+        return new ComposicaoVenda(REGULAR, new BigDecimal(naCondicao), BigDecimal.ZERO, new BigDecimal(semTabela));
+    }
+
+    private static ComposicaoVenda renova(String naCondicao) {
+        return new ComposicaoVenda(RENOVA, new BigDecimal(naCondicao), DESCONTO, BigDecimal.ZERO);
     }
 
     private static OpcaoPagamentoDTO opcao(ValoresCondicao v, CondicaoPagamento condicao, int parcelas) {

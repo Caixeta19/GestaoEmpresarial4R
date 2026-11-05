@@ -17,6 +17,8 @@ import java.util.TreeMap;
  *   <li>À vista e 2x a 12x: preço cheio, sem juros.</li>
  *   <li>13x a 21x: preço cheio × fator (juros ≈ 1,0831% a.m., tabela Price).</li>
  *   <li>Renova: PIX e 13x–21x sobre o preço Regular, menos o desconto do fabricante.</li>
+ *   <li>Entrada no parcelado: os juros incidem só sobre o que sobra da base de tabela.</li>
+ *   <li>Itens sem tabela (chip, serviço, recarga): valor cheio em qualquer condição.</li>
  * </ul>
  * A planilha prevalece: a fórmula só preenche o que falta e serve para conferir a importação.
  */
@@ -29,16 +31,6 @@ public final class CalculadoraCondicaoPagamento {
     private static final int CASAS = 2;
     private static final BigDecimal FATOR_PIX = new BigDecimal("0.9");
     private static final BigDecimal TOLERANCIA = new BigDecimal("0.01");
-    private static final Map<Integer, BigDecimal> FATORES = Map.of(
-            13, new BigDecimal("1.0774494"),
-            14, new BigDecimal("1.0831273"),
-            15, new BigDecimal("1.0888245"),
-            16, new BigDecimal("1.0945411"),
-            17, new BigDecimal("1.1002770"),
-            18, new BigDecimal("1.1060324"),
-            19, new BigDecimal("1.1118073"),
-            20, new BigDecimal("1.1176012"),
-            21, new BigDecimal("1.1234148"));
 
     private CalculadoraCondicaoPagamento() {
     }
@@ -50,15 +42,35 @@ public final class CalculadoraCondicaoPagamento {
 
     /** @param desconto desconto do fabricante (null ou zero na REGULAR) */
     public static BigDecimal totalParcelado(BigDecimal regular, int parcelas, BigDecimal desconto) {
-        BigDecimal fator = FATORES.get(parcelas);
-        if (fator == null) {
-            throw new IllegalArgumentException("Sem fator para " + parcelas + "x.");
-        }
-        return arredondar(regular.multiply(fator)).subtract(zeroSeNulo(desconto));
+        return arredondar(regular.multiply(CondicaoPagamento.parcelado(parcelas).fator())).subtract(zeroSeNulo(desconto));
     }
 
     public static BigDecimal valorParcela(BigDecimal total, int parcelas) {
         return total.divide(BigDecimal.valueOf(parcelas), CASAS, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Total da venda numa condição. Sem entrada, vale a soma dos itens de tabela nessa condição (a planilha, centavo a
+     * centavo). Com entrada em PARCELADO_n: {@code E + round((baseTabela − E) × fator) − desconto + semTabela}, com
+     * {@code E} limitada à base de tabela; o que passar dela abate os itens sem tabela, que não têm juros.
+     *
+     * @param entrada soma das linhas de entrada (só conta em PARCELADO_n)
+     */
+    public static TotalVenda totalDaVenda(CondicaoPagamento condicao, ComposicaoVenda venda, BigDecimal entrada) {
+        boolean comEntrada = condicao.parcelado() && entrada.signum() > 0;
+        BigDecimal tabela = comEntrada ? tabelaComEntrada(condicao, venda, entrada) : venda.tabelaNaCondicao();
+        BigDecimal total = tabela.add(venda.semTabela());
+        BigDecimal financiado = condicao.parcelado() ? total.subtract(entrada).max(BigDecimal.ZERO) : BigDecimal.ZERO;
+        BigDecimal parcelado = condicao.parcelado() ? financiado : total;
+        return new TotalVenda(total, total.subtract(venda.valorItens()), financiado,
+                valorParcela(parcelado, condicao.parcelas()));
+    }
+
+    private static BigDecimal tabelaComEntrada(CondicaoPagamento condicao, ComposicaoVenda venda, BigDecimal entrada) {
+        BigDecimal base = venda.cheioTabela().add(venda.descontoFabricante());
+        BigDecimal abatido = entrada.min(base);
+        return abatido.add(arredondar(base.subtract(abatido).multiply(condicao.fator())))
+                .subtract(venda.descontoFabricante());
     }
 
     /** Diferença acima de R$ 0,01 entre o valor da planilha e o da fórmula. */
@@ -92,6 +104,31 @@ public final class CalculadoraCondicaoPagamento {
 
     private static BigDecimal zeroSeNulo(BigDecimal valor) {
         return valor == null ? BigDecimal.ZERO : valor;
+    }
+
+    /**
+     * O que compõe o total da venda.
+     *
+     * @param cheioTabela        itens de tabela no preço cheio (na Renova, o preço cheio Renova)
+     * @param tabelaNaCondicao   itens de tabela no preço da condição, sem entrada
+     * @param descontoFabricante desconto do fabricante dos itens na Renova; cheioTabela + desconto = Regular
+     * @param semTabela          itens sem tabela e chips, que não mudam com a condição
+     */
+    public record ComposicaoVenda(BigDecimal cheioTabela, BigDecimal tabelaNaCondicao, BigDecimal descontoFabricante,
+                                  BigDecimal semTabela) {
+
+        /** Soma no preço cheio, sem juros nem desconto PIX. */
+        public BigDecimal valorItens() {
+            return cheioTabela.add(semTabela);
+        }
+    }
+
+    /**
+     * @param ajuste       total − preço cheio: negativo = desconto PIX, positivo = juros
+     * @param financiado   saldo no crédito (total − entrada); zero fora de PARCELADO_n
+     * @param valorParcela financiado ÷ n em PARCELADO_n; total ÷ parcelas da condição nas demais
+     */
+    public record TotalVenda(BigDecimal total, BigDecimal ajuste, BigDecimal financiado, BigDecimal valorParcela) {
     }
 
     /** Total de cada condição: {@code cheio} (até 12x), {@code pix} e {@code totais} (13x a 21x, sempre completo). */
