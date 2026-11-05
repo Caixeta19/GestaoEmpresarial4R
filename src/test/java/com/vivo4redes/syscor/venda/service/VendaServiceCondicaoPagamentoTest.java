@@ -132,7 +132,9 @@ class VendaServiceCondicaoPagamentoTest {
         assertThat(servico.getValorUnitario()).isEqualByComparingTo("0");
         assertThat(servico.getValorChip()).isEqualByComparingTo("13.00");
         assertThat(recarga.getValorUnitario()).isEqualByComparingTo("20.00");
-        assertThat(v.getValorTotal()).isEqualByComparingTo("10279.01");
+        assertThat(v.getValorTotal()).isEqualByComparingTo("10292.01");
+        assertThat(v.getValorItens()).isEqualByComparingTo("11431.90");
+        assertThat(v.getAjusteCondicao()).isEqualByComparingTo("-1139.89");
     }
 
     @Test
@@ -145,13 +147,13 @@ class VendaServiceCondicaoPagamentoTest {
         assertThat(aparelho.getValorUnitario()).isEqualByComparingTo("12581.12");
         assertThat(aparelho.getFormaPagamento()).isEqualTo(FormaPagamento.CARTAO_CREDITO);
         assertThat(aparelho.getParcelas()).isEqualTo(21);
-        assertThat(venda.getValorTotal()).isEqualByComparingTo("12825.69");
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("12838.69");
 
         service.definirCondicaoPagamento(1L, CondicaoPagamento.A_VISTA);
         assertThat(aparelho.getValorUnitario()).isEqualByComparingTo("11199.00");
         assertThat(aparelho.getFormaPagamento()).isNull();
         assertThat(aparelho.getParcelas()).isNull();
-        assertThat(venda.getValorTotal()).isEqualByComparingTo("11418.90");
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("11431.90");
     }
 
     @Test
@@ -204,33 +206,35 @@ class VendaServiceCondicaoPagamentoTest {
     @Test
     @DisplayName("Para finalizar, os pagamentos precisam fechar o total da condição escolhida")
     void pagamentosFechamOTotalDaCondicao() {
-        pagamentos.add(pagamento(FormaPagamento.CARTAO_CREDITO, "11418.90"));
+        pagamentos.add(pagamento(FormaPagamento.PIX, "11431.90"));
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX);
 
         assertThatThrownBy(() -> service.finalizar(1L, finalizar()))
-                .isInstanceOf(NegocioException.class).hasMessageContaining("10279.01");
+                .isInstanceOf(NegocioException.class).hasMessageContaining("10292.01");
 
         pagamentos.clear();
-        pagamentos.add(pagamento(FormaPagamento.PIX, "10279.01"));
+        pagamentos.add(pagamento(FormaPagamento.PIX, "10292.01"));
         assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
     }
 
     @Test
     @DisplayName("Resposta traz condição, parcelas e valor da parcela; pagamento acima do novo total gera aviso")
     void respostaDaVenda() {
-        pagamentos.add(pagamento(FormaPagamento.CARTAO_CREDITO, "11418.90"));
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
 
         VendaResponseDTO parcelado = VendaResponseDTO.from(venda, pagamentos);
         assertThat(parcelado.condicaoPagamento()).isEqualTo(CondicaoPagamento.PARCELADO_21);
         assertThat(parcelado.parcelasCondicao()).isEqualTo(21);
-        assertThat(parcelado.valorParcela()).isEqualByComparingTo("610.75");
+        assertThat(parcelado.valorParcela()).isEqualByComparingTo("611.37");
+        assertThat(parcelado.valorItens()).isEqualByComparingTo("11431.90");
+        assertThat(parcelado.ajusteCondicao()).isEqualByComparingTo("1406.79");
         assertThat(parcelado.aviso()).isNull();
 
+        pagamentos.add(pagamento(FormaPagamento.PIX, "11431.90"));
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX);
         VendaResponseDTO pix = VendaResponseDTO.from(venda, pagamentos);
         assertThat(pix.parcelasCondicao()).isEqualTo(1);
-        assertThat(pix.valorParcela()).isEqualByComparingTo("10279.01");
+        assertThat(pix.valorParcela()).isEqualByComparingTo("10292.01");
         assertThat(pix.aviso()).contains("passam do total");
     }
 
@@ -246,17 +250,17 @@ class VendaServiceCondicaoPagamentoTest {
 
     private void regular(FormaPagamento forma, Integer parcelas, String valor) {
         lenient().when(precoVigenteService.calcular(iphone, PLANO, TabelaPreco.REGULAR, forma, parcelas))
-                .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.CONTROLE_ALTO_VALOR, valor, null));
+                .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.CONTROLE_ALTO_VALOR, "11199.00", valor, null));
     }
 
     private void renova(FormaPagamento forma, Integer parcelas, String valor) {
         lenient().when(precoVigenteService.calcular(iphone, PLANO, TabelaPreco.RENOVA, forma, parcelas))
-                .thenReturn(preco(TabelaPreco.RENOVA, GrupoPlano.CONTROLE_ALTO_VALOR, valor, "500.00"));
+                .thenReturn(preco(TabelaPreco.RENOVA, GrupoPlano.CONTROLE_ALTO_VALOR, "10699.00", valor, "500.00"));
     }
 
     private void acessorio(FormaPagamento forma, Integer parcelas, String valor) {
         lenient().when(precoVigenteService.calcular(fone, null, TabelaPreco.REGULAR, forma, parcelas))
-                .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.SEM_PLANO, valor, null));
+                .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.SEM_PLANO, "199.90", valor, null));
     }
 
     private PagamentoVenda pagamento(FormaPagamento forma, String valor) {
@@ -267,9 +271,9 @@ class VendaServiceCondicaoPagamentoTest {
         return new FinalizarVendaRequestDTO(new AutenticacaoUsuarioDTO("v@4r.com", "senha"));
     }
 
-    private static PrecoCalculado preco(TabelaPreco tabela, GrupoPlano grupo, String valor, String desconto) {
+    private static PrecoCalculado preco(TabelaPreco tabela, GrupoPlano grupo, String cheio, String valor, String desconto) {
         BigDecimal v = new BigDecimal(valor);
         return new PrecoCalculado(1L, LocalDate.of(2026, 10, 29), "Item", tabela, grupo,
-                v, v, null, null, null, v, desconto == null ? null : new BigDecimal(desconto), List.of());
+                new BigDecimal(cheio), v, null, null, null, v, desconto == null ? null : new BigDecimal(desconto), List.of());
     }
 }

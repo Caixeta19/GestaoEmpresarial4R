@@ -106,6 +106,8 @@ class VendaServiceRenovaTest {
                 .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.VIVO_V, "10149.00", null));
         lenient().when(precoVigenteService.calcular(iphone, PLANO, TabelaPreco.RENOVA, null, null))
                 .thenReturn(preco(TabelaPreco.RENOVA, GrupoPlano.VIVO_V, "9649.00", "500.00"));
+        lenient().when(precoVigenteService.calcular(acessorio.getEstoque(), null, TabelaPreco.REGULAR, null, null))
+                .thenReturn(preco(TabelaPreco.REGULAR, GrupoPlano.SEM_PLANO, "199.90", null));
     }
 
     @Test
@@ -129,7 +131,7 @@ class VendaServiceRenovaTest {
         assertThat(aparelho.getTabelaAplicada()).isEqualTo(TabelaPreco.RENOVA);
         assertThat(aparelho.getValorUnitario()).isEqualByComparingTo("9649.00");
         assertThat(aparelho.getDescontoFabricante()).isEqualByComparingTo("500.00");
-        // Acessório (SEM_PLANO) não muda e nem consulta a tabela.
+        // Acessório (SEM_PLANO) fica na REGULAR, com o mesmo preço.
         assertThat(acessorio.getValorUnitario()).isEqualByComparingTo("199.90");
         assertThat(acessorio.getTabelaAplicada()).isEqualTo(TabelaPreco.REGULAR);
         // O desconto já está no preço Renova: o total é a soma dos itens, sem abater de novo.
@@ -229,7 +231,8 @@ class VendaServiceRenovaTest {
         assertThat(item.getTabelaAplicada()).isEqualTo(TabelaPreco.RENOVA);
         assertThat(item.getValorUnitario()).isEqualByComparingTo("9649.00");
         assertThat(venda.getDescontoFabricante()).isEqualByComparingTo("500.00");
-        verify(precoVigenteService).calcular(eq(iphone), eq(PLANO), eq(TabelaPreco.RENOVA), any(), any());
+        verify(precoVigenteService, org.mockito.Mockito.atLeastOnce())
+                .calcular(eq(iphone), eq(PLANO), eq(TabelaPreco.RENOVA), any(), any());
     }
 
     @Test

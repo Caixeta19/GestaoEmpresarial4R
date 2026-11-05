@@ -168,6 +168,7 @@ class TabelaPrecoServiceIntegracaoTest {
         service.importar(arquivo(0));
 
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.PIX, null)).isEqualByComparingTo("9134.10");
+        assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.VIVO_PAY, null)).isEqualByComparingTo("9134.10");
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 12)).isEqualByComparingTo("10149.00");
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_DEBITO, null)).isEqualByComparingTo("10149.00");
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.DINHEIRO, null)).isEqualByComparingTo("10149.00");

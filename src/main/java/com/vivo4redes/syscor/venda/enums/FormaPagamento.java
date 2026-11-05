@@ -7,5 +7,7 @@ public enum FormaPagamento {
     DINHEIRO,
     BOLETO,
     /** Voucher do fabricante (com código). Junto com o Desconto fabricante, liga a TABELA RENOVA. */
-    VOUCHER
+    VOUCHER,
+    /** Na tabela da Telefônica vale como PIX. */
+    VIVO_PAY
 }

@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.venda.model;
 
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
+import com.vivo4redes.syscor.venda.enums.TipoPagamento;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -34,6 +35,11 @@ public class PagamentoVenda {
     @Column(nullable = false)
     @Builder.Default
     private Integer parcelas = 1;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 12)
+    @Builder.Default
+    private TipoPagamento tipo = TipoPagamento.PAGAMENTO;
 
     /** Código do voucher (só na forma VOUCHER). */
     @Column(name = "codigo_voucher", length = 60)

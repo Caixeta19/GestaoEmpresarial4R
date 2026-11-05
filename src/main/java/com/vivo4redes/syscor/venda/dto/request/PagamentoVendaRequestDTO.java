@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 
 public record PagamentoVendaRequestDTO(
 
-        @NotNull(message = "forma é obrigatória (CARTAO_CREDITO, CARTAO_DEBITO, PIX, DINHEIRO, BOLETO ou VOUCHER)")
+        @NotNull(message = "forma é obrigatória (CARTAO_CREDITO, CARTAO_DEBITO, PIX, VIVO_PAY, DINHEIRO, BOLETO ou VOUCHER)")
         FormaPagamento forma,
 
         @NotNull(message = "valor é obrigatório")

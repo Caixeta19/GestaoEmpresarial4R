@@ -33,6 +33,14 @@ public class GlobalExceptionHandler {
                 .body(corpo(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage()));
     }
 
+    // 422: troca de condição com pagamentos incompatíveis; o corpo lista quais remover
+    @ExceptionHandler(PagamentosIncompativeisException.class)
+    public ResponseEntity<Map<String, Object>> handlePagamentosIncompativeis(PagamentosIncompativeisException ex) {
+        Map<String, Object> corpo = corpo(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        corpo.put("pagamentosIncompativeis", ex.getPagamentos());
+        return ResponseEntity.unprocessableEntity().body(corpo);
+    }
+
     // 401: credenciais inválidas (login / reautenticação do vendedor)
     @ExceptionHandler(AutenticacaoInvalidaException.class)
     public ResponseEntity<Map<String, Object>> handleAutenticacao(AutenticacaoInvalidaException ex) {

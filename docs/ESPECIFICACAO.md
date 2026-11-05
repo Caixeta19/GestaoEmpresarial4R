@@ -265,7 +265,7 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 
 ## 6. Modelo de dados
 
-O schema tem 24 migrations Flyway (V1 a V24) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V25 em diante.
+O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration`. Nenhuma migration já aplicada deve ser editada: toda mudança entra como V25 em diante.
 
 | Tabela | Módulo | Conteúdo | Migrations |
 | --- | --- | --- | --- |
@@ -274,7 +274,7 @@ O schema tem 24 migrations Flyway (V1 a V24) em `src/main/resources/db/migration
 | `usuarios` | venda | Vendedores: login, e-mail, `senha_hash`, cargo, filial, prestadora, `primeiro_acesso`, `ativo` | V2, V17, V18 |
 | `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário, total, status, procedência, score | V1–V3, V13 |
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id` | V1, V4, V8, V13, V14, V19, V20 |
-| `pagamentos_venda` | venda | Pagamentos por forma | V8 |
+| `pagamentos_venda` | venda | Pagamentos por forma e tipo (`PAGAMENTO`, `ENTRADA`, `FINANCIADO`), com código do voucher | V8, V25, V27 |
 | `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22, V23 |
 | `tb_inventario_execucao` / `tb_inventario_item` | estoque | Execuções e linhas da conciliação SAP | V5 |
 | `tb_tabela_preco_execucao` | estoque | Uma linha por upload da tabela da Telefônica; a mais recente é a vigente (`vigencia_em DATE`) | V6, V24 |
@@ -302,8 +302,9 @@ O schema tem 24 migrations Flyway (V1 a V24) em `src/main/resources/db/migration
 | --- | --- |
 | `StatusVenda` | ABERTA, PENDENTE, APROVADA, CONCLUIDA, CANCELADA |
 | `CategoriaItemVenda` | PRODUTO\_VIVO, SERVICO\_VIVO, ACESSORIO, RECARGA |
-| `FormaPagamento` | CARTAO\_CREDITO, CARTAO\_DEBITO, PIX, DINHEIRO, BOLETO, VOUCHER (com `codigo_voucher`, V25) |
+| `FormaPagamento` | CARTAO\_CREDITO, CARTAO\_DEBITO, PIX, DINHEIRO, BOLETO, VOUCHER (com `codigo_voucher`, V25), VIVO\_PAY (V27) |
 | `CondicaoPagamento` | PIX, A\_VISTA, PARCELADO\_13 a PARCELADO\_21 (V26) |
+| `TipoPagamento` | PAGAMENTO, ENTRADA, FINANCIADO (V27) |
 | `StatusAvaliacaoProcedencia` | Improcedente, Procedente, Em\_avaliacao\_pelo\_BKO, Nao\_avaliado |
 | `StatusScoreCliente` | NAO\_REALIZADA, CONSULTANDO, APROVADO, REPROVADO |
 | `TipoPessoa` | FISICA, JURIDICA |
@@ -353,7 +354,9 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
 | DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento (remover o último voucher desliga o Renova) |
 | PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo }`; exige voucher) |
-| PATCH | `/vendas/{id}/condicao-pagamento` | Troca a condição (`{ condicaoPagamento }`) e reprecifica a venda |
+| PATCH | `/vendas/{id}/condicao-pagamento` | Troca a condição (`{ condicao }`; aceita também `{ condicaoPagamento }`) e reprecifica a venda. 422 com `pagamentosIncompativeis` se houver linha que a condição não aceita |
+| GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
+| POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |
 | GET | `/vendas/{id}/resumo` | Totais e saldo do carrinho |
 | PATCH | `/vendas/{id}/finalizar` | Finalizar (exige reautenticação) |
 | PATCH | `/vendas/{id}/status` | Avançar status (exige reautenticação) |
@@ -508,6 +511,7 @@ O preço de um aparelho depende de: produto (Nome Comercial) + grupo do plano do
 5. O upload devolve `estoqueSemPreco` (modelos do estoque sem preço) e `planilhaSemEstoque` (itens da planilha sem estoque), para correção do cadastro. A importação é toda numa transação: se falhar, a vigente continua a anterior.
 6. **Renova (V25, decisão de 04/11/2026):** o aparelho passa para a `RENOVA` com Desconto fabricante + Voucher. O vendedor lança o pagamento `VOUCHER` (valor + código) e chama `PATCH /vendas/{id}/renova`; sem voucher → 422; remover o último voucher desliga o Renova. Só aparelho com preço por plano muda (acessório, chip, serviço e `SEM_PLANO` não). Pré-pago não tem Renova → 422 "Renova não disponível para plano pré-pago.". A coluna `DESCONTO` do bloco Renova vai para `tb_preco_item.desconto_fabricante`; o preço Renova já tem o desconto, então `vendas.desconto_fabricante` (soma dos aparelhos na Renova) é só controle e não abate o total. A resposta da venda traz `renova`, `descontoFabricante`, `saldo` e `aviso` (pagamentos acima do total após reprecificar).
 7. **Condição de pagamento (V26):** a venda tem `condicao_pagamento` (`PIX`, `A_VISTA`, `PARCELADO_13` … `PARCELADO_21`; padrão `A_VISTA`), escolhida na aba Pagamento com `PATCH /vendas/{id}/condicao-pagamento`. A troca reprecifica os aparelhos e acessórios com preço de tabela (inclusive `SEM_PLANO`) e recalcula o total; chip, serviço e recarga não mudam. Item novo segue a condição da venda: `formaPagamento` e `parcelas` enviados no item são ignorados. A planilha prevalece; o que faltar vem de `CalculadoraCondicaoPagamento`: PIX = 90% do preço cheio; até 12x = preço cheio; 13x–21x = preço cheio × fator, em 2 casas (HALF_UP); parcela = total ÷ n. Na Renova, PIX e 13x–21x saem do preço Regular menos o `DESCONTO`. O upload devolve `divergenciasCondicao` (PIX e 13x–21x com diferença acima de R$ 0,01 entre planilha e fórmula). `GET /produtos/precos/item` devolve `opcoes` com as 22 opções (PIX, `A_VISTA` de 1x a 12x e 13x a 21x). Os pagamentos precisam fechar o total da condição; a forma do pagamento não é validada contra a condição. O `valorChip` é gravado no item, mas não entra em `valor_total`.
+8. **Pagamento por condição (V27):** as linhas de pagamento precisam caber na condição: `PIX` aceita `PIX`, `VIVO_PAY` e `VOUCHER`; `A_VISTA` aceita todas, com crédito até 12x; `PARCELADO_N` aceita as entradas (`DINHEIRO`, `PIX`, `VIVO_PAY`, `CARTAO_DEBITO`, `VOUCHER`) e uma linha `FINANCIADO`, criada por `POST /vendas/{id}/financiar`. Total com entrada E: `E + round((baseTabela − E) × fator[N], 2) − descontoFabricante + semTabela`, com E limitada a `baseTabela` e o excesso abatendo os itens sem tabela; sem entrada, vale a soma dos `parcelas[N]` da planilha. Chip (`valorChip`), serviço, recarga e item sem preço de tabela entram pelo valor cheio, sem juros nem desconto PIX. O voucher conta como entrada, inclusive no Renova. Toda mudança em item, Renova, condição ou entrada reprecifica a venda e recalcula a linha `FINANCIADO`, que acompanha N ao trocar de parcelado e é apagada ao sair dele ou sem saldo. `valor_itens` é o preço de tabela sem juros nem desconto (na Renova, o preço cheio Renova) mais os itens sem tabela; `ajuste_condicao` = `valor_total − valor_itens`. Trocar para uma condição que recusa alguma linha devolve 422 com `pagamentosIncompativeis`. `GET /vendas/{id}/simulacao-pagamento` mostra todas as condições com as entradas lançadas. No caixa, `VIVO_PAY` é forma própria e a linha `FINANCIADO` entra como crédito.
 
 **Ordem de execução no Claude Code**
 

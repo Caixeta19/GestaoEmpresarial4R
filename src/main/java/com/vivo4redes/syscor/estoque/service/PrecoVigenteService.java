@@ -159,7 +159,7 @@ public class PrecoVigenteService {
     }
 
     private BigDecimal valorParaPagamento(ValoresCondicao valores, FormaPagamento forma, Integer numeroParcelas) {
-        if (forma == FormaPagamento.PIX) {
+        if (forma == FormaPagamento.PIX || forma == FormaPagamento.VIVO_PAY) {
             return valores.pix();
         }
         if (forma == FormaPagamento.CARTAO_CREDITO && numeroParcelas != null) {

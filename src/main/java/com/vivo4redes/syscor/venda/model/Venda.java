@@ -95,6 +95,21 @@ public class Venda {
     @Builder.Default
     private CondicaoPagamento condicaoPagamento = CondicaoPagamento.A_VISTA;
 
+    /** Soma no preço cheio, sem juros nem desconto PIX (na Renova, o preço cheio Renova). Sempre recalculado. */
+    @Column(name = "valor_itens", nullable = false, precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal valorItens = BigDecimal.ZERO;
+
+    /** valorTotal − valorItens: negativo = desconto PIX, positivo = juros. Sempre recalculado. */
+    @Column(name = "ajuste_condicao", nullable = false, precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal ajusteCondicao = BigDecimal.ZERO;
+
+    /** Financiado ÷ n em PARCELADO_n; valorTotal ÷ parcelas da condição nas demais. Sempre recalculado. */
+    @Column(name = "valor_parcela", nullable = false, precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal valorParcela = BigDecimal.ZERO;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
@@ -124,7 +139,7 @@ public class Venda {
 
     public void recalcularValorTotal() {
         this.valorTotal = itens.stream()
-                .map(ItemVenda::getValorTotalItem)
+                .map(i -> i.getValorTotalItem().add(i.getValorChipCobrado()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, java.math.RoundingMode.HALF_UP);
         this.descontoFabricante = itens.stream()

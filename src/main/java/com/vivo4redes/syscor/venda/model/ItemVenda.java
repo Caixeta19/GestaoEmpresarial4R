@@ -150,4 +150,9 @@ public class ItemVenda {
     public BigDecimal getValorTotalItem() {
         return valorUnitario.multiply(quantidade).setScale(2, java.math.RoundingMode.HALF_UP);
     }
+
+    /** Chip do item: soma no total da venda, à parte de {@link #getValorTotalItem()}, e não muda com a condição. */
+    public BigDecimal getValorChipCobrado() {
+        return valorChip == null ? BigDecimal.ZERO : valorChip;
+    }
 }

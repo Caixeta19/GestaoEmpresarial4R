@@ -1,6 +1,9 @@
 package com.vivo4redes.syscor.venda.repository;
 
 import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
+import com.vivo4redes.syscor.venda.enums.FormaPagamento;
+import com.vivo4redes.syscor.venda.enums.TipoPagamento;
+import com.vivo4redes.syscor.venda.model.PagamentoVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -33,6 +37,9 @@ class VendaRepositoryTest {
 
     @Autowired
     private VendaRepository repository;
+
+    @Autowired
+    private PagamentoVendaRepository pagamentoRepository;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -69,6 +76,53 @@ class VendaRepositoryTest {
         }
         assertThatThrownBy(() -> jdbc.update("UPDATE vendas SET condicao_pagamento = 'PARCELADO_22' WHERE id = ?", id))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("V27: tipo padrão PAGAMENTO e CHECKs de forma e tipo iguais aos literais dos enums")
+    void pagamentoNoBanco() {
+        jdbc.execute("SET LOCAL session_replication_role = replica");
+        long venda = venda("ABERTA", Instant.parse("2026-11-02T12:00:00Z"));
+
+        long id = jdbc.queryForObject("INSERT INTO pagamentos_venda (venda_id, forma, valor) VALUES (?, 'PIX', 10) RETURNING id",
+                Long.class, venda);
+
+        assertThat(pagamentoRepository.findById(id)).get()
+                .extracting(PagamentoVenda::getTipo).isEqualTo(TipoPagamento.PAGAMENTO);
+        for (FormaPagamento forma : FormaPagamento.values()) {
+            assertThat(jdbc.update("UPDATE pagamentos_venda SET forma = ? WHERE id = ?", forma.name(), id)).isEqualTo(1);
+        }
+        for (TipoPagamento tipo : TipoPagamento.values()) {
+            assertThat(jdbc.update("UPDATE pagamentos_venda SET tipo = ? WHERE id = ?", tipo.name(), id)).isEqualTo(1);
+        }
+        assertThatThrownBy(() -> jdbc.update("UPDATE pagamentos_venda SET tipo = 'OUTRO' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("Caixa: VIVO_PAY soma como forma própria e a linha FINANCIADO entra como crédito")
+    void entradasDoCaixa() {
+        jdbc.execute("SET LOCAL session_replication_role = replica");
+        long venda = venda("ABERTA", Instant.parse("2026-11-02T12:00:00Z"));
+        pagamento(venda, "VIVO_PAY", "PAGAMENTO", "100.00");
+        pagamento(venda, "PIX", "ENTRADA", "30.00");
+        pagamento(venda, "CARTAO_CREDITO", "FINANCIADO", "70.00");
+        pagamento(venda, "CARTAO_CREDITO", "PAGAMENTO", "5.00");
+
+        assertThat(entradas(FormaPagamento.VIVO_PAY)).isEqualByComparingTo("100.00");
+        assertThat(entradas(FormaPagamento.PIX)).isEqualByComparingTo("30.00");
+        assertThat(entradas(FormaPagamento.CARTAO_CREDITO)).isEqualByComparingTo("75.00");
+    }
+
+    private void pagamento(long venda, String forma, String tipo, String valor) {
+        jdbc.update("INSERT INTO pagamentos_venda (venda_id, forma, tipo, valor) VALUES (?, ?, ?, ?)",
+                venda, forma, tipo, new BigDecimal(valor));
+    }
+
+    private BigDecimal entradas(FormaPagamento forma) {
+        Instant agora = Instant.now();
+        return pagamentoRepository.somarPorFilialFormaEData(1L, forma,
+                agora.minus(Duration.ofDays(1)), agora.plus(Duration.ofDays(1)));
     }
 
     /**
