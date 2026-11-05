@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -164,6 +165,6 @@ class VendaServicePrecoTest {
     private static PrecoCalculado preco(TabelaPreco tabela, GrupoPlano grupo, String valor) {
         BigDecimal v = new BigDecimal(valor);
         return new PrecoCalculado(1L, LocalDate.of(2026, 11, 1), "iPhone 17 Pro Max 512GB", tabela, grupo,
-                v, v, null, null, null, v, null);
+                v, v, null, null, null, v, null, List.of());
     }
 }

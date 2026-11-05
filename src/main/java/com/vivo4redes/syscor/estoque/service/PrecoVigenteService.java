@@ -13,6 +13,7 @@ import com.vivo4redes.syscor.estoque.repository.PlanoVivoRepository;
 import com.vivo4redes.syscor.estoque.repository.PrecoItemRepository;
 import com.vivo4redes.syscor.estoque.repository.ProdutoVivoRepository;
 import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
+import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento.ValoresCondicao;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.util.EstoqueUtil;
 import com.vivo4redes.syscor.util.TextoUtil;
@@ -41,9 +42,6 @@ public class PrecoVigenteService {
 
     /** Unidades que recebem o preço de referência; VENDIDO guarda o preço da época e DEFEITO não é vendido. */
     static final Set<StatusEstoque> STATUS_COM_PRECO_VIGENTE = EnumSet.of(StatusEstoque.DISPONIVEL, StatusEstoque.RESERVADO);
-
-    private static final int PARCELAS_NO_PRECO_CHEIO = 12;
-    private static final int MAXIMO_PARCELAS = 21;
 
     private final TabelaPrecoExecucaoRepository execucaoRepository;
     private final PrecoItemRepository precoItemRepository;
@@ -86,7 +84,8 @@ public class PrecoVigenteService {
      *   <li>Tabela informada (ver {@link ResolvedorTabela}). RENOVA não existe para PRE (422); produto sem linha
      *       Renova fica no preço REGULAR do mesmo grupo.</li>
      *   <li>Item que só existe nas abas sem plano: SEM_PLANO / REGULAR, qualquer que seja o plano.</li>
-     *   <li>Pagamento: PIX -> preço PIX; crédito em 13x–21x -> total da parcela; demais -> preço cheio.</li>
+     *   <li>Pagamento: PIX -> preço PIX; crédito em 13x–21x -> total da parcela; demais -> preço cheio. O valor
+     *       que faltar na planilha vem de {@link CalculadoraCondicaoPagamento}.</li>
      * </ol>
      *
      * @throws NegocioException (422) sem tabela importada, plano desconhecido, parcelamento inválido ou item sem preço
@@ -115,13 +114,23 @@ public class PrecoVigenteService {
                         .stream().findFirst())
                 .orElseThrow(() -> new NegocioException("Item sem preço na tabela vigente (" + nomeExibido + ")."));
 
-        BigDecimal valor = valorParaPagamento(preco, formaPagamento, numeroParcelas).setScale(2, RoundingMode.HALF_UP);
         BigDecimal desconto = preco.getTabela() != TabelaPreco.RENOVA ? null
                 : (preco.getDescontoFabricante() == null ? BigDecimal.ZERO : preco.getDescontoFabricante())
                         .setScale(2, RoundingMode.HALF_UP);
+        ValoresCondicao valores = valoresDe(preco, desconto, execucaoId);
+        BigDecimal valor = valorParaPagamento(valores, formaPagamento, numeroParcelas).setScale(2, RoundingMode.HALF_UP);
         return new PrecoCalculado(execucaoId, execucao.getVigenciaEm(), preco.getNomeComercial(), preco.getTabela(),
                 preco.getGrupoPlano(), preco.getPreco(), preco.getPrecoPix(), preco.getParcelas(),
-                formaPagamento, numeroParcelas, valor, desconto);
+                formaPagamento, numeroParcelas, valor, desconto, valores.opcoes());
+    }
+
+    /** Valores da planilha e, no que faltar, a fórmula. Na Renova, a base é o preço Regular do mesmo grupo. */
+    private ValoresCondicao valoresDe(PrecoItem preco, BigDecimal desconto, Long execucaoId) {
+        BigDecimal regular = preco.getTabela() != TabelaPreco.RENOVA ? preco.getPreco()
+                : precoItemRepository.buscar(execucaoId, preco.getChaveNome(), TabelaPreco.REGULAR, List.of(preco.getGrupoPlano()))
+                        .stream().findFirst().map(PrecoItem::getPreco)
+                        .orElseGet(() -> preco.getPreco().add(desconto));
+        return CalculadoraCondicaoPagamento.completar(preco.getPreco(), preco.getPrecoPix(), preco.getParcelas(), regular, desconto);
     }
 
     /** Regra 1, consultando os produtos gravados da execução. */
@@ -149,24 +158,20 @@ public class PrecoVigenteService {
         throw new NegocioException("Plano '" + plano.trim() + "' não encontrado na tabela de preços vigente.");
     }
 
-    private BigDecimal valorParaPagamento(PrecoItem preco, FormaPagamento forma, Integer numeroParcelas) {
+    private BigDecimal valorParaPagamento(ValoresCondicao valores, FormaPagamento forma, Integer numeroParcelas) {
         if (forma == FormaPagamento.PIX) {
-            return preco.getPrecoPix() != null ? preco.getPrecoPix() : preco.getPreco();
+            return valores.pix();
         }
         if (forma == FormaPagamento.CARTAO_CREDITO && numeroParcelas != null) {
-            if (numeroParcelas < 1 || numeroParcelas > MAXIMO_PARCELAS) {
-                throw new NegocioException("Parcelamento inválido: " + numeroParcelas + "x (de 1x a " + MAXIMO_PARCELAS + "x).");
+            if (numeroParcelas < 1 || numeroParcelas > CalculadoraCondicaoPagamento.ULTIMA_PARCELA) {
+                throw new NegocioException("Parcelamento inválido: " + numeroParcelas + "x (de 1x a "
+                        + CalculadoraCondicaoPagamento.ULTIMA_PARCELA + "x).");
             }
-            if (numeroParcelas > PARCELAS_NO_PRECO_CHEIO) {
-                BigDecimal valor = preco.getParcelas() == null ? null : preco.getParcelas().get(numeroParcelas);
-                if (valor == null) {
-                    throw new NegocioException("Item sem preço em " + numeroParcelas + "x na tabela vigente ("
-                            + preco.getNomeComercial() + ").");
-                }
-                return valor;
+            if (numeroParcelas > CalculadoraCondicaoPagamento.PARCELAS_SEM_JUROS) {
+                return valores.totais().get(numeroParcelas);
             }
         }
-        return preco.getPreco();
+        return valores.cheio();
     }
 
     // ------------------------------------------------------------------ referência no estoque (regra 7)

@@ -275,6 +275,6 @@ class VendaServiceRenovaTest {
     private static PrecoCalculado preco(TabelaPreco tabela, GrupoPlano grupo, String valor, String desconto) {
         BigDecimal v = new BigDecimal(valor);
         return new PrecoCalculado(1L, LocalDate.of(2026, 11, 1), "iPhone 17 Pro Max 512GB", tabela, grupo,
-                v, v, null, null, null, v, desconto == null ? null : new BigDecimal(desconto));
+                v, v, null, null, null, v, desconto == null ? null : new BigDecimal(desconto), List.of());
     }
 }
