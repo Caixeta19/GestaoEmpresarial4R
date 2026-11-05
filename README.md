@@ -105,8 +105,8 @@ vale confirmar se a dependência ainda é necessária ou se pode sair.
 
 - Só é possível adicionar/remover item enquanto `status == ABERTA`. Fora disso,
   `CarrinhoNaoEditavelException`.
-- `valorTotal` nunca é setado diretamente pela API — é sempre recalculado a partir da
-  soma dos itens (`Venda.recalcularValorTotal()`).
+- `valorTotal` nunca é setado diretamente pela API — é sempre recalculado a partir dos itens, dos chips
+  (`valorChip`) e da condição de pagamento (`VendaService.reprecificar`).
 - Toda venda precisa de ao menos um item para ser finalizada — senão,
   `VendaSemItemException`.
 - Transições de status permitidas, validadas por `StatusVenda.podeTransicionarPara()`:
@@ -174,14 +174,38 @@ CANCELADA → (terminal, sem saída)
 
 - A venda tem `condicaoPagamento`: `PIX` (PIX e Vivo Pay), `A_VISTA` (crédito à vista, débito, dinheiro e
   2x a 12x) ou `PARCELADO_13` a `PARCELADO_21`. O padrão é `A_VISTA`.
-- `PATCH /vendas/{id}/condicao-pagamento { "condicaoPagamento": "PIX" }` reprecifica aparelhos e acessórios
-  com preço de tabela e recalcula o total. Chip, serviço e recarga não mudam. Pagamentos também não: se
-  passarem do novo total, a resposta traz `saldo` negativo e `aviso`.
+- `PATCH /vendas/{id}/condicao-pagamento { "condicao": "PIX" }` reprecifica aparelhos e acessórios com preço
+  de tabela e recalcula o total (o nome antigo `condicaoPagamento` continua aceito). Chip, serviço e recarga
+  não mudam. Se os pagamentos passarem do novo total, a resposta traz `saldo` negativo e `aviso`.
 - Item novo segue a condição da venda. `formaPagamento` e `parcelas` enviados no item são ignorados.
 - A planilha prevalece. O que faltar vem da fórmula: PIX = 90% do preço cheio; 13x–21x = preço cheio × fator;
   parcela = total ÷ n. Na Renova, PIX e 13x–21x saem do preço Regular menos o `DESCONTO`.
 - O upload devolve `divergenciasCondicao` para PIX e 13x–21x com diferença acima de R$ 0,01 entre planilha e
   fórmula. `GET /produtos/precos/item` devolve `opcoes` com as 22 opções de pagamento.
+
+### Pagamento por condição (V27)
+
+- Linhas aceitas: `PIX` só `PIX`, `VIVO_PAY` e `VOUCHER`. `A_VISTA` todas as formas, com crédito até 12x; PIX
+  misturado com cartão paga o preço cheio. `PARCELADO_N` só entradas (`DINHEIRO`, `PIX`, `VIVO_PAY`,
+  `CARTAO_DEBITO`, `VOUCHER`) mais a linha `FINANCIADO`.
+- Cada linha tem `tipo`: `PAGAMENTO`, `ENTRADA` ou `FINANCIADO`. `POST /vendas/{id}/financiar` cria a
+  `FINANCIADO` (`CARTAO_CREDITO` em N parcelas, valor calculado pelo backend). `POST /pagamentos` recusa crédito
+  em `PARCELADO_N`.
+- Total com entrada E: `E + round((baseTabela − E) × fator[N], 2) − descontoFabricante + semTabela`. Sem entrada,
+  vale a soma dos `parcelas[N]` da planilha. `baseTabela` é o preço Regular dos itens de tabela; `semTabela` são
+  chip, serviço, recarga e item sem preço de tabela, sempre pelo valor cheio, sem juros nem desconto PIX.
+- E fica limitada a `baseTabela`: o que passar disso abate os itens sem tabela. Entrada acima do total é recusada.
+- O voucher conta como entrada. No Renova em 21x com voucher de R$ 500, o total é R$ 12.019,41, não os
+  R$ 12.081,12 da tabela.
+- Toda mudança em item, Renova, condição ou entrada reprecifica a venda pela tabela vigente e recalcula a linha
+  `FINANCIADO`. Ao trocar de parcelado ela acompanha N; ao sair dele, ou sem saldo, é apagada.
+- O item fica no preço da condição sem entrada. Com entrada, a soma dos itens difere de `valorTotal`.
+- `valorChip` soma em `valorTotal`, mas não em `valorTotalItem`.
+- `valorItens` é o preço de tabela sem juros nem desconto PIX (na Renova, o preço cheio Renova), mais os itens
+  sem tabela. `ajusteCondicao` = `valorTotal − valorItens`. Remuneração e comissão não mudaram nesta tarefa.
+- `valorParcela`: financiado ÷ N no parcelado; total ÷ 12 em `A_VISTA`; o total em `PIX`.
+- Caixa: `VIVO_PAY` é forma própria e precisa estar em `formasIniciais` ao abrir o caixa para ser conferida. A
+  linha `FINANCIADO` entra como `CARTAO_CREDITO`.
 
 ### Protocolo documental
 
@@ -527,7 +551,9 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
 | DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento (remover o último voucher desliga o Renova) |
 | PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo }`; exige voucher) |
-| PATCH | `/vendas/{id}/condicao-pagamento` | Troca a condição (`{ condicaoPagamento }`) e reprecifica a venda |
+| PATCH | `/vendas/{id}/condicao-pagamento` | Troca a condição (`{ condicao }`; aceita também `{ condicaoPagamento }`) e reprecifica a venda. 422 com `pagamentosIncompativeis` se houver linha que a condição não aceita |
+| GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
+| POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |
 | GET | `/vendas/{id}/resumo` | Resumo do carrinho (totais, saldo) |
 | PATCH | `/vendas/{id}/finalizar` | Finalizar venda |
 | PATCH | `/vendas/{id}/status` | Avançar status da venda |
