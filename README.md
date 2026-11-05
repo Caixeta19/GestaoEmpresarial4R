@@ -170,6 +170,19 @@ CANCELADA → (terminal, sem saída)
 - Ao reprecificar, os pagamentos não são mexidos: se passarem do novo total, a resposta traz `saldo`
   negativo e `aviso`, e a venda só finaliza depois do ajuste.
 
+### Condição de pagamento (V26)
+
+- A venda tem `condicaoPagamento`: `PIX` (PIX e Vivo Pay), `A_VISTA` (crédito à vista, débito, dinheiro e
+  2x a 12x) ou `PARCELADO_13` a `PARCELADO_21`. O padrão é `A_VISTA`.
+- `PATCH /vendas/{id}/condicao-pagamento { "condicaoPagamento": "PIX" }` reprecifica aparelhos e acessórios
+  com preço de tabela e recalcula o total. Chip, serviço e recarga não mudam. Pagamentos também não: se
+  passarem do novo total, a resposta traz `saldo` negativo e `aviso`.
+- Item novo segue a condição da venda. `formaPagamento` e `parcelas` enviados no item são ignorados.
+- A planilha prevalece. O que faltar vem da fórmula: PIX = 90% do preço cheio; 13x–21x = preço cheio × fator;
+  parcela = total ÷ n. Na Renova, PIX e 13x–21x saem do preço Regular menos o `DESCONTO`.
+- O upload devolve `divergenciasCondicao` para PIX e 13x–21x com diferença acima de R$ 0,01 entre planilha e
+  fórmula. `GET /produtos/precos/item` devolve `opcoes` com as 22 opções de pagamento.
+
 ### Protocolo documental
 
 - Vínculo 1:1 com a venda (`uk` em `venda_id`) — uma venda tem no máximo um protocolo.
@@ -514,6 +527,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
 | DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento (remover o último voucher desliga o Renova) |
 | PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo }`; exige voucher) |
+| PATCH | `/vendas/{id}/condicao-pagamento` | Troca a condição (`{ condicaoPagamento }`) e reprecifica a venda |
 | GET | `/vendas/{id}/resumo` | Resumo do carrinho (totais, saldo) |
 | PATCH | `/vendas/{id}/finalizar` | Finalizar venda |
 | PATCH | `/vendas/{id}/status` | Avançar status da venda |
@@ -532,10 +546,10 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/produtos` | Cadastrar produto |
 | GET | `/produtos/{id}` | Buscar produto |
 | GET | `/produtos` | Listar produtos |
-| POST | `/produtos/precos/importar-telefonica` | Importar tabela de preços da Telefônica (multipart `arquivo`); devolve o relatório da importação |
+| POST | `/produtos/precos/importar-telefonica` | Importar tabela de preços da Telefônica (multipart `arquivo`); devolve o relatório da importação, com `divergenciasCondicao` |
 | GET | `/produtos/precos/vigente` | Execução vigente: vigência, data da importação e totais |
 | GET | `/produtos/precos/planos?busca=&disponivelAlta=` | Planos da vigente (combo "Plano Ativo / Linha") |
-| GET | `/produtos/precos/item?estoqueId=&plano=&tabela=&pagamento=&parcelas=` | Preço de uma unidade do estoque (422 se sem preço) |
+| GET | `/produtos/precos/item?estoqueId=&plano=&tabela=&pagamento=&parcelas=` | Preço de uma unidade do estoque, com `opcoes` de pagamento (422 se sem preço) |
 | GET | `/produtos/precos/execucoes/{execucaoId}` | **Deprecado** — use `/vigente` |
 | GET | `/produtos/precos/produtos/{produtoId}` | **Deprecado** — use `/item`. Agora devolve os preços REGULAR da unidade por grupo do plano |
 | GET | `/produtos/precos/ofertas` | **Deprecado** — use `/planos`. Agora devolve os grupos de plano com preço (`PRE`, `VIVO_V`...) |
