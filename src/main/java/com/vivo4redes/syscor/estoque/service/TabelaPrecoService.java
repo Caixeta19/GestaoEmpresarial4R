@@ -2,6 +2,7 @@ package com.vivo4redes.syscor.estoque.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vivo4redes.syscor.estoque.dto.response.DivergenciaCondicaoDTO;
 import com.vivo4redes.syscor.estoque.dto.response.ImportacaoTabelaPrecoResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.PlanoVivoResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.PrecoItemResponseDTO;
@@ -25,6 +26,7 @@ import com.vivo4redes.syscor.estoque.service.ResultadoParseTabelaPreco.LinhaProd
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.util.TextoUtil;
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -86,20 +88,24 @@ public class TabelaPrecoService {
         List<EstoqueGeral> unidades = estoqueGeralRepository.findByStatusIn(PrecoVigenteService.STATUS_COM_PRECO_VIGENTE);
         ResultadoReferencia referencia = precoVigenteService.aplicarReferencia(unidades, indices);
         int planilhaSemEstoque = contarPlanilhaSemEstoque(lido, indices);
+        List<DivergenciaCondicaoDTO> divergencias = conferirCondicoes(lido);
 
         execucao.setTotalProdutosAtualizados(referencia.unidadesAtualizadas());
         execucao.setTotalNaoEncontrados(planilhaSemEstoque);
         execucaoRepository.save(execucao);
 
         log.info("Tabela de preços importada (execução {}, vigência {}): {} preços, {} planos, {} produtos, "
-                        + "{} unidades com preço, {} modelos do estoque sem preço, {} itens da planilha sem estoque.",
+                        + "{} unidades com preço, {} modelos do estoque sem preço, {} itens da planilha sem estoque, "
+                        + "{} divergências de condição.",
                 execucao.getId(), lido.vigencia(), lido.precos().size(), lido.planos().size(), lido.produtos().size(),
-                referencia.unidadesAtualizadas(), referencia.modelosSemPreco().size(), planilhaSemEstoque);
+                referencia.unidadesAtualizadas(), referencia.modelosSemPreco().size(), planilhaSemEstoque,
+                divergencias.size());
 
         return new ImportacaoTabelaPrecoResponseDTO(
                 execucao.getId(), lido.vigencia(), lido.linhasPorAba(),
                 lido.precos().size(), lido.planos().size(), lido.produtos().size(),
                 referencia.unidadesAtualizadas(), List.copyOf(referencia.modelosSemPreco()), planilhaSemEstoque,
+                divergencias,
                 execucao.getNomeArquivo(),
                 lido.vigencia() == null ? null : lido.vigencia().format(DD_MM_YYYY),
                 execucao.getCriadoEm(),
@@ -187,6 +193,40 @@ public class TabelaPrecoService {
         lido.precos().forEach(p -> chavesPlanilha.add(TextoUtil.chave(p.nomeComercial())));
         chavesPlanilha.removeAll(chavesEstoque);
         return chavesPlanilha.size();
+    }
+
+    /** PIX e 13x–21x presentes na planilha que diferem da fórmula. O que faltou não é divergência. */
+    private List<DivergenciaCondicaoDTO> conferirCondicoes(ResultadoParseTabelaPreco lido) {
+        Map<String, BigDecimal> regularPorLinha = new HashMap<>();
+        for (LinhaPreco p : lido.precos()) {
+            if (p.tabela() == TabelaPreco.REGULAR) regularPorLinha.putIfAbsent(chaveDaLinha(p), p.preco());
+        }
+        List<DivergenciaCondicaoDTO> divergencias = new ArrayList<>();
+        for (LinhaPreco p : lido.precos()) {
+            BigDecimal desconto = p.descontoFabricante();
+            BigDecimal regular = p.tabela() == TabelaPreco.REGULAR ? p.preco()
+                    : regularPorLinha.getOrDefault(chaveDaLinha(p), p.preco().add(desconto == null ? BigDecimal.ZERO : desconto));
+            if (p.precoPix() != null) {
+                registrarSeDiverge(divergencias, p, CondicaoPagamento.PIX, p.precoPix(),
+                        CalculadoraCondicaoPagamento.pix(regular, desconto));
+            }
+            if (p.parcelas() != null) {
+                p.parcelas().forEach((n, total) -> registrarSeDiverge(divergencias, p, CondicaoPagamento.parcelado(n), total,
+                        CalculadoraCondicaoPagamento.totalParcelado(regular, n, desconto)));
+            }
+        }
+        return divergencias;
+    }
+
+    private static String chaveDaLinha(LinhaPreco p) {
+        return p.aba() + "|" + p.grupo() + "|" + TextoUtil.chave(p.nomeComercial());
+    }
+
+    private static void registrarSeDiverge(List<DivergenciaCondicaoDTO> divergencias, LinhaPreco p, CondicaoPagamento condicao,
+                                           BigDecimal planilha, BigDecimal calculado) {
+        if (CalculadoraCondicaoPagamento.diverge(planilha, calculado)) {
+            divergencias.add(new DivergenciaCondicaoDTO(p.nomeComercial(), p.grupo(), p.tabela(), condicao, planilha, calculado));
+        }
     }
 
     private static String truncar(String texto, int max) {

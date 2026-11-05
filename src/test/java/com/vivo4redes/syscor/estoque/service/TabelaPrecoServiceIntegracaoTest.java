@@ -1,7 +1,9 @@
 package com.vivo4redes.syscor.estoque.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vivo4redes.syscor.estoque.dto.response.DivergenciaCondicaoDTO;
 import com.vivo4redes.syscor.estoque.dto.response.ImportacaoTabelaPrecoResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.OpcaoPagamentoDTO;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
@@ -14,6 +16,7 @@ import com.vivo4redes.syscor.estoque.repository.ProdutoVivoRepository;
 import com.vivo4redes.syscor.estoque.repository.TabelaPrecoExecucaoRepository;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
+import com.vivo4redes.syscor.venda.enums.CondicaoPagamento;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
@@ -170,10 +173,66 @@ class TabelaPrecoServiceIntegracaoTest {
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.DINHEIRO, null)).isEqualByComparingTo("10149.00");
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 13)).isEqualByComparingTo("10500.10");
         assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 21)).isEqualByComparingTo("10900.99");
-        assertThatThrownBy(() -> valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 18))
-                .isInstanceOf(NegocioException.class).hasMessageContaining("18x");
+        // 18x não está na planilha: vem da fórmula (10149,00 × 1,1060324).
+        assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 18)).isEqualByComparingTo("11225.12");
         assertThatThrownBy(() -> valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 24))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("Parcelamento inválido");
+    }
+
+    @Test
+    @DisplayName("Opções do item: planilha onde há valor, fórmula no que falta; Renova sobre o Regular menos o desconto")
+    void opcoesDoItem() {
+        EstoqueGeral iphone = unidade("IP-1", IPHONE, null, StatusEstoque.DISPONIVEL);
+        service.importar(arquivo(0));
+
+        var regular = service.precoDoItem(iphone.getId(), PLANO_VIVO_V, null, null, null);
+        assertThat(regular.opcoes()).hasSize(22);
+        assertThat(total(regular.opcoes(), CondicaoPagamento.PIX)).isEqualByComparingTo("9134.10");
+        assertThat(total(regular.opcoes(), CondicaoPagamento.A_VISTA)).isEqualByComparingTo("10149.00");
+        assertThat(total(regular.opcoes(), CondicaoPagamento.PARCELADO_13)).isEqualByComparingTo("10500.10");
+        assertThat(total(regular.opcoes(), CondicaoPagamento.PARCELADO_18)).isEqualByComparingTo("11225.12");
+
+        var renova = service.precoDoItem(iphone.getId(), PLANO_VIVO_V, TabelaPreco.RENOVA, null, null);
+        assertThat(total(renova.opcoes(), CondicaoPagamento.PIX)).isEqualByComparingTo("8550.00");
+        assertThat(total(renova.opcoes(), CondicaoPagamento.A_VISTA)).isEqualByComparingTo("9500.00");
+        assertThat(total(renova.opcoes(), CondicaoPagamento.PARCELADO_13)).isEqualByComparingTo("9800.00");
+        // 21x não está no bloco Renova: 10149,00 × 1,1234148 = 11401,54, menos o desconto de 909,00.
+        assertThat(total(renova.opcoes(), CondicaoPagamento.PARCELADO_21)).isEqualByComparingTo("10492.54");
+    }
+
+    @Test
+    @DisplayName("Item sem PIX e sem 13x–21x na planilha usa a fórmula, também no SEM_PLANO")
+    void formulaPreencheItemSemValores() {
+        EstoqueGeral fone = unidade("FN-1", "Nome diferente no estoque", "ACC-FONE", StatusEstoque.DISPONIVEL);
+        service.importar(arquivo(0));
+        PrecoItem linha = precos.findAll().stream().filter(p -> p.getNomeComercial().equals(FONE)).findFirst().orElseThrow();
+        linha.setPrecoPix(null);
+        linha.setParcelas(null);
+        em.flush();
+
+        PrecoCalculado p = precoVigente.calcular(fone, null, TabelaPreco.REGULAR, FormaPagamento.PIX, null);
+
+        assertThat(p.grupoPlano()).isEqualTo(GrupoPlano.SEM_PLANO);
+        assertThat(p.valorAplicado()).isEqualByComparingTo("179.91");
+        assertThat(total(p.opcoes(), CondicaoPagamento.PARCELADO_13)).isEqualByComparingTo("215.38");
+    }
+
+    @Test
+    @DisplayName("Importação relata o que diverge da fórmula; a planilha prevalece")
+    void divergenciasNaImportacao() {
+        EstoqueGeral iphone = unidade("IP-1", IPHONE, null, StatusEstoque.DISPONIVEL);
+
+        ImportacaoTabelaPrecoResponseDTO r = service.importar(arquivo(0));
+
+        assertThat(r.divergenciasCondicao()).contains(
+                new DivergenciaCondicaoDTO(IPHONE, GrupoPlano.VIVO_V, TabelaPreco.REGULAR, CondicaoPagamento.PARCELADO_13,
+                        new BigDecimal("10500.10"), new BigDecimal("10935.03")),
+                new DivergenciaCondicaoDTO(IPHONE, GrupoPlano.VIVO_V, TabelaPreco.RENOVA, CondicaoPagamento.PIX,
+                        new BigDecimal("8550.00"), new BigDecimal("8225.10")));
+        // PIX Regular do iPhone no Vivo V é 90% de 10149,00: não diverge.
+        assertThat(r.divergenciasCondicao()).noneMatch(d -> d.grupo() == GrupoPlano.VIVO_V && d.produto().equals(IPHONE)
+                && d.tabela() == TabelaPreco.REGULAR && d.condicao() == CondicaoPagamento.PIX);
+        assertThat(valor(iphone, PLANO_VIVO_V, FormaPagamento.CARTAO_CREDITO, 13)).isEqualByComparingTo("10500.10");
     }
 
     @Test
@@ -315,6 +374,10 @@ class TabelaPrecoServiceIntegracaoTest {
                 .containsExactlyInAnyOrder(GrupoPlano.PRE, GrupoPlano.VIVO_V);
         assertThatThrownBy(() -> service.listarProdutosPorOferta("Oferta Antiga de Marketing"))
                 .isInstanceOf(NegocioException.class);
+    }
+
+    private static BigDecimal total(List<OpcaoPagamentoDTO> opcoes, CondicaoPagamento condicao) {
+        return opcoes.stream().filter(o -> o.condicao() == condicao).findFirst().orElseThrow().total();
     }
 
     private BigDecimal valor(EstoqueGeral item, String plano, FormaPagamento forma, Integer parcelas) {
