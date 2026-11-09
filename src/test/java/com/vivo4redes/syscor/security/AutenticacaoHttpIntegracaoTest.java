@@ -14,9 +14,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -38,8 +42,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-/** Respostas de autenticação com os filtros, o login e o JWT reais. */
-@SpringBootTest
+/** Respostas de autenticação com os filtros, o login e o JWT reais. Servidor real para cobrir também o despacho de erro. */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
@@ -58,6 +62,7 @@ class AutenticacaoHttpIntegracaoTest {
     private static final String SENHA = "senha-de-teste";
 
     @Autowired MockMvc mvc;
+    @Autowired TestRestTemplate http;
     @Autowired ObjectMapper json;
     @Autowired UsuarioRepository usuarios;
     @Autowired PasswordEncoder encoder;
@@ -111,6 +116,29 @@ class AutenticacaoHttpIntegracaoTest {
         MvcResult r = mvc.perform(get("/rota-que-nao-existe").header(HttpHeaders.AUTHORIZATION, "Bearer " + entrar())).andReturn();
 
         assertThat(r.getResponse().getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    @DisplayName("Erro que passa pelo /error mantém o status real com token válido, e não vira 401")
+    void erroPeloDespachoDeErro() throws Exception {
+        HttpHeaders cabecalhos = new HttpHeaders();
+        cabecalhos.setBearerAuth(entrar());
+        cabecalhos.setAccept(java.util.List.of(MediaType.TEXT_EVENT_STREAM));
+
+        ResponseEntity<String> r = http.exchange("/rota-que-nao-existe", HttpMethod.GET, new HttpEntity<>(cabecalhos), String.class);
+
+        assertThat(r.getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    @DisplayName("Sem token, o despacho de erro não abre a rota: continua 401")
+    void semTokenNoServidorReal() {
+        HttpHeaders cabecalhos = new HttpHeaders();
+        cabecalhos.setAccept(java.util.List.of(MediaType.TEXT_EVENT_STREAM));
+
+        ResponseEntity<String> r = http.exchange("/usuarios", HttpMethod.GET, new HttpEntity<>(cabecalhos), String.class);
+
+        assertThat(r.getStatusCode().value()).isEqualTo(401);
     }
 
     @Test

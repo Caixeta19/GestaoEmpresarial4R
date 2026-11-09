@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.security;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -48,6 +49,9 @@ public class SecurityConfig {
                 // Sem token válido é 401; sem isso o Spring Security responde 403. O 403 fica para a falta de perfil.
                 .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
+                        // O despacho de erro (/error) só renderiza um erro que já aconteceu numa requisição já filtrada.
+                        // O JwtAuthFilter não roda nele, então sem esta linha todo erro virava 401 mesmo com token válido.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/auth/login", "/api/auth/login").permitAll()
                         .requestMatchers("/auth/alterar-senha", "/api/auth/alterar-senha").authenticated()
