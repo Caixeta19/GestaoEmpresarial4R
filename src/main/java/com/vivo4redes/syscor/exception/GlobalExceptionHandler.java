@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -53,6 +54,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleAutenticacao(AutenticacaoInvalidaException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(corpo(HttpStatus.UNAUTHORIZED, ex.getMessage()));
+    }
+
+    // 401: login recusado. A mesma mensagem não revela se o usuário existe, se está inativo ou se a senha errou.
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<Map<String, Object>> handleLoginRecusado(AuthenticationException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(corpo(HttpStatus.UNAUTHORIZED, "Usuário ou senha inválidos."));
     }
 
     // 404

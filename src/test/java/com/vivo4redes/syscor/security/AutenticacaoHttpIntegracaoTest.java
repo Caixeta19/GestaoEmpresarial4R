@@ -141,6 +141,38 @@ class AutenticacaoHttpIntegracaoTest {
         assertTokenRecusadoDepoisDe(u -> u.setSituacao("INATIVO"));
     }
 
+    // ------------------------------------------------------------------ login
+
+    @Test
+    @DisplayName("Login com a senha certa: 200 com o token")
+    void loginCerto() throws Exception {
+        Resposta r = login(usuario.getLogin(), SENHA);
+
+        assertThat(r.status).isEqualTo(200);
+        assertThat(r.corpo.path("token").asText()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("Login com senha errada: 401 com a mensagem padronizada")
+    void loginSenhaErrada() throws Exception {
+        assertLoginRecusado(login(usuario.getLogin(), "senha-errada"));
+    }
+
+    @Test
+    @DisplayName("Login de usuário inexistente: 401, sem revelar que ele não existe")
+    void loginInexistente() throws Exception {
+        assertLoginRecusado(login("nao-existe", SENHA));
+    }
+
+    @Test
+    @DisplayName("Login de usuário inativo: 401, com a mesma mensagem")
+    void loginInativo() throws Exception {
+        usuario.setSituacao("INATIVO");
+        usuarios.save(usuario);
+
+        assertLoginRecusado(login(usuario.getLogin(), SENHA));
+    }
+
     // ------------------------------------------------------------------ apoio
 
     private void assertTokenRecusadoDepoisDe(Consumer<Usuario> inativar) throws Exception {
