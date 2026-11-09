@@ -7,6 +7,8 @@ import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.exception.VendedorDuplicadoException;
 import com.vivo4redes.syscor.venda.model.Usuario;
 import com.vivo4redes.syscor.venda.repository.UsuarioRepository;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,8 +59,20 @@ public class UsuarioService {
         return usuarioRepository.findByAtivoTrueOrderByNomeAsc();
     }
 
+    /** Usuário do JWT da requisição. Inativo com token ainda válido também é recusado. */
+    @Transactional(readOnly = true)
+    public Usuario usuarioLogado() {
+        Authentication autenticacao = SecurityContextHolder.getContext().getAuthentication();
+        if (autenticacao == null) {
+            throw new AutenticacaoInvalidaException("Usuário não autenticado ou inativo.");
+        }
+        return usuarioRepository.findFirstByLoginIgnoreCase(autenticacao.getName())
+                .filter(Usuario::podeAcessar)
+                .orElseThrow(() -> new AutenticacaoInvalidaException("Usuário não autenticado ou inativo."));
+    }
+
     /**
-     * US-302: reautenticação exigida para salvar/alterar uma venda.
+     * US-302: reautenticação exigida para finalizar uma venda ou mudar o status.
      * Mensagem de erro deliberadamente genérica (não revela se o e-mail/login existe).
      */
     @Transactional(readOnly = true)
@@ -73,8 +87,8 @@ public class UsuarioService {
 
         Usuario usuario = optUsuario.orElseThrow(AutenticacaoInvalidaException::new);
 
-        // Verifica se o usuário está ativo e se a senha confere
-        if (!usuario.isAtivo() || !passwordEncoder.matches(dto.senha(), usuario.getSenhaHash())) {
+        // Verifica se o usuário pode acessar e se a senha confere
+        if (!usuario.podeAcessar() || !passwordEncoder.matches(dto.senha(), usuario.getSenhaHash())) {
             throw new AutenticacaoInvalidaException();
         }
 

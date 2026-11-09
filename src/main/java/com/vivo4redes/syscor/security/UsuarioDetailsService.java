@@ -35,20 +35,15 @@ public class UsuarioDetailsService implements UserDetailsService {
         // 3. Obtém o usuário ou lança exceção se nenhum for encontrado
         Usuario u = optUsuario.orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado"));
 
-        // 4. Validação de status (Inativo, cargo ou situação)
-        boolean inativo = !u.isAtivo()
-                || "INATIVO".equalsIgnoreCase(u.getCargo())
-                || "INATIVO".equalsIgnoreCase(u.getSituacao());
-
-        // 5. Tratativa para primeiro acesso (se for true, valida contra a senha temporária "00000000")
+        // 4. Tratativa para primeiro acesso (se for true, valida contra a senha temporária "00000000")
         boolean ehPrimeiroAcesso = u.isPrimeiroAcesso();
         String senhaParaValidar = ehPrimeiroAcesso ? passwordEncoder.encode("00000000") : u.getSenhaHash();
 
-        // 6. Retorna o UserDetails configurado para o Spring Security
+        // 5. Retorna o UserDetails configurado para o Spring Security
         return User.withUsername(u.getLogin())
                 .password(senhaParaValidar)
                 .roles("USER", papel(u.getCargo()))
-                .disabled(inativo)
+                .disabled(!u.podeAcessar())
                 .build();
     }
 

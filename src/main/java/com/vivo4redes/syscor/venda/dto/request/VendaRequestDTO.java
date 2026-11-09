@@ -1,14 +1,13 @@
 package com.vivo4redes.syscor.venda.dto.request;
 
-import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
 /**
  * Abre um novo carrinho de venda (status ABERTA). Reflete a tela "Início":
- * cliente, filial e estoqueAvancado vêm dela, e a autenticação do vendedor
- * é exigida para confirmar quem está registrando a venda. Os itens são
- * adicionados depois, incrementalmente, pelas abas (POST /vendas/{id}/itens).
+ * cliente, filial e estoqueAvancado vêm dela. Não pede senha: o vendedor
+ * provisório é o usuário logado, e uma autenticação enviada pelo front antigo
+ * é ignorada. Os itens são adicionados depois, incrementalmente, pelas abas
+ * (POST /vendas/{id}/itens).
  */
 public record VendaRequestDTO(
 
@@ -19,10 +18,6 @@ public record VendaRequestDTO(
         Long filialId,
 
         @NotNull(message = "estoqueAvancado é obrigatório (true/false)")
-        Boolean estoqueAvancado,
-
-        @Valid
-        @NotNull(message = "autenticacaoVendedor é obrigatória")
-        AutenticacaoUsuarioDTO autenticacaoVendedor
+        Boolean estoqueAvancado
 ) {
 }

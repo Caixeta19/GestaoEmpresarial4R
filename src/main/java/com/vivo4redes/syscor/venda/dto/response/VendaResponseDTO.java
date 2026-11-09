@@ -53,7 +53,10 @@ public record VendaResponseDTO(
         /** Soma no preço cheio, sem juros nem desconto PIX. */
         BigDecimal valorItens,
         /** valorTotal − valorItens: negativo = desconto PIX, positivo = juros. */
-        BigDecimal ajusteCondicao
+        BigDecimal ajusteCondicao,
+        /** Quem se autenticou para finalizar; null enquanto ABERTA e nas vendas antigas. */
+        String finalizadoPorNome,
+        Instant finalizadoEm
 ) {
     public record ItemDTO(
             Long id, CategoriaItemVenda categoria, Long produtoId, String descricaoProduto,
@@ -132,7 +135,9 @@ public record VendaResponseDTO(
                 v.getCondicaoPagamento().parcelas(),
                 v.getValorParcela(),
                 v.getValorItens(),
-                v.getAjusteCondicao()
+                v.getAjusteCondicao(),
+                v.getFinalizadoPor() == null ? null : v.getFinalizadoPor().getNome(),
+                v.getFinalizadoEm()
         );
     }
 }

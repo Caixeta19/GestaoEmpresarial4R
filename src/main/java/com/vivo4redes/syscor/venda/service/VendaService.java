@@ -38,6 +38,7 @@ import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.util.EstoqueUtil;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
 import com.vivo4redes.syscor.venda.model.PagamentoVenda;
+import com.vivo4redes.syscor.venda.model.Usuario;
 import com.vivo4redes.syscor.venda.model.Venda;
 import com.vivo4redes.syscor.venda.repository.PagamentoVendaRepository;
 import com.vivo4redes.syscor.venda.repository.VendaRepository;
@@ -93,7 +94,7 @@ public class VendaService {
     public Venda abrirCarrinho(VendaRequestDTO dto) {
         Cliente cliente = clienteService.buscarPorId(dto.clienteId());
         var filial = filialService.buscarPorId(dto.filialId());
-        var usuario = usuarioService.autenticar(dto.autenticacaoVendedor());
+        var usuario = usuarioService.usuarioLogado();
 
         Venda venda = Venda.builder()
                 .numeroVenda(numeroVendaGenerator.gerar())
@@ -246,8 +247,9 @@ public class VendaService {
 
     @Transactional
     public Venda atualizarDadosIniciais(Long vendaId, DadosIniciaisVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
-        exigirVendedorAutenticado(dto.autenticacaoUsuario());
+        Venda venda = buscarParaEdicao(vendaId);
+        // Sem senha neste endpoint: depois de finalizada, a venda não pode mais ser trocada de cliente ou filial.
+        exigirCarrinhoEditavel(venda);
 
         Cliente cliente = clienteService.buscarPorId(dto.clienteId());
         var filial = filialService.buscarPorId(dto.filialId());
@@ -266,12 +268,13 @@ public class VendaService {
 
     /**
      * Fecha o carrinho pela tabela vigente. Se o total mudou (tabela nova, por exemplo), grava o total novo e recusa
-     * com 422: o vendedor confere antes de cobrar. Por isso essa exceção não desfaz a transação.
+     * com 422: o vendedor confere antes de cobrar. Por isso essa exceção não desfaz a transação, e o vendedor só é
+     * gravado depois de todas as validações. Ordem: autenticação → itens → Renova → total vigente → pagamentos.
      */
     @Transactional(noRollbackFor = TotalVendaAlteradoException.class)
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
+        var vendedor = exigirVendedorAutenticado(dto.autenticacaoVendedor());
         Venda venda = buscarParaEdicao(vendaId);
-        exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         if (venda.getItens().isEmpty()) {
             throw new VendaSemItemException();
@@ -290,13 +293,16 @@ public class VendaService {
         }
 
         transicionar(venda, StatusVenda.PENDENTE);
+        venda.setUsuario(vendedor);
+        venda.setFinalizadoPor(vendedor);
+        venda.setFinalizadoEm(Instant.now());
         return vendaRepository.save(venda);
     }
 
     @Transactional
     public Venda avancarStatus(Long vendaId, StatusVendaRequestDTO dto) {
         Venda venda = buscarPorId(vendaId);
-        exigirVendedorAutenticado(dto.autenticacaoUsuario());
+        var autenticado = exigirVendedorAutenticado(dto.autenticacaoUsuario());
 
         StatusVenda novoStatus = dto.novoStatus();
         if (novoStatus == null) {
@@ -304,6 +310,8 @@ public class VendaService {
         }
 
         transicionar(venda, novoStatus);
+        venda.setStatusAlteradoPor(autenticado);
+        venda.setStatusAlteradoEm(Instant.now());
         if (novoStatus == StatusVenda.CONCLUIDA) {
             confirmarEstoqueDaVenda(venda);
         } else if (novoStatus == StatusVenda.CANCELADA) {
@@ -775,11 +783,11 @@ public class VendaService {
         }
     }
 
-    private void exigirVendedorAutenticado(AutenticacaoUsuarioDTO autenticacao) {
+    private Usuario exigirVendedorAutenticado(AutenticacaoUsuarioDTO autenticacao) {
         if (autenticacao == null) {
             throw new IllegalArgumentException("Dados de autenticacao do vendedor sao obrigatorios.");
         }
-        usuarioService.autenticar(autenticacao);
+        return usuarioService.autenticar(autenticacao);
     }
 
     private void transicionar(Venda venda, StatusVenda novoStatus) {
