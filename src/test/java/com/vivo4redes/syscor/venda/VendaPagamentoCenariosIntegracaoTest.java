@@ -21,6 +21,7 @@ import com.vivo4redes.syscor.venda.repository.UsuarioRepository;
 import org.assertj.core.api.SoftAssertions;
 import org.assertj.core.api.junit.jupiter.InjectSoftAssertions;
 import org.assertj.core.api.junit.jupiter.SoftAssertionsExtension;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -109,8 +112,16 @@ class VendaPagamentoCenariosIntegracaoTest {
         email = "vendedor" + n + "@teste.local";
         usuarios.save(Usuario.builder().nome("Vendedor Teste").login("vendedor" + n).email(email)
                 .senhaHash(encoder.encode(SENHA)).filial("Filial Teste").cargo("VENDEDOR").build());
+        // Sem filtros neste teste: o usuário logado, que o JWT definiria, entra direto no contexto.
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("vendedor" + n, null, List.of()));
         aparelho = estoque.save(EstoqueGeral.builder().serial("SINT-" + n).modeloComercial(MODELO).build());
         tabelaVigente("11199.00", "10079.10", "12581.12", "10699.00", "9579.10", "12081.12", "500.00");
+    }
+
+    @AfterEach
+    void limparContexto() {
+        SecurityContextHolder.clearContext();
     }
 
     // ------------------------------------------------------------------ cenários 1 a 16
@@ -505,7 +516,7 @@ class VendaPagamentoCenariosIntegracaoTest {
 
     private long vendaComAparelho(String valorChip) throws Exception {
         JsonNode aberta = exigir(201, post("/vendas"), Map.of("clienteId", clienteId, "filialId", filialId,
-                "estoqueAvancado", false, "autenticacaoVendedor", autenticacao()));
+                "estoqueAvancado", false));
         long id = aberta.get("id").asLong();
 
         Map<String, Object> item = new HashMap<>();
