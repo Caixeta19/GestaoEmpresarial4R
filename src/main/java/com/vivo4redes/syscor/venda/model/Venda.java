@@ -76,10 +76,14 @@ public class Venda {
     @Builder.Default
     private BigDecimal valorTotal = BigDecimal.ZERO;
 
-    /** Renova ligado (Desconto fabricante + Voucher): aparelhos com preço por plano vão para a TABELA RENOVA. */
+    /** Renova ligado pelo número do voucher: aparelhos com preço por plano vão para a TABELA RENOVA. */
     @Column(name = "renova", nullable = false)
     @Builder.Default
     private boolean renova = false;
+
+    /** Número do voucher do Renova. Não tem valor na venda: o preço Renova já traz o desconto do fabricante. */
+    @Column(name = "codigo_voucher", length = 60)
+    private String codigoVoucher;
 
     /**
      * Soma do desconto do fabricante dos aparelhos na RENOVA. Só controle/conciliação: o preço Renova já tem o
