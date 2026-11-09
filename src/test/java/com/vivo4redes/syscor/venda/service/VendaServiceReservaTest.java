@@ -7,6 +7,7 @@ import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.estoque.service.PrecoCalculado;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
+import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.venda.dto.request.ItemVendaRequestDTO;
@@ -120,26 +121,26 @@ class VendaServiceReservaTest {
     }
 
     @Test
-    @DisplayName("Concluir a venda confirma a baixa (RESERVADO -> VENDIDO) de cada unidade")
-    void concluirConfirmaVenda() {
-        Venda venda = venda(StatusVenda.APROVADA);
+    @DisplayName("Pedir CONCLUIDA pelo status é recusado e não mexe no estoque: lançar é só pelo finalizar")
+    void concluirPeloStatusNaoMexe() {
+        Venda venda = venda(StatusVenda.ABERTA);
         venda.adicionarItem(itemCom(unidade));
-        venda.adicionarItem(itemSemEstoque());
 
-        service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CONCLUIDA, AUTH));
+        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CONCLUIDA, AUTH)))
+                .isInstanceOf(NegocioException.class);
 
-        verify(estoqueService).confirmarVenda(unidade);
-        verify(estoqueService, never()).liberar(any());
-        assertThat(venda.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
+        verifyNoInteractions(estoqueService);
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.ABERTA);
     }
 
     @Test
-    @DisplayName("Avançar para PENDENTE/APROVADA não mexe no estoque")
-    void avancarSemConcluirNaoMexe() {
-        Venda venda = venda(StatusVenda.PENDENTE);
+    @DisplayName("Pedir PENDENTE/APROVADA é recusado e não mexe no estoque")
+    void statusNaoUsadoNaoMexe() {
+        Venda venda = venda(StatusVenda.ABERTA);
         venda.adicionarItem(itemCom(unidade));
 
-        service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.APROVADA, AUTH));
+        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.APROVADA, AUTH)))
+                .isInstanceOf(NegocioException.class);
 
         verifyNoInteractions(estoqueService);
     }
@@ -160,10 +161,10 @@ class VendaServiceReservaTest {
     @Test
     @DisplayName("Transição inválida não mexe no estoque")
     void transicaoInvalidaNaoMexe() {
-        Venda venda = venda(StatusVenda.ABERTA);
+        Venda venda = venda(StatusVenda.CANCELADA);
         venda.adicionarItem(itemCom(unidade));
 
-        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CONCLUIDA, AUTH)))
+        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CANCELADA, AUTH)))
                 .isInstanceOf(TransicaoStatusInvalidaException.class);
         verifyNoInteractions(estoqueService);
     }

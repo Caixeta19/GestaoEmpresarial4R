@@ -170,6 +170,43 @@ class EstoqueGeralRepositoryTest {
         assertThat(jdbc.queryForObject("SELECT data_venda FROM tb_estoque_geral WHERE id = ?", Object.class, uAberta)).isNull();
     }
 
+    // ---- V30: venda lançada direto; PENDENTE/APROVADA viram CONCLUIDA e baixam o estoque
+
+    @Test
+    @DisplayName("V30 conclui as vendas PENDENTE/APROVADA e baixa só as unidades RESERVADO delas")
+    void v30ConcluiPendentesEAprovadas() throws Exception {
+        jdbc.execute("SET LOCAL session_replication_role = replica");
+
+        long pendente = venda("PENDENTE"), aprovada = venda("APROVADA"), aberta = venda("ABERTA");
+        long concluida = venda("CONCLUIDA"), cancelada = venda("CANCELADA");
+        long uPendente = naVenda("V30P", pendente, "RESERVADO"), uAprovada = naVenda("V30R", aprovada, "RESERVADO");
+        long uDisponivel = naVenda("V30D", aprovada, "DISPONIVEL");
+        long uAberta = naVenda("V30A", aberta, "RESERVADO");
+        long uCompartilhada = naVenda("V30S", aprovada, "RESERVADO");
+        incluirNaVenda(aberta, uCompartilhada);
+        long uCancelada = naVenda("V30X", cancelada, "DISPONIVEL");
+
+        jdbc.execute(new String(new ClassPathResource("db/migration/V30__venda_lancada_direto.sql")
+                .getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+
+        assertThat(statusDaVenda(pendente)).isEqualTo("CONCLUIDA");
+        assertThat(statusDaVenda(aprovada)).isEqualTo("CONCLUIDA");
+        assertThat(statusDaVenda(aberta)).isEqualTo("ABERTA");
+        assertThat(statusDaVenda(concluida)).isEqualTo("CONCLUIDA");
+        assertThat(statusDaVenda(cancelada)).isEqualTo("CANCELADA");
+        assertThat(jdbc.queryForObject("SELECT status_alterado_em FROM vendas WHERE id = ?", Object.class, aprovada)).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT status_alterado_em FROM vendas WHERE id = ?", Object.class, concluida)).isNull();
+
+        assertThat(statusDe(uPendente)).isEqualTo("VENDIDO");
+        assertThat(statusDe(uAprovada)).isEqualTo("VENDIDO");
+        assertThat(jdbc.queryForObject("SELECT data_venda FROM tb_estoque_geral WHERE id = ?", Object.class, uAprovada)).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT version FROM tb_estoque_geral WHERE id = ?", Long.class, uAprovada)).isEqualTo(1L);
+        assertThat(statusDe(uDisponivel)).as("fora de RESERVADO fica como está").isEqualTo("DISPONIVEL");
+        assertThat(statusDe(uAberta)).as("carrinho aberto não é tocado").isEqualTo("RESERVADO");
+        assertThat(statusDe(uCompartilhada)).as("também está num carrinho aberto").isEqualTo("RESERVADO");
+        assertThat(statusDe(uCancelada)).isEqualTo("DISPONIVEL");
+    }
+
     // ---- V23: codigo_acessorio com marcador de vazio vira NULL
 
     @Test
@@ -207,6 +244,24 @@ class EstoqueGeralRepositoryTest {
                 VALUES (?, 'PRODUTO_VIVO', ?, 'Aparelho', 1, 100, ?)
                 """, vendaId, id, id);
         return id;
+    }
+
+    private long naVenda(String serial, long vendaId, String status) {
+        long id = jdbc.queryForObject("INSERT INTO tb_estoque_geral (serial, status) VALUES (?, ?) RETURNING id",
+                Long.class, serial, status);
+        incluirNaVenda(vendaId, id);
+        return id;
+    }
+
+    private void incluirNaVenda(long vendaId, long estoqueId) {
+        jdbc.update("""
+                INSERT INTO itens_venda (venda_id, categoria, produto_id, descricao_produto, quantidade, valor_unitario, estoque_geral_id)
+                VALUES (?, 'PRODUTO_VIVO', ?, 'Aparelho', 1, 100, ?)
+                """, vendaId, estoqueId, estoqueId);
+    }
+
+    private String statusDaVenda(long id) {
+        return jdbc.queryForObject("SELECT status FROM vendas WHERE id = ?", String.class, id);
     }
 
     private String statusDe(long id) {

@@ -213,7 +213,7 @@ class VendaServiceCondicaoPagamentoTest {
 
         pagamentos.clear();
         pagamentos.add(pagamento(FormaPagamento.PIX, "10292.01"));
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
     }
 
     @Test
@@ -240,7 +240,7 @@ class VendaServiceCondicaoPagamentoTest {
     @Test
     @DisplayName("Venda fora de ABERTA não troca a condição")
     void vendaNaoEditavel() {
-        venda.setStatus(StatusVenda.PENDENTE);
+        venda.setStatus(StatusVenda.CONCLUIDA);
 
         assertThatThrownBy(() -> service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX))
                 .isInstanceOf(CarrinhoNaoEditavelException.class);

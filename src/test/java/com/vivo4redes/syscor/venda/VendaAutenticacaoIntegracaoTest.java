@@ -179,17 +179,19 @@ class VendaAutenticacaoIntegracaoTest {
         assertThat(venda.get("status").asText()).isEqualTo("ABERTA");
         assertThat(venda.get("vendedorNome").asText()).isEqualTo("Logado");
         assertThat(venda.get("finalizadoPorNome").isNull()).isTrue();
+        assertThat(statusDoSerial(id)).isEqualTo("RESERVADO");
     }
 
     @Test
-    @DisplayName("Finalizar com outro vendedor: ele passa a ser o vendedor, inclusive na listagem e no filtro")
+    @DisplayName("Finalizar lança a venda (CONCLUIDA), baixa o serial e passa a venda para o vendedor autenticado")
     void finalizarComOutroVendedor() throws Exception {
         long id = vendaProntaParaFinalizar();
 
         Resposta r = finalizar(id, outroVendedor, SENHA);
 
         assertThat(r.status).isEqualTo(200);
-        assertThat(r.corpo.get("status").asText()).isEqualTo("PENDENTE");
+        assertThat(r.corpo.get("status").asText()).isEqualTo("CONCLUIDA");
+        assertThat(statusDoSerial(id)).isEqualTo("VENDIDO");
         assertThat(r.corpo.get("vendedorNome").asText()).isEqualTo("Outro Vendedor");
         assertThat(r.corpo.get("finalizadoPorNome").asText()).isEqualTo("Outro Vendedor");
         assertThat(r.corpo.get("finalizadoEm").isNull()).isFalse();
@@ -249,20 +251,64 @@ class VendaAutenticacaoIntegracaoTest {
     }
 
     @Test
-    @DisplayName("Mudar o status grava quem alterou e quando, sem trocar o vendedor da venda")
+    @DisplayName("Cancelar a venda lançada: CANCELADA, serial volta a DISPONIVEL, grava quem cancelou sem trocar o vendedor")
     void statusGravaAutor() throws Exception {
         long id = vendaProntaParaFinalizar();
         assertThat(finalizar(id, logado, SENHA).status).isEqualTo(200);
 
-        Resposta r = mudarStatus(id, "APROVADA", outroVendedor, SENHA);
+        Resposta r = mudarStatus(id, "CANCELADA", outroVendedor, SENHA);
 
         assertThat(r.status).isEqualTo(200);
+        assertThat(r.corpo.get("status").asText()).isEqualTo("CANCELADA");
+        assertThat(statusDoSerial(id)).isEqualTo("DISPONIVEL");
         assertThat(r.corpo.get("vendedorNome").asText()).isEqualTo("Logado");
         Map<String, Object> linha = jdbc.queryForMap(
                 "SELECT usuario_id, status_alterado_por_id, status_alterado_em FROM vendas WHERE id = ?", id);
         assertThat(linha.get("usuario_id")).isEqualTo(logado.getId());
         assertThat(linha.get("status_alterado_por_id")).isEqualTo(outroVendedor.getId());
         assertThat(linha.get("status_alterado_em")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Pedir APROVADA ou PENDENTE: 422, sem alterar a venda")
+    void statusNaoUsado() throws Exception {
+        long id = vendaProntaParaFinalizar();
+        assertThat(finalizar(id, logado, SENHA).status).isEqualTo(200);
+
+        for (String pedido : List.of("APROVADA", "PENDENTE")) {
+            Resposta r = mudarStatus(id, pedido, outroVendedor, SENHA);
+
+            assertThat(r.status).as(pedido).isEqualTo(422);
+            assertThat(r.corpo.get("mensagem").asText()).isEqualTo("Status não usado: a venda é lançada direto ao finalizar.");
+        }
+        assertThat(buscar(id).get("status").asText()).isEqualTo("CONCLUIDA");
+        assertThat(statusDoSerial(id)).isEqualTo("VENDIDO");
+    }
+
+    @Test
+    @DisplayName("Pedir CONCLUIDA pelo status: 422; lançar é só pelo finalizar")
+    void concluirSoPeloFinalizar() throws Exception {
+        long id = vendaProntaParaFinalizar();
+
+        Resposta r = mudarStatus(id, "CONCLUIDA", outroVendedor, SENHA);
+
+        assertThat(r.status).isEqualTo(422);
+        assertThat(buscar(id).get("status").asText()).isEqualTo("ABERTA");
+        assertThat(statusDoSerial(id)).isEqualTo("RESERVADO");
+    }
+
+    @Test
+    @DisplayName("Dashboard conta a venda lançada, e não o carrinho aberto")
+    void dashboardContaVendaLancada() throws Exception {
+        long id = vendaProntaParaFinalizar();
+        JsonNode antes = dashboard();
+        assertThat(antes.get("volumeVendasTransacoes").asLong()).isZero();
+
+        assertThat(finalizar(id, outroVendedor, SENHA).status).isEqualTo(200);
+
+        JsonNode depois = dashboard();
+        assertThat(depois.get("volumeVendasTransacoes").asLong()).isEqualTo(1);
+        assertThat(new BigDecimal(depois.get("faturamentoMesAtual").asText())).isEqualByComparingTo("1000.00");
     }
 
     @Test
@@ -362,6 +408,21 @@ class VendaAutenticacaoIntegracaoTest {
     private Resposta mudarStatus(long id, String novoStatus, Usuario usuario, String senha) throws Exception {
         return enviar(patch("/vendas/{id}/status", id), Map.of("novoStatus", novoStatus,
                 "autenticacaoUsuario", Map.of("email", usuario.getEmail(), "senha", senha)));
+    }
+
+    /** Status, no estoque, do serial do único item da venda. */
+    private String statusDoSerial(long vendaId) {
+        return jdbc.queryForObject("""
+                SELECT e.status FROM itens_venda i JOIN tb_estoque_geral e ON e.id = i.estoque_geral_id
+                WHERE i.venda_id = ?
+                """, String.class, vendaId);
+    }
+
+    /** Painel executivo só da filial deste teste. */
+    private JsonNode dashboard() throws Exception {
+        Resposta r = enviar(get("/dashboard/executivo").param("filialId", filialId.toString()), null);
+        assertThat(r.status).isEqualTo(200);
+        return r.corpo;
     }
 
     private JsonNode buscar(long id) throws Exception {

@@ -12,6 +12,7 @@
     import com.vivo4redes.syscor.financeiro.model.ItemRemuneracao;
     import com.vivo4redes.syscor.financeiro.repository.ExecucaoRemuneracaoRepository;
     import com.vivo4redes.syscor.financeiro.repository.ItemRemuneracaoRepository;
+    import com.vivo4redes.syscor.venda.enums.StatusVenda;
     import com.vivo4redes.syscor.venda.model.ItemVenda;
     import com.vivo4redes.syscor.venda.model.Venda;
     import com.vivo4redes.syscor.venda.service.VendaService;
@@ -38,9 +39,12 @@
         public ExecucaoRemuneracaoResponseDTO processarConsolidado(MultipartFile arquivo) {
             List<LinhaConsolidadoVivoDTO> linhasVivo = parser.parsear(arquivo);
 
-            List<Venda> todasAsVendas = vendaService.listarTodas();
+            // Só venda lançada gera comissão: carrinho aberto ou venda cancelada não entram no cruzamento.
+            List<Venda> vendasLancadas = vendaService.listarTodas().stream()
+                    .filter(v -> v.getStatus() == StatusVenda.CONCLUIDA)
+                    .toList();
             Map<String, Venda> vendaPorAcesso = new HashMap<>();
-            for (Venda v : todasAsVendas) {
+            for (Venda v : vendasLancadas) {
                 for (ItemVenda item : v.getItens()) {
                     String acessoNormalizado = normalizarAcesso(item.getNumeroAcesso());
                     if (!acessoNormalizado.isBlank()) {
@@ -61,7 +65,7 @@
                 itens.add(classificarLinhaVivo(linha, vendaPorAcesso.get(acessoNormalizado), contadores));
             }
 
-            for (Venda v : todasAsVendas) {
+            for (Venda v : vendasLancadas) {
                 if (!temProtocoloValido(v.getId())) continue;
 
                 for (ItemVenda item : v.getItens()) {
@@ -123,7 +127,7 @@
 
             if (vendaEncontrada == null) {
                 status = PENDENTE_SISTEMA;
-                diagnostico = "Numero de acesso nao encontrado em nenhuma venda do sistema.";
+                diagnostico = "Numero de acesso nao encontrado em nenhuma venda lancada do sistema.";
                 contadores[1]++;
             } else {
                 vendaId = vendaEncontrada.getId();

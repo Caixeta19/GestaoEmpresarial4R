@@ -270,6 +270,7 @@ public class VendaService {
      * Fecha o carrinho pela tabela vigente. Se o total mudou (tabela nova, por exemplo), grava o total novo e recusa
      * com 422: o vendedor confere antes de cobrar. Por isso essa exceção não desfaz a transação, e o vendedor só é
      * gravado depois de todas as validações. Ordem: autenticação → itens → Renova → total vigente → pagamentos.
+     * Passando tudo, a venda é lançada (CONCLUIDA) e as unidades reservadas viram VENDIDO na mesma transação.
      */
     @Transactional(noRollbackFor = TotalVendaAlteradoException.class)
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
@@ -292,7 +293,8 @@ public class VendaService {
                     + ") nao bate com o valor total da venda (" + venda.getValorTotal() + ").");
         }
 
-        transicionar(venda, StatusVenda.PENDENTE);
+        transicionar(venda, StatusVenda.CONCLUIDA);
+        confirmarEstoqueDaVenda(venda);
         venda.setUsuario(vendedor);
         venda.setFinalizadoPor(vendedor);
         venda.setFinalizadoEm(Instant.now());
@@ -307,6 +309,12 @@ public class VendaService {
         StatusVenda novoStatus = dto.novoStatus();
         if (novoStatus == null) {
             throw new IllegalArgumentException("O novo status da venda e obrigatorio.");
+        }
+        if (novoStatus == StatusVenda.PENDENTE || novoStatus == StatusVenda.APROVADA) {
+            throw new NegocioException("Status não usado: a venda é lançada direto ao finalizar.");
+        }
+        if (novoStatus == StatusVenda.CONCLUIDA) {
+            throw new NegocioException("A venda é lançada pelo finalizar, com a senha do vendedor.");
         }
 
         transicionar(venda, novoStatus);
