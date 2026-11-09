@@ -236,6 +236,16 @@ CANCELADA → (terminal, sem saída)
 - Vínculo 1:1 com a venda (`uk` em `venda_id`) — uma venda tem no máximo um protocolo.
 - `situacaoServico` (`CONFIRMADO`/`CANCELADO`) e `gerarComissao` (default `true`) ficam
   registrados por venda, independente do status da venda em si.
+- Só venda lançada (`CONCLUIDA`) recebe protocolo; salvar em venda `ABERTA` ou `CANCELADA` é 422.
+- Toda venda lançada nasce **Não avaliado** no BKO (o finalizar grava `Nao_avaliado`; a V31 marcou as antigas).
+  A fila do BKO é `GET /documental/protocolos/busca?statusBko=Nao_avaliado`, e `statusBko` nunca vem nulo.
+- A busca e a exportação só trazem vendas com pelo menos um item de serviço (número de acesso e serviço
+  preenchidos); aparelho avulso e acessório ficam de fora. O período é o do lançamento.
+- Tipo de plano: `PRE` → PRE; `CONTROLE_*` → CONTROLE; `POS_INDIVIDUAL`, `FAMILIA_*`, `VIVO_V`, `MULTIVIVO`
+  e `VIM_*` → POS; sem grupo de preço, vale o segmento ("Pré", "Controle", "Pós").
+- Importação em lote por CSV (`NUMERO_VENDA;PROTOCOLO_GED;STATUS_BKO;NUMERO_ACESSO;DATA_DIGITALIZACAO`): uma
+  transação por linha, então uma linha com erro não desfaz as outras.
+- Exportação do Relatório de Gestão Documental em CSV (`;`, UTF-8 com BOM), período de até 93 dias.
 
 ### Mailing (WhatsApp)
 
@@ -617,6 +627,9 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | PUT | `/documental/protocolos/{vendaId}` | Salvar/atualizar protocolo documental da venda |
 | GET | `/documental/protocolos/{vendaId}` | Buscar protocolo por venda |
 | GET | `/documental/protocolos` | Buscar por número de protocolo GED |
+| GET | `/documental/protocolos/busca` | Vendas lançadas com ou sem protocolo, paginadas, com os filtros da tela (período, filiais, vendedor, nº da venda, nº de acesso, GED, líder, status BKO, tipos de plano, serviços) |
+| POST | `/documental/protocolos/importacao` | Importar protocolos em lote (CSV) → `{ total, sucessos, erros }` |
+| GET | `/documental/protocolos/exportacao` | Relatório de Gestão Documental em CSV (período obrigatório, até 93 dias) |
 | POST | `/mailing/campanhas` | Criar campanha |
 | GET | `/mailing/campanhas/modelo-planilha` | Baixar modelo de planilha de destinatários |
 | POST | `/mailing/campanhas/importar-planilha` | Importar destinatários (multipart) |
@@ -674,7 +687,7 @@ backend fora de uma rede confiável, ativar de fato o `JwtFilter` no
 |---|---|---|---|---|
 | `venda` | ✅ completo (carrinho, itens, pagamentos, status, avaliação) | ✅ máquina de estados, validação de carrinho | ✅ V1, V2, V8 | Núcleo do sistema — mais maduro |
 | `estoque` | ✅ produto, entrada de serial, alertas, inventário SAP, tabela de preços | ✅ status de serial, conciliação, resolução de SKU | ✅ V4, V5, V6 | — |
-| `gestao` (documental) | ✅ salvar/buscar protocolo | ✅ vínculo 1:1 com venda | ✅ V9 | — |
+| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31 | — |
 | `mailing` | ✅ criar, importar, disparar, listar campanha | ✅ fila + listener assíncrono | ✅ V7 | Depende de credenciais WhatsApp via env vars |
 | `dashboard` | ✅ 1 endpoint (`/dashboard/executivo`) | ✅ implementado, meta fixa no código | — (lê de `venda`/`estoque`) | Ver limitação de filtros abaixo |
 

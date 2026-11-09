@@ -174,6 +174,12 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | --- | --- | --- |
 | RN.33 | No máximo um protocolo por venda (único em `venda_id`) | V9 |
 | RN.34 | `situacaoServico` (`CONFIRMADO`/`CANCELADO`) e `gerarComissao` (padrão `true`) independem do status da venda | `ProtocoloDocumental` |
+| RN.54 | Toda venda lançada nasce **Não avaliado**: o finalizar grava `Nao_avaliado`, e a V31 marcou assim as lançadas sem avaliação. Nas respostas do documental, `statusBko` nunca vem nulo. A fila do BKO é a busca com `statusBko=Nao_avaliado` | `VendaService.finalizar`, V31, `RegrasDocumental.statusBko` |
+| RN.55 | Entram no documental só vendas lançadas (`CONCLUIDA`; `incluirCanceladas=true` traz também as `CANCELADA`) com **pelo menos um item de serviço**: número de acesso e `tipoServico` preenchidos (`SERVICO_VIVO` ou aparelho vinculado a uma linha). Aparelho avulso e acessório não entram. O período é o do lançamento (`finalizado_em`, ou `criado_em` se vazio) | `BuscaDocumentalSpecs`, `RegrasDocumental` |
+| RN.56 | Tipo de plano do item: pelo `grupoPlano` (`PRE` → PRE; `CONTROLE_*` → CONTROLE; `POS_INDIVIDUAL`, `FAMILIA_*`, `VIVO_V`, `MULTIVIVO` e `VIM_*` → POS); sem grupo ou `SEM_PLANO`, pelo segmento ("Pré", "Controle", "Pós"). Serviço é comparado sem acento nem maiúsculas ("Troca de numero" = "Troca de número") | `TipoPlano`, `BuscaDocumentalSpecs` |
+| RN.57 | Só venda lançada recebe protocolo: salvar em venda `ABERTA` ou `CANCELADA` é 422 | `ProtocoloDocumentalService.salvar` |
+| RN.58 | Importação em lote (CSV `;` ou `,`; colunas `NUMERO_VENDA`, `PROTOCOLO_GED`, `STATUS_BKO`, `NUMERO_ACESSO`, `DATA_DIGITALIZACAO` dd/MM/aaaa): acha a venda pelo `numeroVenda` e grava pelo mesmo serviço do PUT, uma transação por linha. Só os campos da planilha mudam; número de acesso que não é de nenhum item da venda vira erro da linha | `ImportacaoProtocolosService` |
+| RN.59 | Exportação do Relatório de Gestão Documental: CSV `;` UTF-8 com BOM, uma linha por venda (item de serviço principal), período obrigatório de no máximo 93 dias (422 fora disso) | `ExportacaoDocumentalService` |
 
 **Financeiro**
 
@@ -286,7 +292,7 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `tb_preco_item` | estoque | Preço por Nome Comercial × tabela (`REGULAR`/`RENOVA`) × grupo do plano: cheio, PIX e 13x–21x (`parcelas JSONB`) | V24 |
 | `tb_plano_vivo` / `tb_produto_vivo` | estoque | Abas PLANOS (plano → grupo de preço) e PRODUTOS (Cod_Sap → Nome Comercial), por execução | V24 |
 | `tb_produto_preco_plano` | estoque | **Fora de uso desde a V24** (será removida numa migration futura) | V6, V19 |
-| `tb_protocolo_documental` | gestao | Protocolo 1:1 com a venda | V9 |
+| `tb_protocolo_documental` | gestao | Protocolo 1:1 com a venda; `vendas.avaliacao_procedencia` guarda o status BKO | V9, V31 |
 | `tb_campanha_mailing` / `tb_destinatario_mailing` | mailing | Campanhas e destinatários | V7 |
 | `tb_titulo_financeiro` | financeiro | Títulos a pagar/receber, identificador de pagamento, código de barras | V10, V16 |
 | `tb_execucao_remuneracao` / `tb_item_remuneracao` | financeiro | Importações do consolidado Vivo e classificação por linha | V10 |
@@ -398,8 +404,11 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 
 | Método | Rota | Descrição |
 | --- | --- | --- |
-| PUT / GET | `/documental/protocolos/{vendaId}` | Salvar / buscar protocolo da venda |
+| PUT / GET | `/documental/protocolos/{vendaId}` | Salvar / buscar protocolo da venda (`{vendaId}` é o id, não o `numeroVenda`). PUT em venda não lançada → 422 |
 | GET | `/documental/protocolos?numeroProtocoloGed=` | Buscar por número GED |
+| GET | `/documental/protocolos/busca` | Vendas lançadas, com ou sem protocolo, paginadas (`content`, `page.totalElements`). Filtros: `dataInicio`, `dataFim`, `filialIds`, `vendedorId`, `numeroVenda`, `numeroAcesso`, `numeroProtocoloGed`, `liderEquipe`, `statusBko`, `tiposPlano` (`PRE`/`CONTROLE`/`POS`), `servicos`, `incluirCanceladas`, `page`, `size` (até 200). Sem resultado → 200 com lista vazia |
+| POST | `/documental/protocolos/importacao` | CSV multipart (`arquivo`) → `{ total, sucessos, erros: [{ linha, numeroVenda, motivo }] }` |
+| GET | `/documental/protocolos/exportacao` | Mesmos filtros da busca, sem paginação; CSV `Relatorio_Gestao_Documental_<inicio>_a_<fim>.csv`. Período obrigatório de até 93 dias (senão 422) |
 | POST / GET | `/mailing/campanhas` | Criar / listar campanhas |
 | GET | `/mailing/campanhas/modelo-planilha` | Baixar modelo de planilha |
 | POST | `/mailing/campanhas/importar-planilha` | Importar destinatários |
