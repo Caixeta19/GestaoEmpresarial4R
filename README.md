@@ -604,6 +604,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/clientes` | Cadastrar cliente |
 | GET | `/clientes/{id}` | Buscar cliente |
 | POST | `/filiais` | Cadastrar filial |
+| GET | `/filiais` | Listar filiais ativas (`?incluirInativas=true` traz também as inativas) |
 | GET | `/filiais/{id}` | Buscar filial |
 | POST | `/usuarios` | Cadastrar usuário/vendedor |
 | GET | `/usuarios` | Listar quem pode se autenticar (sem inativos pela flag, pelo cargo ou pela situação) |

@@ -343,6 +343,20 @@ class ProtocoloDocumentalIntegracaoTest {
                 .andReturn().getResponse().getStatus()).as("93 dias").isEqualTo(200);
     }
 
+    // ------------------------------------------------------------------ filiais do relatório
+
+    @Test
+    @DisplayName("GET /filiais traz só as ativas; com incluirInativas=true, também as inativas")
+    void filiaisInativasNoRelatorio() throws Exception {
+        Filial inativa = filiais.save(Filial.builder().codigo("INA" + n).nome("Filial Inativa " + n).ativo(false).build());
+
+        JsonNode ativas = enviar(get("/filiais"), null).corpo;
+        JsonNode todas = enviar(get("/filiais").param("incluirInativas", "true"), null).corpo;
+
+        assertThat(ativas.findValuesAsText("id")).contains(String.valueOf(filialId)).doesNotContain(String.valueOf(inativa.getId()));
+        assertThat(todas.findValuesAsText("id")).contains(String.valueOf(filialId), String.valueOf(inativa.getId()));
+    }
+
     // ------------------------------------------------------------------ apoio
 
     private long vendaLancada(String avaliacao, LocalDate dia) {

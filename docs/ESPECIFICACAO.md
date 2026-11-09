@@ -348,7 +348,7 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | --- | --- | --- |
 | POST / GET | `/clientes` | Cadastrar / buscar paginado (`?busca=&page=&size=`) |
 | GET | `/clientes/{id}` | Buscar cliente |
-| POST / GET | `/filiais` | Cadastrar / listar ativas |
+| POST / GET | `/filiais` | Cadastrar / listar ativas (`?incluirInativas=true` traz também as inativas, para os relatórios) |
 | GET | `/filiais/{id}` | Buscar filial |
 | POST / GET | `/usuarios` | Cadastrar / listar quem pode se autenticar (sem inativos pela flag, pelo cargo ou pela situação) |
 | GET | `/usuarios/{id}` | Buscar usuário |

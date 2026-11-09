@@ -26,10 +26,11 @@ public class FilialController {
         return ResponseEntity.status(HttpStatus.CREATED).body(FilialResponseDTO.from(filial));
     }
 
+    /** Só as ativas, por padrão; {@code incluirInativas=true} traz todas (relatórios). */
     @GetMapping
-    public ResponseEntity<List<FilialResponseDTO>> listarAtivas() {
-        return ResponseEntity.ok(
-                filialService.listarAtivas().stream().map(FilialResponseDTO::from).toList());
+    public ResponseEntity<List<FilialResponseDTO>> listar(@RequestParam(defaultValue = "false") boolean incluirInativas) {
+        var filiais = incluirInativas ? filialService.listarTodas() : filialService.listarAtivas();
+        return ResponseEntity.ok(filiais.stream().map(FilialResponseDTO::from).toList());
     }
 
     @GetMapping("/{id}")
