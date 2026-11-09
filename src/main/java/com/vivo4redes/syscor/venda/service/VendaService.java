@@ -698,13 +698,10 @@ public class VendaService {
         });
     }
 
-    /** Aparelho/acessório: preço da tabela vigente. Serviço: 0. Recarga: valor informado. */
+    /** Aparelho/acessório: preço da tabela vigente. Serviço: sempre 0, o valor enviado é ignorado. Recarga: valor informado. */
     private BigDecimal valorUnitarioDoItem(ItemVendaRequestDTO dto, PrecoCalculado preco) {
         if (preco != null) return preco.valorAplicado();
-        if (dto.categoria() == CategoriaItemVenda.SERVICO_VIVO) {
-            return dto.valorUnitario() == null ? BigDecimal.ZERO : dto.valorUnitario();
-        }
-        return dto.valorUnitario();
+        return dto.categoria() == CategoriaItemVenda.SERVICO_VIVO ? BigDecimal.ZERO : dto.valorUnitario();
     }
 
     /** Trava a venda (FOR UPDATE) antes de mexer no carrinho, para não concorrer com a expiração. */
