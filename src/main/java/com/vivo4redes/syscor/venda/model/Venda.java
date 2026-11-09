@@ -46,10 +46,26 @@ public class Venda {
     @JoinColumn(name = "filial_id", nullable = false)
     private Filial filial;
 
-    /** Vendedor autenticado que abriu/está operando a venda (tela "Início"). */
+    /** Vendedor da venda: o usuário logado enquanto ABERTA (provisório); ao finalizar, quem se autenticou. */
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "usuario_id", nullable = false)
     private Usuario usuario;
+
+    /** Quem se autenticou para finalizar a venda; null enquanto ABERTA e nas vendas antigas. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "finalizado_por_id")
+    private Usuario finalizadoPor;
+
+    @Column(name = "finalizado_em")
+    private Instant finalizadoEm;
+
+    /** Quem fez a última mudança por PATCH /vendas/{id}/status; procedência e expiração não têm autenticação. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "status_alterado_por_id")
+    private Usuario statusAlteradoPor;
+
+    @Column(name = "status_alterado_em")
+    private Instant statusAlteradoEm;
 
     /** Dropdown "Venda Estoque Avançado?" da tela Início. */
     @Column(name = "estoque_avancado", nullable = false)
