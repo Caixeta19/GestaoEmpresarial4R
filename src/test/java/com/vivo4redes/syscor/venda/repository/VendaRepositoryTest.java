@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -20,6 +21,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -112,6 +114,28 @@ class VendaRepositoryTest {
         assertThat(entradas(FormaPagamento.VIVO_PAY)).isEqualByComparingTo("100.00");
         assertThat(entradas(FormaPagamento.PIX)).isEqualByComparingTo("30.00");
         assertThat(entradas(FormaPagamento.CARTAO_CREDITO)).isEqualByComparingTo("75.00");
+    }
+
+    @Test
+    @DisplayName("V31: venda lançada sem avaliação entra na fila do BKO como Nao_avaliado; o resto não muda")
+    void v31NaoAvaliado() throws Exception {
+        jdbc.execute("SET LOCAL session_replication_role = replica");
+        Instant t = Instant.parse("2026-11-02T12:00:00Z");
+        long semAvaliacao = venda("CONCLUIDA", t), procedente = venda("CONCLUIDA", t);
+        long aberta = venda("ABERTA", t), cancelada = venda("CANCELADA", t);
+        jdbc.update("UPDATE vendas SET avaliacao_procedencia = 'Procedente' WHERE id = ?", procedente);
+
+        jdbc.execute(new String(new ClassPathResource("db/migration/V31__venda_lancada_nao_avaliado.sql")
+                .getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+
+        assertThat(avaliacao(semAvaliacao)).isEqualTo("Nao_avaliado");
+        assertThat(avaliacao(procedente)).isEqualTo("Procedente");
+        assertThat(avaliacao(aberta)).isNull();
+        assertThat(avaliacao(cancelada)).isNull();
+    }
+
+    private String avaliacao(long id) {
+        return jdbc.queryForObject("SELECT avaliacao_procedencia FROM vendas WHERE id = ?", String.class, id);
     }
 
     private void pagamento(long venda, String forma, String tipo, String valor) {

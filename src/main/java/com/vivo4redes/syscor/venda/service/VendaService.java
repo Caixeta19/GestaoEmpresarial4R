@@ -295,6 +295,7 @@ public class VendaService {
 
         transicionar(venda, StatusVenda.CONCLUIDA);
         confirmarEstoqueDaVenda(venda);
+        venda.setAvaliacaoProcedencia(StatusAvaliacaoProcedencia.Nao_avaliado); // entra na fila do BKO
         venda.setUsuario(vendedor);
         venda.setFinalizadoPor(vendedor);
         venda.setFinalizadoEm(Instant.now());
