@@ -20,6 +20,7 @@ import com.vivo4redes.syscor.venda.dto.request.StatusVendaRequestDTO;
 import com.vivo4redes.syscor.venda.dto.request.VendaRequestDTO;
 import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
+import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.model.Cliente;
 import com.vivo4redes.syscor.venda.model.Filial;
@@ -151,6 +152,7 @@ class VendaServiceAutenticacaoTest {
         Venda finalizada = service.finalizar(1L, FINALIZAR);
 
         assertThat(finalizada.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
+        assertThat(finalizada.getAvaliacaoProcedencia()).as("entra na fila do BKO").isEqualTo(StatusAvaliacaoProcedencia.Nao_avaliado);
         verify(estoqueService).confirmarVenda(aparelho);
         assertThat(finalizada.getUsuario()).isSameAs(autenticado);
         assertThat(finalizada.getFinalizadoPor()).isSameAs(autenticado);

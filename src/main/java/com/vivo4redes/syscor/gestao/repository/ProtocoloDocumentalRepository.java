@@ -4,6 +4,7 @@ import com.vivo4redes.syscor.gestao.model.ProtocoloDocumental;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,4 +13,6 @@ public interface ProtocoloDocumentalRepository extends JpaRepository<ProtocoloDo
     Optional<ProtocoloDocumental> findByVendaId(Long vendaId);
 
     List<ProtocoloDocumental> findByNumeroProtocoloGed(String numeroProtocoloGed);
+
+    List<ProtocoloDocumental> findByVendaIdIn(Collection<Long> vendaIds);
 }

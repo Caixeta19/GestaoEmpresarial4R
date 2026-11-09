@@ -2,10 +2,13 @@ package com.vivo4redes.syscor.venda.repository;
 
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -24,7 +27,19 @@ import java.util.Optional;
  * via @EntityGraph — sem precisar tornar as relações EAGER na entidade
  * (o que causaria N+1 em toda consulta que não precisa desses dados).
  */
-public interface VendaRepository extends JpaRepository<Venda, Long> {
+public interface VendaRepository extends JpaRepository<Venda, Long>, JpaSpecificationExecutor<Venda> {
+
+    Optional<Venda> findByNumeroVenda(Long numeroVenda);
+
+    /** Busca documental paginada; os itens vêm em lote (@BatchSize em Venda.itens). */
+    @Override
+    @EntityGraph(attributePaths = {"cliente", "filial", "usuario"})
+    Page<Venda> findAll(Specification<Venda> spec, Pageable pageable);
+
+    /** Exportação documental, sem paginação. */
+    @Override
+    @EntityGraph(attributePaths = {"cliente", "filial", "usuario"})
+    List<Venda> findAll(Specification<Venda> spec);
 
     List<Venda> findByClienteId(Long clienteId);
 

@@ -1,26 +1,32 @@
 package com.vivo4redes.syscor.gestao.service;
 
+import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.gestao.dto.request.FiltroDocumentalDTO;
 import com.vivo4redes.syscor.gestao.dto.request.ProtocoloDocumentalRequestDTO;
 import com.vivo4redes.syscor.gestao.dto.response.ProtocoloDocumentalResponseDTO;
 import com.vivo4redes.syscor.gestao.model.ProtocoloDocumental;
+import com.vivo4redes.syscor.gestao.repository.BuscaDocumentalSpecs;
 import com.vivo4redes.syscor.gestao.repository.ProtocoloDocumentalRepository;
-import com.vivo4redes.syscor.exception.NegocioException;
-import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
-import com.vivo4redes.syscor.venda.enums.CategoriaItemVenda;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
-import com.vivo4redes.syscor.venda.model.ItemVenda;
+import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
+import com.vivo4redes.syscor.venda.repository.VendaRepository;
 import com.vivo4redes.syscor.venda.service.VendaService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * Tela "Gestão Documental" — cria/atualiza o protocolo de uma venda (1:1) e
- * delega a avaliação de procedência (statusBko) para o VendaService, que já
- * cancela/estorna automaticamente quando Improcedente (US-303).
+ * Tela "Gestão Documental" — busca as vendas lançadas, cria/atualiza o protocolo de uma venda (1:1) e delega a
+ * avaliação de procedência (statusBko) para o VendaService, que cancela/estorna quando Improcedente (US-303).
  */
 @Service
 @RequiredArgsConstructor
@@ -28,10 +34,16 @@ public class ProtocoloDocumentalService {
 
     private final ProtocoloDocumentalRepository protocoloRepository;
     private final VendaService vendaService;
+    private final VendaRepository vendaRepository;
 
+    /** Só venda lançada (CONCLUIDA) recebe protocolo: carrinho aberto ainda muda, e venda cancelada não tem o que documentar. */
     @Transactional
     public ProtocoloDocumentalResponseDTO salvar(Long vendaId, ProtocoloDocumentalRequestDTO dto) {
         Venda venda = vendaService.buscarPorId(vendaId);
+        if (venda.getStatus() != StatusVenda.CONCLUIDA) {
+            throw new NegocioException("Só vendas lançadas recebem protocolo documental (venda #"
+                    + venda.getNumeroVenda() + " está " + venda.getStatus() + ").");
+        }
 
         if (dto.statusBko() != null && !dto.statusBko().isBlank()) {
             venda = vendaService.avaliarProcedencia(vendaId, parseStatusBko(dto.statusBko()));
@@ -63,14 +75,14 @@ public class ProtocoloDocumentalService {
                         ? null : String.join(";", dto.motivosCancelamento()));
 
         protocolo = protocoloRepository.save(protocolo);
-        return montarResponse(venda, protocolo);
+        return ProtocoloDocumentalResponseDTO.from(venda, protocolo);
     }
 
     @Transactional(readOnly = true)
     public ProtocoloDocumentalResponseDTO buscarPorVenda(Long vendaId) {
         Venda venda = vendaService.buscarPorId(vendaId);
         ProtocoloDocumental protocolo = protocoloRepository.findByVendaId(vendaId).orElse(null);
-        return montarResponse(venda, protocolo);
+        return ProtocoloDocumentalResponseDTO.from(venda, protocolo);
     }
 
     @Transactional(readOnly = true)
@@ -80,58 +92,34 @@ public class ProtocoloDocumentalService {
             throw new RecursoNaoEncontradoException("Protocolo documental");
         }
         return protocolos.stream()
-                .map(p -> montarResponse(p.getVenda(), p))
+                .map(p -> ProtocoloDocumentalResponseDTO.from(p.getVenda(), p))
                 .toList();
     }
 
-    private StatusAvaliacaoProcedencia parseStatusBko(String texto) {
-        String normalizado = texto.trim().replace(' ', '_');
-        try {
-            return StatusAvaliacaoProcedencia.valueOf(normalizado);
-        } catch (IllegalArgumentException e) {
-            throw new NegocioException("statusBko inválido: '" + texto
-                    + "'. Use um de: Improcedente, Procedente, Em_avaliacao_pelo_BKO, Nao_avaliado.");
-        }
+    /** Vendas lançadas (e canceladas, se pedido), com ou sem protocolo. Sem resultado é página vazia, não 404. */
+    @Transactional(readOnly = true)
+    public Page<ProtocoloDocumentalResponseDTO> buscar(FiltroDocumentalDTO filtro, Pageable pageable) {
+        Page<Venda> vendas = vendaRepository.findAll(BuscaDocumentalSpecs.de(filtro), pageable);
+        Map<Long, ProtocoloDocumental> protocolos = protocolosDas(vendas.getContent());
+        return vendas.map(v -> ProtocoloDocumentalResponseDTO.from(v, protocolos.get(v.getId())));
     }
 
-    private ProtocoloDocumentalResponseDTO montarResponse(Venda venda, ProtocoloDocumental protocolo) {
-        ItemVenda itemServico = venda.getItens().stream()
-                .filter(i -> i.getCategoria() == CategoriaItemVenda.SERVICO_VIVO)
-                .findFirst()
-                .or(() -> venda.getItens().stream().findFirst())
-                .orElse(null);
+    /** Todas as vendas dos filtros, sem paginação (exportação). */
+    @Transactional(readOnly = true)
+    public List<ProtocoloDocumentalResponseDTO> listar(FiltroDocumentalDTO filtro) {
+        List<Venda> vendas = vendaRepository.findAll(BuscaDocumentalSpecs.de(filtro));
+        Map<Long, ProtocoloDocumental> protocolos = protocolosDas(vendas);
+        return vendas.stream().map(v -> ProtocoloDocumentalResponseDTO.from(v, protocolos.get(v.getId()))).toList();
+    }
 
-        String servico = itemServico != null && itemServico.getTipoServico() != null
-                ? itemServico.getTipoServico()
-                : (itemServico != null ? itemServico.getCategoria().name() : null);
-        String plano = itemServico != null ? itemServico.getPlano() : null;
-        String numeroAcesso = itemServico != null ? itemServico.getNumeroAcesso() : null;
+    private Map<Long, ProtocoloDocumental> protocolosDas(List<Venda> vendas) {
+        if (vendas.isEmpty()) return Map.of();
+        return protocoloRepository.findByVendaIdIn(vendas.stream().map(Venda::getId).toList()).stream()
+                .collect(Collectors.toMap(p -> p.getVenda().getId(), Function.identity()));
+    }
 
-        return new ProtocoloDocumentalResponseDTO(
-                protocolo != null ? protocolo.getId() : null,
-                venda.getId(),
-                venda.getNumeroVenda(),
-                servico,
-                plano,
-                venda.getCliente().getNome(),
-                venda.getCliente().getCpfCnpj(),
-                venda.getUsuario().getNome(),
-                venda.getCriadoEm(),
-                numeroAcesso,
-                venda.getAvaliacaoProcedencia(),
-                protocolo != null ? protocolo.getNumeroProtocoloGed() : null,
-                protocolo != null ? protocolo.getDataDigitalizacao() : null,
-                protocolo != null ? protocolo.getZerarRemuneracao() : null,
-                protocolo != null ? protocolo.getGerarPrice() : null,
-                protocolo != null ? protocolo.getVencimento() : null,
-                protocolo != null ? protocolo.getLiderEquipe() : null,
-                protocolo != null ? protocolo.getObservacoes() : null,
-                protocolo != null ? protocolo.getObservacoesImportacao() : null,
-                protocolo != null ? protocolo.getSituacaoServico() : null,
-                protocolo != null ? protocolo.getGerarComissao() : null,
-                protocolo != null && protocolo.getMotivosCancelamento() != null
-                        ? List.of(protocolo.getMotivosCancelamento().split(";"))
-                        : List.of()
-        );
+    static StatusAvaliacaoProcedencia parseStatusBko(String texto) {
+        return StatusAvaliacaoProcedencia.deTexto(texto).orElseThrow(() -> new NegocioException("statusBko inválido: '"
+                + texto + "'. Use um de: Improcedente, Procedente, Em_avaliacao_pelo_BKO, Nao_avaliado."));
     }
 }

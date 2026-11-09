@@ -43,4 +43,10 @@ public class FilialService {
     public List<Filial> listarAtivas() {
         return filialRepository.findByAtivoTrueOrderByNomeAsc();
     }
+
+    /** Relatórios mostram também as filiais inativas (vendas antigas continuam nelas). */
+    @Transactional(readOnly = true)
+    public List<Filial> listarTodas() {
+        return filialRepository.findAllByOrderByNomeAsc();
+    }
 }

@@ -10,4 +10,6 @@ public interface FilialRepository extends JpaRepository<Filial, Long> {
     boolean existsByCodigoIgnoreCase(String codigo);
 
     List<Filial> findByAtivoTrueOrderByNomeAsc();
+
+    List<Filial> findAllByOrderByNomeAsc();
 }
