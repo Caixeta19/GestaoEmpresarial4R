@@ -343,7 +343,7 @@ class VendaServiceRenovaTest {
         service.aplicarRenova(1L, true, "V-123");
         pagamentos.add(pagamento(FormaPagamento.DINHEIRO, "9848.90"));
 
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
     }
 
     private static FinalizarVendaRequestDTO finalizar() {

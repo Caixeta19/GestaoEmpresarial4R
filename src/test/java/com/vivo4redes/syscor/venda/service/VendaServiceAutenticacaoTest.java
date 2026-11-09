@@ -146,11 +146,12 @@ class VendaServiceAutenticacaoTest {
     }
 
     @Test
-    @DisplayName("Finalizar: o autenticado vira o vendedor da venda, com autor e data")
+    @DisplayName("Finalizar lança a venda (CONCLUIDA): baixa o estoque e o autenticado vira o vendedor, com autor e data")
     void finalizarGravaAutenticado() {
         Venda finalizada = service.finalizar(1L, FINALIZAR);
 
-        assertThat(finalizada.getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(finalizada.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
+        verify(estoqueService).confirmarVenda(aparelho);
         assertThat(finalizada.getUsuario()).isSameAs(autenticado);
         assertThat(finalizada.getFinalizadoPor()).isSameAs(autenticado);
         assertThat(finalizada.getFinalizadoEm()).isNotNull();
@@ -165,6 +166,7 @@ class VendaServiceAutenticacaoTest {
         assertThatThrownBy(() -> service.finalizar(1L, FINALIZAR)).isInstanceOf(AutenticacaoInvalidaException.class);
 
         verify(vendaRepository, never()).buscarPorIdForUpdate(any());
+        verify(estoqueService, never()).confirmarVenda(any());
         assertNaoFinalizada();
     }
 
@@ -216,40 +218,67 @@ class VendaServiceAutenticacaoTest {
     }
 
     @Test
-    @DisplayName("Venda já finalizada: finalizar de novo não troca o vendedor")
+    @DisplayName("Venda já lançada: finalizar de novo não troca o vendedor nem baixa o estoque de novo")
     void finalizarDeNovoNaoTrocaVendedor() {
-        venda.setStatus(StatusVenda.PENDENTE);
+        venda.setStatus(StatusVenda.CONCLUIDA);
 
         assertThatThrownBy(() -> service.finalizar(1L, FINALIZAR)).isInstanceOf(TransicaoStatusInvalidaException.class);
+        verify(estoqueService, never()).confirmarVenda(any());
 
         assertThat(venda.getUsuario()).isSameAs(provisorio);
         assertThat(venda.getFinalizadoPor()).isNull();
     }
 
     @Test
-    @DisplayName("Mudar o status grava autor e data, sem trocar o vendedor")
+    @DisplayName("Cancelar venda lançada grava autor e data, devolve o estoque e não troca o vendedor")
     void statusGravaAutor() {
-        venda.setStatus(StatusVenda.PENDENTE);
+        venda.setStatus(StatusVenda.CONCLUIDA);
 
-        Venda aprovada = service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.APROVADA, AUTH));
+        Venda cancelada = service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CANCELADA, AUTH));
 
-        assertThat(aprovada.getStatusAlteradoPor()).isSameAs(autenticado);
-        assertThat(aprovada.getStatusAlteradoEm()).isNotNull();
-        assertThat(aprovada.getUsuario()).isSameAs(provisorio);
+        assertThat(cancelada.getStatus()).isEqualTo(StatusVenda.CANCELADA);
+        assertThat(cancelada.getStatusAlteradoPor()).isSameAs(autenticado);
+        assertThat(cancelada.getStatusAlteradoEm()).isNotNull();
+        assertThat(cancelada.getUsuario()).isSameAs(provisorio);
+        verify(estoqueService).liberar(aparelho);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = StatusVenda.class, names = {"PENDENTE", "APROVADA"})
+    @DisplayName("Pedir PENDENTE ou APROVADA é 422: a venda é lançada direto")
+    void statusNaoUsado(StatusVenda pedido) {
+        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(pedido, AUTH)))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("Status não usado: a venda é lançada direto ao finalizar.");
+
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.ABERTA);
+        assertThat(venda.getStatusAlteradoPor()).isNull();
+    }
+
+    @Test
+    @DisplayName("Pedir CONCLUIDA pelo status é 422: lançar só pelo finalizar, sem baixar o estoque")
+    void concluirSoPeloFinalizar() {
+        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CONCLUIDA, AUTH)))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("A venda é lançada pelo finalizar, com a senha do vendedor.");
+
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.ABERTA);
+        verify(estoqueService, never()).confirmarVenda(any());
     }
 
     @Test
     @DisplayName("Mudar o status com senha errada não altera nada")
     void statusSenhaErrada() {
-        venda.setStatus(StatusVenda.PENDENTE);
+        venda.setStatus(StatusVenda.CONCLUIDA);
         when(usuarioService.autenticar(AUTH)).thenThrow(new AutenticacaoInvalidaException());
 
         assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CANCELADA, AUTH)))
                 .isInstanceOf(AutenticacaoInvalidaException.class);
 
-        assertThat(venda.getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
         assertThat(venda.getStatusAlteradoPor()).isNull();
         assertThat(venda.getStatusAlteradoEm()).isNull();
+        verify(estoqueService, never()).liberar(any());
     }
 
     private void assertNaoFinalizada() {

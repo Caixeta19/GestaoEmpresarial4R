@@ -472,7 +472,7 @@ class VendaPagamentoCenariosIntegracaoTest {
         long antiga = vendaComAparelho(null);
         jdbc.update("INSERT INTO pagamentos_venda (venda_id, forma, valor, codigo_voucher) VALUES (?, 'VOUCHER', 100, 'V-ANTIGO')",
                 antiga);
-        jdbc.update("UPDATE vendas SET status = 'PENDENTE' WHERE id = ?", antiga);
+        jdbc.update("UPDATE vendas SET status = 'CONCLUIDA' WHERE id = ?", antiga);
         aparelho = estoque.save(EstoqueGeral.builder().serial("SINT-B-" + SEQUENCIA.get()).modeloComercial(MODELO).build());
         long id = vendaComAparelho(null);
 

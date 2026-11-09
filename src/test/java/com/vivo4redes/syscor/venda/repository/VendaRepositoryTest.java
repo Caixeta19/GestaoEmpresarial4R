@@ -57,7 +57,7 @@ class VendaRepositoryTest {
         long abertaAntiga = venda("ABERTA", limite.minus(Duration.ofDays(2)));
         long abertaParada = venda("ABERTA", limite.minus(Duration.ofMinutes(1)));
         venda("ABERTA", limite.plusSeconds(1));                       // ainda ativa
-        venda("PENDENTE", limite.minus(Duration.ofDays(2)));          // já finalizada pelo vendedor
+        venda("CONCLUIDA", limite.minus(Duration.ofDays(2)));         // já lançada pelo vendedor
         venda("CANCELADA", limite.minus(Duration.ofDays(2)));
 
         assertThat(repository.buscarIdsCarrinhosAbandonados(limite)).containsExactly(abertaAntiga, abertaParada);

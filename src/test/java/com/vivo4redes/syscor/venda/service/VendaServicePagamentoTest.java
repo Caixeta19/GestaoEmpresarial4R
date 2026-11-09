@@ -173,7 +173,7 @@ class VendaServicePagamentoTest {
         assertThat(pagamentos.get(0).getTipo()).isEqualTo(TipoPagamento.ENTRADA);
         assertThat(venda.getValorTotal()).isEqualByComparingTo("12334.29");
         assertThat(venda.getValorParcela()).isEqualByComparingTo("492.11");
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
     }
 
     @Test
@@ -281,7 +281,7 @@ class VendaServicePagamentoTest {
 
         assertThat(venda.getValorTotal()).isEqualByComparingTo("11199.00");
         assertThat(pagamentos).allMatch(p -> p.getTipo() == TipoPagamento.PAGAMENTO);
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
     }
 
     @Test
@@ -289,7 +289,7 @@ class VendaServicePagamentoTest {
     void vivoPayECreditoDe13x() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX);
         pagar(FormaPagamento.VIVO_PAY, "10079.10");
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
 
         venda.setStatus(StatusVenda.ABERTA);
         pagamentos.clear();
@@ -430,7 +430,7 @@ class VendaServicePagamentoTest {
         assertThat(venda.getStatus()).isEqualTo(StatusVenda.ABERTA);
 
         pagar(FormaPagamento.DINHEIRO, "800.00");
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
     }
 
     @Test
@@ -443,7 +443,7 @@ class VendaServicePagamentoTest {
         assertThatThrownBy(() -> service.finalizar(1L, finalizar())).isInstanceOf(TotalVendaAlteradoException.class);
         assertThat(financiado().getValor()).isEqualByComparingTo("13480.00");
 
-        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
     }
 
     @Test
