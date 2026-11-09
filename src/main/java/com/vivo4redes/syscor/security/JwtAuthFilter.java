@@ -46,9 +46,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 jwt.usuarioDoToken(cabecalho.substring(7)).ifPresent(email -> {
                     try {
                         UserDetails usuario = usuarios.loadUserByUsername(email);
-                        var auth = new UsernamePasswordAuthenticationToken(usuario, null, usuario.getAuthorities());
-                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
-                        SecurityContextHolder.getContext().setAuthentication(auth);
+                        // Inativado depois da emissão do token: segue sem autenticar, como o usuário removido
+                        if (usuario.isEnabled()) {
+                            var auth = new UsernamePasswordAuthenticationToken(usuario, null, usuario.getAuthorities());
+                            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
+                            SecurityContextHolder.getContext().setAuthentication(auth);
+                        }
                     } catch (UsernameNotFoundException ignorado) {
                         // usuário removido depois da emissão do token: segue sem autenticar
                     }
