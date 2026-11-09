@@ -98,7 +98,7 @@ O serial fica `RESERVADO` ao adicionar o item e vira `VENDIDO` quando a venda é
 3. O `JwtService` gera um token assinado com `SYSCOR_JWT_SECRET`, válido por 60 min, e a resposta informa `primeiroAcesso`.
 4. Se `primeiroAcesso = true`, o front obriga `POST /api/auth/alterar-senha` antes de seguir.
 5. Em cada requisição, o `JwtAuthFilter` valida o `Authorization: Bearer` e popula o `SecurityContext`; sem token válido, 401.
-6. Operações sensíveis de venda (finalizar, mudar status) pedem de novo login e senha do vendedor no corpo da requisição.
+6. Abrir e editar a venda só usam o JWT (o usuário logado é o vendedor provisório). Finalizar e mudar status pedem login e senha do vendedor no corpo da requisição.
 
 ## 4. Regras de negócio
 
@@ -121,7 +121,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.06 | E-mail de vendedor único (`VendedorDuplicadoException`) | `UsuarioService` |
 | RN.07 | Login por `login`/`email`/`usuario` + senha devolve JWT de 60 min e a flag `primeiroAcesso` | `AuthController`, `JwtService` |
 | RN.08 | No primeiro acesso o usuário troca a senha (mínimo 8 caracteres); a flag vira `false` | `AuthController` |
-| RN.09 | Finalizar ou mudar status de venda exige reautenticação do vendedor (login + senha) | `VendaService.exigirVendedorAutenticado` |
+| RN.09 | Finalizar ou mudar status de venda exige reautenticação do vendedor (login + senha); abrir e editar não pedem senha, e uma autenticação enviada é ignorada. Usuário inativo pela flag `ativo`, pelo cargo ou pela situação `INATIVO` não se autentica | `VendaService.exigirVendedorAutenticado`, `Usuario.podeAcessar` |
 | RN.10 | **(a fazer)** Autorização por cargo: o papel `ROLE_<CARGO>` já é montado no login, falta aplicá-lo nas rotas | — |
 
 **Venda**
@@ -136,7 +136,9 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.16 | Acessório sem serial baixa a linha inteira do estoque; a quantidade tem que bater com a da linha | `VendaService.adicionarItem` |
 | RN.17 | O serial lido precisa ser da mesma linha de estoque escolhida (impede vender IMEI com preço de outro) | `VendaService.adicionarItem` |
 | RN.18 | Pagamento não pode exceder o saldo restante da venda | `VendaService.adicionarPagamento` |
-| RN.19 | Finalizar exige ≥ 1 item e soma dos pagamentos igual ao total; a venda vai para `PENDENTE` | `VendaService.finalizar` |
+| RN.19 | Finalizar valida, nesta ordem: autenticação → ≥ 1 item → Renova com número → reprecificação/total → soma dos pagamentos igual ao total. A venda vai para `PENDENTE`, e quem se autenticou passa a ser o vendedor (`usuario_id`), com `finalizado_por_id` e `finalizado_em`. Senha errada é 401 sem alterar nada; no 422 de total alterado, só o total muda | `VendaService.finalizar` |
+| RN.51 | Abrir o carrinho usa o usuário do JWT como vendedor provisório. Os dados iniciais só mudam com a venda `ABERTA` (`CarrinhoNaoEditavelException`) | `VendaService.abrirCarrinho`, `VendaService.atualizarDadosIniciais` |
+| RN.52 | `PATCH /vendas/{id}/status` grava `status_alterado_por_id` e `status_alterado_em`, sem trocar o vendedor. Procedência e expiração do carrinho não têm autenticação e não preenchem esses campos | `VendaService.avancarStatus` |
 | RN.20 | Transições válidas ficam no enum `StatusVenda` (diagrama na seção 3); fora delas, `TransicaoStatusInvalidaException` | `StatusVenda` |
 | RN.21 | Cancelar a venda (de qualquer status não terminal, inclusive `CONCLUIDA`) devolve a `DISPONIVEL` todas as unidades reservadas ou vendidas; remover o item do carrinho também | `VendaService.liberarEstoqueDaVenda` |
 | RN.22 | Avaliação de procedência `Improcedente` cancela a venda e libera o estoque | `VendaService.avaliarProcedencia` |
@@ -257,8 +259,8 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 | HTTP | Quando acontece | Exceção |
 | --- | --- | --- |
 | 400 | Corpo inválido, JSON malformado, tipo errado no parâmetro, documento inválido | `MethodArgumentNotValidException`, `DocumentoInvalidoException` |
-| 401 | Sem token, token expirado, ou senha do vendedor errada na reautenticação | filtro JWT, `AutenticacaoInvalidaException` |
-| 403 | **(a fazer)** Usuário sem perfil para a rota | — |
+| 401 | Senha do vendedor errada na reautenticação, ou usuário logado inativo | `AutenticacaoInvalidaException` |
+| 403 | Sem token, ou token inválido ou expirado (ver bug 15). **(a fazer)** Usuário sem perfil para a rota | Spring Security |
 | 404 | Recurso inexistente | `RecursoNaoEncontradoException` |
 | 422 | Regra de negócio violada (carrinho não editável, venda sem item, transição inválida, duplicidade, serial indisponível) | `BusinessException` e subclasses |
 | 500 | Erro não tratado (mensagem genérica) | `Exception` |
@@ -272,7 +274,7 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `clientes` | venda | PF/PJ, documento único, contato, endereço, RG/IE, consentimento LGPD | V1, V12, V15 |
 | `filiais` | venda | Lojas da rede | V2, V17 |
 | `usuarios` | venda | Vendedores: login, e-mail, `senha_hash`, cargo, filial, prestadora, `primeiro_acesso`, `ativo` | V2, V17, V18 |
-| `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário, total, status, procedência, score, número do voucher do Renova | V1–V3, V13, V28 |
+| `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário (vendedor), total, status, procedência, score, número do voucher do Renova, quem finalizou e quem alterou o status, com as datas | V1–V3, V13, V28, V29 |
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id` | V1, V4, V8, V13, V14, V19, V20 |
 | `pagamentos_venda` | venda | Pagamentos por forma e tipo (`PAGAMENTO`, `ENTRADA`, `FINANCIADO`); `codigo_voucher` só no histórico | V8, V25, V27, V28 |
 | `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22, V23 |
@@ -346,9 +348,9 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 
 | Método | Rota | Descrição |
 | --- | --- | --- |
-| POST | `/vendas` | Abrir carrinho (`ABERTA`) |
+| POST | `/vendas` | Abrir carrinho (`ABERTA`), sem senha; vendedor provisório = usuário do JWT |
 | GET | `/vendas` | Listar com filtros (`filialId`, `vendedorId`, `numeroVenda`, `dataInicio`, `dataFim`, `cliente`, `numeroAcesso`, `serialProdutoVivo`, `serialSimcard`, `modeloAcessorio`) |
-| GET / PUT | `/vendas/{id}` | Buscar / atualizar dados iniciais (filial, vendedor, score) |
+| GET / PUT | `/vendas/{id}` | Buscar / atualizar dados iniciais (cliente, filial, score, nota), sem senha; `PUT` só com a venda `ABERTA` (senão 422). A resposta da venda traz `vendedorNome`, `finalizadoPorNome` e `finalizadoEm` |
 | POST | `/vendas/{id}/itens` | Adicionar item (reserva o serial; a baixa é na conclusão) |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item (estorna o serial) |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento (`VOUCHER` → 422) |
@@ -358,8 +360,8 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
 | POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |
 | GET | `/vendas/{id}/resumo` | Totais e saldo do carrinho |
-| PATCH | `/vendas/{id}/finalizar` | Finalizar (exige reautenticação) |
-| PATCH | `/vendas/{id}/status` | Avançar status (exige reautenticação) |
+| PATCH | `/vendas/{id}/finalizar` | Finalizar com `{ autenticacaoVendedor: { email, senha } }`; `email` aceita e-mail ou login. Quem se autentica vira o vendedor. Sem o campo 400, senha errada 401 |
+| PATCH | `/vendas/{id}/status` | Avançar status com `{ novoStatus, autenticacaoUsuario: { email, senha } }` e gravar quem alterou. Sem o campo 400, senha errada 401 |
 | PATCH | `/vendas/{id}/avaliacao-procedencia` | Avaliação do BKO |
 
 **Estoque**
@@ -450,6 +452,8 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 | 12 | `tb_inventario_item.item_estoque_id` manteve o nome antigo, enquanto `itens_venda` foi renomeado para `estoque_geral_id` (V20) | V19, V20, `InventarioItem` | Padronizar o nome numa V21 (opcional) |
 | 13 | README desatualizado (estoque, segurança, financeiro, migrations) | `README.md` | Reescrever a partir deste documento |
 | 14 | Primeiro acesso aceita a senha fixa 00000000 para qualquer usuário com primeiroAcesso = true | UsuarioDetailsService.loadUserByUsername | Gerar senha temporária aleatória por usuário (gravada em hash, com validade) e obrigar a troca |
+| 15 | Sem token, ou com token inválido ou expirado, a API responde 403, e não 401 | `SecurityConfig` não define `authenticationEntryPoint`; `VendaAutenticacaoIntegracaoTest` | Definir `HttpStatusEntryPoint(UNAUTHORIZED)`, alinhado com o front, que hoje recebe 401 só para senha errada ou usuário inativo |
+| 16 | Usuário inativado continua acessando as rotas enquanto o token vale | `JwtAuthFilter` não confere `isEnabled()`; só abrir carrinho, finalizar e mudar status recusam o inativo | Conferir `isEnabled()` no filtro |
 
 ## 10. Plano de construção
 

@@ -57,7 +57,7 @@ estado não-terminal. Só é possível adicionar ou remover item enquanto a vend
 - Carrinho de venda multi-categoria (Produto Vivo, Serviço Vivo, Acessório, Recarga) com
   cálculo automático de valor total a partir dos itens
 - Cadastro de cliente (PF/PJ) com validação de CPF/CNPJ e e-mail/telefone
-- Cadastro de filial e de usuário/vendedor (com reautenticação por senha na venda)
+- Cadastro de filial e de usuário/vendedor (com senha do vendedor para finalizar a venda e mudar o status)
 - Registro de pagamentos por venda, com múltiplas formas (cartão, PIX, Vivo Pay, dinheiro, boleto)
 - Transição de status da venda com validação de máquina de estados
 - Avaliação de procedência da venda (BKO) pós-conclusão
@@ -111,6 +111,15 @@ vale confirmar se a dependência ainda é necessária ou se pode sair.
   `VendaSemItemException`.
 - Finalizar reprecifica a venda pela tabela vigente. Se o total mudou, o novo total fica gravado e a resposta é
   422 com os dois valores: o vendedor confere os pagamentos e finaliza de novo.
+- A venda é montada sem senha. Abrir (`POST /vendas`) e editar (`PUT /vendas/{id}`) usam o usuário do JWT como
+  vendedor provisório; uma autenticação enviada no corpo é ignorada. `PUT` só com a venda `ABERTA`; fora disso, 422.
+- `PATCH /vendas/{id}/finalizar` exige `autenticacaoVendedor`: quem se autentica passa a ser o vendedor da venda, e
+  ficam gravados `finalizado_por_id` e `finalizado_em`. A ordem é autenticação → itens → Renova com número →
+  reprecificação/total → pagamentos = total. Senha errada é 401 sem alterar nada; no 422 de total alterado, o
+  vendedor continua o provisório.
+- `PATCH /vendas/{id}/status` exige `autenticacaoUsuario` e grava `status_alterado_por_id` e `status_alterado_em`,
+  sem trocar o vendedor. Procedência e expiração do carrinho não têm autenticação e não preenchem esses campos.
+- Usuário inativo pela flag `ativo`, pelo cargo ou pela situação `INATIVO` não se autentica na venda.
 - `SERVICO_VIVO` fica sempre com valor 0: o `valorUnitario` enviado é ignorado. O chip é cobrado só por `valorChip`.
 - Transições de status permitidas, validadas por `StatusVenda.podeTransicionarPara()`:
 
@@ -355,10 +364,14 @@ Front (syscor-frontend)         API Spring Boot                       Banco
       |   (repetido por item)         |-- INSERT itens_venda ----------->|
       |                               |-- recalcula valorTotal           |
       |                               |                                  |
-      |-- PATCH .../finalizar ------->|-- valida ≥1 item                 |
-      |                               |-- valida transição de status     |
-      |                               |-- (CONCLUIDA: RESERVADO->VENDIDO)|
-      |                               |-- UPDATE status = CONCLUIDA ---->|
+      |-- PATCH .../finalizar ------->|-- autentica o vendedor           |
+      |   (com vendedor e senha)      |-- valida itens, Renova, total    |
+      |                               |-- e pagamentos                   |
+      |                               |-- UPDATE status = PENDENTE e     |
+      |                               |   vendedor autenticado --------->|
+      |                               |                                  |
+      |-- PATCH .../status ---------->|-- autentica quem alterou         |
+      |   (aprovar, concluir)         |-- (CONCLUIDA: RESERVADO->VENDIDO)|
       |                               |                                  |
       |-- PUT /api/documental/        |                                  |
       |   protocolos/{vendaId} ------>|-- INSERT tb_protocolo_documental->|
@@ -469,6 +482,10 @@ CREATE TABLE vendas (
     cliente_id                            BIGINT NOT NULL REFERENCES clientes (id),
     filial_id                             BIGINT NOT NULL REFERENCES filiais (id),     -- V2
     usuario_id                            BIGINT NOT NULL REFERENCES usuarios (id),    -- V2
+    finalizado_por_id                     BIGINT REFERENCES usuarios (id),             -- V29
+    finalizado_em                         TIMESTAMP,                                   -- V29
+    status_alterado_por_id                BIGINT REFERENCES usuarios (id),             -- V29
+    status_alterado_em                    TIMESTAMP,                                   -- V29
     valor_total                           NUMERIC(12,2) NOT NULL DEFAULT 0,
     status                                VARCHAR(20) NOT NULL DEFAULT 'ABERTA'
         CHECK (status IN ('ABERTA','PENDENTE','APROVADA','CONCLUIDA','CANCELADA')),
@@ -552,10 +569,10 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | Método | Rota | Descrição |
 |---|---|---|
 | GET | `/dashboard/executivo` | Painel executivo (faturamento, meta, ticket médio, SKUs críticos, evolução 6M, atividades recentes) |
-| POST | `/vendas` | Abrir carrinho de venda (`ABERTA`) |
+| POST | `/vendas` | Abrir carrinho de venda (`ABERTA`), sem senha; o vendedor provisório é o usuário do JWT |
 | GET | `/vendas` | Listar todas as vendas |
 | GET | `/vendas/{id}` | Buscar venda por id |
-| PUT | `/vendas/{id}` | Atualizar dados iniciais (filial, vendedor, score, etc.) |
+| PUT | `/vendas/{id}` | Atualizar dados iniciais (cliente, filial, score, nota), sem senha; só com a venda `ABERTA` (senão 422) |
 | POST | `/vendas/{id}/itens` | Adicionar item ao carrinho |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item do carrinho |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento (`VOUCHER` → 422) |
@@ -565,8 +582,8 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
 | POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |
 | GET | `/vendas/{id}/resumo` | Resumo do carrinho (totais, saldo) |
-| PATCH | `/vendas/{id}/finalizar` | Finalizar venda |
-| PATCH | `/vendas/{id}/status` | Avançar status da venda |
+| PATCH | `/vendas/{id}/finalizar` | Finalizar venda com `autenticacaoVendedor`; quem se autentica vira o vendedor (sem o campo 400, senha errada 401) |
+| PATCH | `/vendas/{id}/status` | Avançar status com `autenticacaoUsuario` e gravar quem alterou (sem o campo 400, senha errada 401) |
 | PATCH | `/vendas/{id}/avaliacao-procedencia` | Registrar avaliação de procedência (BKO) |
 | POST | `/clientes` | Cadastrar cliente |
 | GET | `/clientes/{id}` | Buscar cliente |
@@ -607,6 +624,8 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | 200 | Consulta bem-sucedida |
 | 201 | Recurso criado com sucesso |
 | 400 | Corpo inválido (`@Valid`/`ConstraintViolationException`) |
+| 401 | Senha do vendedor errada ou usuário logado inativo (`AutenticacaoInvalidaException`) |
+| 403 | Sem token, ou token inválido ou expirado |
 | 404 | Recurso não encontrado (`RecursoNaoEncontradoException`) |
 | 422 | Violação de regra de negócio (`BusinessException` e subclasses) |
 | 500 | Erro não tratado — inclui hoje as 3 exceções que não estendem `BusinessException` (ver [Backlog](#13-backlog--pendências-conhecidas)) |
@@ -632,7 +651,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | Autenticação JWT | Dependências (`jjwt-api`, `-impl`, `-jackson`) presentes no `pom.xml`, sem `JwtFilter`/`JwtUtil` implementados |
 | Autorização por rota | `SegurancaVendasConfig` define `.anyRequest().permitAll()` — **toda rota está aberta**, sem exceção |
 | Senha de usuário | `Usuario.senhaHash` é sempre BCrypt (`PasswordEncoder` já configurado como bean), nunca texto puro |
-| Senha de venda | Reautenticação do vendedor ao salvar/alterar venda é regra de produto, mas ainda não há endpoint de login que valide isso contra o hash |
+| Senha de venda | Abrir e editar a venda não pedem senha; finalizar e mudar o status exigem vendedor e senha, conferidos contra o hash |
 | SQL Injection | Spring Data JPA com queries parametrizadas — nenhuma concatenação de string identificada |
 | Exposição de campo sensível | `VendaResponseDTO`/`UsuarioResponseDTO` não devolvem `senhaHash` — mapeamento manual evita vazamento (ADR-02) |
 | CORS | Liberado (`@CrossOrigin(origins = "*")`) no `DashboardController` — só nesse controller, não é global |
