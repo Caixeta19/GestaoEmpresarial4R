@@ -34,8 +34,8 @@ diferente, e nada conversa entre si.
 
 A solução: um ERP modular onde a venda é o centro. Um vendedor abre um carrinho
 (`ABERTA`), adiciona itens de categorias diferentes (produto físico, serviço Vivo,
-acessório, recarga), registra pagamentos e finaliza. Cada item reserva o serial no
-estoque (`RESERVADO`) e a conclusão da venda o baixa (`VENDIDO`); a partir daí a
+acessório, recarga), registra pagamentos e lança a venda com a senha do vendedor. Cada item
+reserva o serial no estoque (`RESERVADO`) e o lançamento o baixa (`VENDIDO`); a partir daí a
 venda alimenta o protocolo documental e os KPIs do painel executivo.
 
 O modelo mental inteiro cabe em duas frases:
@@ -44,9 +44,9 @@ O modelo mental inteiro cabe em duas frases:
 > **Cada módulo é dono do seu próprio ciclo de vida e nunca decide por outro.**
 
 Uma venda passa por uma máquina de estados própria: `ABERTA` (carrinho em montagem) →
-`PENDENTE` → `APROVADA` → `CONCLUIDA`, com `CANCELADA` acessível a partir de qualquer
-estado não-terminal. Só é possível adicionar ou remover item enquanto a venda está
-`ABERTA`.
+`CONCLUIDA` (lançada) num passo só, pelo finalizar com a senha do vendedor, e `CANCELADA` a partir
+de `ABERTA` ou `CONCLUIDA`. Não há etapa de aprovação. Só é possível adicionar ou remover item
+enquanto a venda está `ABERTA`.
 
 ---
 
@@ -113,23 +113,28 @@ vale confirmar se a dependência ainda é necessária ou se pode sair.
   422 com os dois valores: o vendedor confere os pagamentos e finaliza de novo.
 - A venda é montada sem senha. Abrir (`POST /vendas`) e editar (`PUT /vendas/{id}`) usam o usuário do JWT como
   vendedor provisório; uma autenticação enviada no corpo é ignorada. `PUT` só com a venda `ABERTA`; fora disso, 422.
-- `PATCH /vendas/{id}/finalizar` exige `autenticacaoVendedor`: quem se autentica passa a ser o vendedor da venda, e
+- `PATCH /vendas/{id}/finalizar` exige `autenticacaoVendedor` e **lança a venda**: vai direto para `CONCLUIDA`, os
+  seriais passam de `RESERVADO` a `VENDIDO` na mesma transação, quem se autentica passa a ser o vendedor da venda, e
   ficam gravados `finalizado_por_id` e `finalizado_em`. A ordem é autenticação → itens → Renova com número →
-  reprecificação/total → pagamentos = total. Senha errada é 401 sem alterar nada; no 422 de total alterado, o
-  vendedor continua o provisório.
+  reprecificação/total → pagamentos = total. Senha errada é 401 sem alterar nada (venda `ABERTA`, seriais
+  `RESERVADO`); no 422 de total alterado, o vendedor continua o provisório.
 - `PATCH /vendas/{id}/status` exige `autenticacaoUsuario` e grava `status_alterado_por_id` e `status_alterado_em`,
-  sem trocar o vendedor. Procedência e expiração do carrinho não têm autenticação e não preenchem esses campos.
+  sem trocar o vendedor. Serve para cancelar: `CANCELADA` devolve os seriais a `DISPONIVEL`. Pedir `PENDENTE` ou
+  `APROVADA` é 422 ("Status não usado: a venda é lançada direto ao finalizar."), e pedir `CONCLUIDA` também é 422:
+  lançar é só pelo finalizar. Procedência e expiração do carrinho não têm autenticação e não preenchem esses campos.
 - Usuário inativo pela flag `ativo`, pelo cargo ou pela situação `INATIVO` não se autentica na venda.
 - `SERVICO_VIVO` fica sempre com valor 0: o `valorUnitario` enviado é ignorado. O chip é cobrado só por `valorChip`.
 - Transições de status permitidas, validadas por `StatusVenda.podeTransicionarPara()`:
 
 ```
-ABERTA    → PENDENTE, CANCELADA
-PENDENTE  → APROVADA, CANCELADA
-APROVADA  → CONCLUIDA, CANCELADA
-CONCLUIDA → CANCELADA   (somente via avaliação de procedência improcedente)
+ABERTA    → CONCLUIDA   (só pelo finalizar, com a senha do vendedor)
+ABERTA    → CANCELADA   (carrinho expirado ou cancelado)
+CONCLUIDA → CANCELADA   (cancelamento com senha ou procedência improcedente; devolve o estoque)
 CANCELADA → (terminal, sem saída)
 ```
+
+  `PENDENTE` e `APROVADA` ficam no enum e no CHECK só por compatibilidade: nenhuma venda entra nesses status, e a
+  V30 passou a `CONCLUIDA` as que estavam neles, baixando os seriais reservados.
 
   Transição fora dessa tabela lança `TransicaoStatusInvalidaException`.
 - `numeroVenda` é um número público de 7 dígitos gerado por sequence de banco na
@@ -367,11 +372,12 @@ Front (syscor-frontend)         API Spring Boot                       Banco
       |-- PATCH .../finalizar ------->|-- autentica o vendedor           |
       |   (com vendedor e senha)      |-- valida itens, Renova, total    |
       |                               |-- e pagamentos                   |
-      |                               |-- UPDATE status = PENDENTE e     |
-      |                               |   vendedor autenticado --------->|
+      |                               |-- UPDATE status = CONCLUIDA,     |
+      |                               |   RESERVADO->VENDIDO e vendedor  |
+      |                               |   autenticado ------------------>|
       |                               |                                  |
       |-- PATCH .../status ---------->|-- autentica quem alterou         |
-      |   (aprovar, concluir)         |-- (CONCLUIDA: RESERVADO->VENDIDO)|
+      |   (cancelar)                  |-- (CANCELADA: volta a DISPONIVEL)|
       |                               |                                  |
       |-- PUT /api/documental/        |                                  |
       |   protocolos/{vendaId} ------>|-- INSERT tb_protocolo_documental->|
@@ -582,8 +588,8 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
 | POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |
 | GET | `/vendas/{id}/resumo` | Resumo do carrinho (totais, saldo) |
-| PATCH | `/vendas/{id}/finalizar` | Finalizar venda com `autenticacaoVendedor`; quem se autentica vira o vendedor (sem o campo 400, senha errada 401) |
-| PATCH | `/vendas/{id}/status` | Avançar status com `autenticacaoUsuario` e gravar quem alterou (sem o campo 400, senha errada 401) |
+| PATCH | `/vendas/{id}/finalizar` | Lançar a venda (`CONCLUIDA`, seriais `VENDIDO`) com `autenticacaoVendedor`; quem se autentica vira o vendedor (sem o campo 400, senha errada 401) |
+| PATCH | `/vendas/{id}/status` | Cancelar com `autenticacaoUsuario` e gravar quem alterou (sem o campo 400, senha errada 401; `PENDENTE`/`APROVADA`/`CONCLUIDA` → 422) |
 | PATCH | `/vendas/{id}/avaliacao-procedencia` | Registrar avaliação de procedência (BKO) |
 | POST | `/clientes` | Cadastrar cliente |
 | GET | `/clientes/{id}` | Buscar cliente |

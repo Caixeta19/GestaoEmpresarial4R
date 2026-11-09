@@ -89,7 +89,9 @@ O front chama a API por REST e recebe a conciliação bancária em tempo real po
 
 &#91;embedded content: máquina de estados da venda · 5 status\]
 
-O serial fica `RESERVADO` ao adicionar o item e vira `VENDIDO` quando a venda é `CONCLUIDA`; remover o item ou cancelar a venda devolve a unidade a `DISPONIVEL` (bug 4 da seção 9, corrigido). Carrinho parado por mais de 24h é cancelado automaticamente (RN.49).
+`ABERTA → CONCLUIDA` num passo só: o finalizar, com a senha do vendedor, lança a venda. `CANCELADA` sai de `ABERTA` (carrinho expirado ou cancelado) ou de `CONCLUIDA` (cancelamento com senha ou procedência improcedente). `PENDENTE` e `APROVADA` ficam no enum e no CHECK só por compatibilidade; nenhuma venda entra nesses status (V30).
+
+O serial fica `RESERVADO` ao adicionar o item e vira `VENDIDO` quando a venda é lançada (`CONCLUIDA`); remover o item ou cancelar a venda devolve a unidade a `DISPONIVEL` (bug 4 da seção 9, corrigido). Carrinho parado por mais de 24h é cancelado automaticamente (RN.49).
 
 **Fluxo de autenticação (JWT)**
 
@@ -136,11 +138,12 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.16 | Acessório sem serial baixa a linha inteira do estoque; a quantidade tem que bater com a da linha | `VendaService.adicionarItem` |
 | RN.17 | O serial lido precisa ser da mesma linha de estoque escolhida (impede vender IMEI com preço de outro) | `VendaService.adicionarItem` |
 | RN.18 | Pagamento não pode exceder o saldo restante da venda | `VendaService.adicionarPagamento` |
-| RN.19 | Finalizar valida, nesta ordem: autenticação → ≥ 1 item → Renova com número → reprecificação/total → soma dos pagamentos igual ao total. A venda vai para `PENDENTE`, e quem se autenticou passa a ser o vendedor (`usuario_id`), com `finalizado_por_id` e `finalizado_em`. Senha errada é 401 sem alterar nada; no 422 de total alterado, só o total muda | `VendaService.finalizar` |
+| RN.19 | Finalizar valida, nesta ordem: autenticação → ≥ 1 item → Renova com número → reprecificação/total → soma dos pagamentos igual ao total. A venda é lançada direto: vai para `CONCLUIDA` e os seriais passam de `RESERVADO` a `VENDIDO` na mesma transação; quem se autenticou passa a ser o vendedor (`usuario_id`), com `finalizado_por_id` e `finalizado_em`. Senha errada é 401 sem alterar nada; no 422 de total alterado, só o total muda | `VendaService.finalizar` |
 | RN.51 | Abrir o carrinho usa o usuário do JWT como vendedor provisório. Os dados iniciais só mudam com a venda `ABERTA` (`CarrinhoNaoEditavelException`) | `VendaService.abrirCarrinho`, `VendaService.atualizarDadosIniciais` |
 | RN.52 | `PATCH /vendas/{id}/status` grava `status_alterado_por_id` e `status_alterado_em`, sem trocar o vendedor. Procedência e expiração do carrinho não têm autenticação e não preenchem esses campos | `VendaService.avancarStatus` |
-| RN.20 | Transições válidas ficam no enum `StatusVenda` (diagrama na seção 3); fora delas, `TransicaoStatusInvalidaException` | `StatusVenda` |
-| RN.21 | Cancelar a venda (de qualquer status não terminal, inclusive `CONCLUIDA`) devolve a `DISPONIVEL` todas as unidades reservadas ou vendidas; remover o item do carrinho também | `VendaService.liberarEstoqueDaVenda` |
+| RN.53 | Não há aprovação: `PATCH /vendas/{id}/status` com `PENDENTE` ou `APROVADA` é 422 "Status não usado: a venda é lançada direto ao finalizar."; com `CONCLUIDA` também é 422, porque lançar é só pelo finalizar. O status serve para cancelar | `VendaService.avancarStatus` |
+| RN.20 | Transições válidas ficam no enum `StatusVenda`: `ABERTA → CONCLUIDA, CANCELADA`; `CONCLUIDA → CANCELADA`; `CANCELADA` é terminal. Fora delas, `TransicaoStatusInvalidaException` | `StatusVenda` |
+| RN.21 | Cancelar a venda (`ABERTA` ou `CONCLUIDA`) devolve a `DISPONIVEL` todas as unidades reservadas ou vendidas; remover o item do carrinho também | `VendaService.liberarEstoqueDaVenda` |
 | RN.22 | Avaliação de procedência `Improcedente` cancela a venda e libera o estoque | `VendaService.avaliarProcedencia` |
 | RN.49 | Carrinho (`ABERTA`) sem atividade há mais de `syscor.carrinho.expiracao` (padrão 24h) é cancelado automaticamente e libera as unidades reservadas. Conta como atividade qualquer mudança na venda (itens, dados iniciais, pagamentos). Edição do carrinho e expiração travam a venda (`FOR UPDATE`) para não concorrerem | `ExpiracaoCarrinhoScheduler`, `VendaService.expirarCarrinho` |
 
@@ -184,7 +187,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.40 | Matching por identificador de pagamento; código de barras como alternativa | `MatchingService` |
 | RN.41 | Valor igual baixa o título (`CONCILIADA`); diferente marca `DIVERGENTE` sem baixar; título já baixado = `DUPLICADA`; sem título = `NAO_ENCONTRADA` | `MatchingService` |
 | RN.42 | Webhook é processado após o commit (evento assíncrono) e reprocessado a cada 60 s se ficou pendente | `WebhookListener`, `ConciliacaoProcessor` |
-| RN.43 | Comissão do consolidado Vivo é `LIBERADO` só quando a venda existe pelo número de acesso e tem protocolo GED preenchido com serviço `CONFIRMADO`; senão `PENDENTE_SISTEMA` | `RemuneracaoVariavelService` |
+| RN.43 | Comissão do consolidado Vivo é `LIBERADO` só quando a venda **lançada** (`CONCLUIDA`) existe pelo número de acesso e tem protocolo GED preenchido com serviço `CONFIRMADO`; senão `PENDENTE_SISTEMA`. Carrinho aberto e venda cancelada não entram no cruzamento | `RemuneracaoVariavelService` |
 
 **Mailing e dashboard**
 
@@ -274,7 +277,7 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `clientes` | venda | PF/PJ, documento único, contato, endereço, RG/IE, consentimento LGPD | V1, V12, V15 |
 | `filiais` | venda | Lojas da rede | V2, V17 |
 | `usuarios` | venda | Vendedores: login, e-mail, `senha_hash`, cargo, filial, prestadora, `primeiro_acesso`, `ativo` | V2, V17, V18 |
-| `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário (vendedor), total, status, procedência, score, número do voucher do Renova, quem finalizou e quem alterou o status, com as datas | V1–V3, V13, V28, V29 |
+| `vendas` | venda | Cabeçalho: `numero_venda`, cliente, filial, usuário (vendedor), total, status, procedência, score, número do voucher do Renova, quem finalizou e quem alterou o status, com as datas | V1–V3, V13, V28, V29, V30 |
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id` | V1, V4, V8, V13, V14, V19, V20 |
 | `pagamentos_venda` | venda | Pagamentos por forma e tipo (`PAGAMENTO`, `ENTRADA`, `FINANCIADO`); `codigo_voucher` só no histórico | V8, V25, V27, V28 |
 | `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22, V23 |
@@ -302,7 +305,7 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 
 | Enum | Valores |
 | --- | --- |
-| `StatusVenda` | ABERTA, PENDENTE, APROVADA, CONCLUIDA, CANCELADA |
+| `StatusVenda` | ABERTA, CONCLUIDA, CANCELADA (PENDENTE e APROVADA só por compatibilidade, sem uso) |
 | `CategoriaItemVenda` | PRODUTO\_VIVO, SERVICO\_VIVO, ACESSORIO, RECARGA |
 | `FormaPagamento` | CARTAO\_CREDITO, CARTAO\_DEBITO, PIX, DINHEIRO, BOLETO, VOUCHER (só histórico, V28), VIVO\_PAY (V27) |
 | `CondicaoPagamento` | PIX, A\_VISTA, PARCELADO\_13 a PARCELADO\_21 (V26) |
@@ -360,9 +363,17 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
 | POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |
 | GET | `/vendas/{id}/resumo` | Totais e saldo do carrinho |
-| PATCH | `/vendas/{id}/finalizar` | Finalizar com `{ autenticacaoVendedor: { email, senha } }`; `email` aceita e-mail ou login. Quem se autentica vira o vendedor. Sem o campo 400, senha errada 401 |
-| PATCH | `/vendas/{id}/status` | Avançar status com `{ novoStatus, autenticacaoUsuario: { email, senha } }` e gravar quem alterou. Sem o campo 400, senha errada 401 |
+| PATCH | `/vendas/{id}/finalizar` | Lançar com `{ autenticacaoVendedor: { email, senha } }`; `email` aceita e-mail ou login. A venda vai para `CONCLUIDA` e os seriais para `VENDIDO`. Quem se autentica vira o vendedor. Sem o campo 400, senha errada 401 |
+| PATCH | `/vendas/{id}/status` | Cancelar com `{ novoStatus: "CANCELADA", autenticacaoUsuario: { email, senha } }` e gravar quem alterou. Sem o campo 400, senha errada 401; `PENDENTE`, `APROVADA` ou `CONCLUIDA` → 422 |
 | PATCH | `/vendas/{id}/avaliacao-procedencia` | Avaliação do BKO |
+
+**Mudanças de contrato: venda lançada direto (V30)**
+
+| Rota | Antes | Agora |
+| --- | --- | --- |
+| `PATCH /vendas/{id}/finalizar` | Devolvia a venda `PENDENTE`; seriais continuavam `RESERVADO` | Devolve a venda `CONCLUIDA`; seriais `VENDIDO` |
+| `PATCH /vendas/{id}/status` | Aceitava `APROVADA` e `CONCLUIDA` (aprovar/concluir) | Só `CANCELADA`; `PENDENTE`/`APROVADA` → 422 "Status não usado: a venda é lançada direto ao finalizar."; `CONCLUIDA` → 422 |
+| Vendas existentes | `PENDENTE`/`APROVADA` | Passaram a `CONCLUIDA` pela V30, com os seriais reservados baixados |
 
 **Estoque**
 
