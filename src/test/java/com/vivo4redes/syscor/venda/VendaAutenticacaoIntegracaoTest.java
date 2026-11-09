@@ -297,7 +297,7 @@ class VendaAutenticacaoIntegracaoTest {
     }
 
     @Test
-    @DisplayName("Sem token ou com token inválido a venda não abre: 403, diferente do 401 da senha errada")
+    @DisplayName("Sem token ou com token inválido a venda não abre: 401")
     void semTokenNaoAbre() throws Exception {
         String abertura = json.writeValueAsString(corpoAbertura());
 
@@ -306,8 +306,8 @@ class VendaAutenticacaoIntegracaoTest {
         int tokenInvalido = mvc.perform(post("/vendas").contentType(MediaType.APPLICATION_JSON).content(abertura)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer token-invalido")).andReturn().getResponse().getStatus();
 
-        assertThat(semToken).as("sem token").isEqualTo(403);
-        assertThat(tokenInvalido).as("token inválido").isEqualTo(403);
+        assertThat(semToken).as("sem token").isEqualTo(401);
+        assertThat(tokenInvalido).as("token inválido").isEqualTo(401);
     }
 
     // ------------------------------------------------------------------ apoio
