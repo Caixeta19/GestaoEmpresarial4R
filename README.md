@@ -58,7 +58,7 @@ estado não-terminal. Só é possível adicionar ou remover item enquanto a vend
   cálculo automático de valor total a partir dos itens
 - Cadastro de cliente (PF/PJ) com validação de CPF/CNPJ e e-mail/telefone
 - Cadastro de filial e de usuário/vendedor (com reautenticação por senha na venda)
-- Registro de pagamentos por venda, com múltiplas formas (cartão, PIX, dinheiro, boleto, voucher)
+- Registro de pagamentos por venda, com múltiplas formas (cartão, PIX, Vivo Pay, dinheiro, boleto)
 - Transição de status da venda com validação de máquina de estados
 - Avaliação de procedência da venda (BKO) pós-conclusão
 - Controle de estoque serializado por IMEI/serial, com status `DISPONIVEL` /
@@ -109,6 +109,9 @@ vale confirmar se a dependência ainda é necessária ou se pode sair.
   (`valorChip`) e da condição de pagamento (`VendaService.reprecificar`).
 - Toda venda precisa de ao menos um item para ser finalizada — senão,
   `VendaSemItemException`.
+- Finalizar reprecifica a venda pela tabela vigente. Se o total mudou, o novo total fica gravado e a resposta é
+  422 com os dois valores: o vendedor confere os pagamentos e finaliza de novo.
+- `SERVICO_VIVO` fica sempre com valor 0: o `valorUnitario` enviado é ignorado. O chip é cobrado só por `valorChip`.
 - Transições de status permitidas, validadas por `StatusVenda.podeTransicionarPara()`:
 
 ```
@@ -155,20 +158,28 @@ CANCELADA → (terminal, sem saída)
   importar estoque novo (só `DISPONIVEL`/`RESERVADO`; `VENDIDO` não muda).
 - **`tb_produto_preco_plano` deixou de ser usada na V24 e será removida numa migration futura.**
 
-### Renova (V25)
+### Renova (V25, V28)
 
 - Todo item entra pela **TABELA REGULAR**. O aparelho (PRODUTO_VIVO com preço por plano) passa para a
-  **TABELA RENOVA** quando a venda tem **Desconto fabricante + Voucher**: o vendedor lança o pagamento
-  `VOUCHER` (valor + `codigoVoucher`) e liga o Renova com `PATCH /vendas/{id}/renova { "ativo": true }`.
-- Sem voucher lançado o Renova é recusado (422); remover o último voucher desliga o Renova e os
-  aparelhos voltam para a Regular. Acessório, chip, serviço e itens `SEM_PLANO` não mudam.
+  **TABELA RENOVA** com o número do voucher:
+  `PATCH /vendas/{id}/renova { "ativo": true, "codigoVoucher": "ABC123" }`.
+- O voucher **não é forma de pagamento** e não tem valor na venda: `POST /vendas/{id}/pagamentos` com `VOUCHER` é
+  recusado (422) e nenhuma condição aceita essa forma. Ela fica só para o histórico das vendas antigas.
+- Ligar exige o número (até 60 caracteres, sem espaços nas pontas) e ao menos um aparelho elegível; senão, 422.
+  O mesmo número em outra venda não cancelada, inclusive em linha `VOUCHER` antiga, é 409 "Voucher já usado na
+  venda #id". Finalizar venda com Renova sem o número é 422.
+- `{ "ativo": false }` limpa o número e os aparelhos voltam para a Regular. Acessório, chip, serviço e itens
+  `SEM_PLANO` não mudam.
 - O bloco Renova não tem o grupo PRÉ: aparelho em plano pré-pago/sem plano → 422 "Renova não
   disponível para plano pré-pago.". Produto sem linha Renova fica no preço Regular do mesmo grupo.
 - A coluna `DESCONTO` do bloco Renova é gravada em `tb_preco_item.desconto_fabricante`. O preço Renova
   **já tem** esse desconto: o `descontoFabricante` da venda (soma dos aparelhos na Renova) é só
-  controle/conciliação e não abate o total de novo. O voucher entra na soma dos pagamentos.
-- Ao reprecificar, os pagamentos não são mexidos: se passarem do novo total, a resposta traz `saldo`
+  controle/conciliação e não abate o total de novo.
+- Ligar ou desligar o Renova não apaga pagamentos: se passarem do novo total, a resposta traz `saldo`
   negativo e `aviso`, e a venda só finaliza depois do ajuste.
+- A V28 leva o código da primeira linha `VOUCHER` para `vendas.codigo_voucher` nas vendas abertas com Renova ligado
+  e apaga essa forma das vendas abertas. O total delas é acertado na próxima edição ou ao finalizar. Vendas
+  finalizadas não mudam.
 
 ### Condição de pagamento (V26)
 
@@ -185,9 +196,9 @@ CANCELADA → (terminal, sem saída)
 
 ### Pagamento por condição (V27)
 
-- Linhas aceitas: `PIX` só `PIX`, `VIVO_PAY` e `VOUCHER`. `A_VISTA` todas as formas, com crédito até 12x; PIX
+- Linhas aceitas: `PIX` só `PIX` e `VIVO_PAY`. `A_VISTA` todas as formas menos `VOUCHER`, com crédito até 12x; PIX
   misturado com cartão paga o preço cheio. `PARCELADO_N` só entradas (`DINHEIRO`, `PIX`, `VIVO_PAY`,
-  `CARTAO_DEBITO`, `VOUCHER`) mais a linha `FINANCIADO`.
+  `CARTAO_DEBITO`) mais a linha `FINANCIADO`.
 - Cada linha tem `tipo`: `PAGAMENTO`, `ENTRADA` ou `FINANCIADO`. `POST /vendas/{id}/financiar` cria a
   `FINANCIADO` (`CARTAO_CREDITO` em N parcelas, valor calculado pelo backend). `POST /pagamentos` recusa crédito
   em `PARCELADO_N`.
@@ -195,8 +206,7 @@ CANCELADA → (terminal, sem saída)
   vale a soma dos `parcelas[N]` da planilha. `baseTabela` é o preço Regular dos itens de tabela; `semTabela` são
   chip, serviço, recarga e item sem preço de tabela, sempre pelo valor cheio, sem juros nem desconto PIX.
 - E fica limitada a `baseTabela`: o que passar disso abate os itens sem tabela. Entrada acima do total é recusada.
-- O voucher conta como entrada. No Renova em 21x com voucher de R$ 500, o total é R$ 12.019,41, não os
-  R$ 12.081,12 da tabela.
+- No Renova em 21x com entrada de R$ 500, o total é R$ 12.019,41, não os R$ 12.081,12 da tabela.
 - Toda mudança em item, Renova, condição ou entrada reprecifica a venda pela tabela vigente e recalcula a linha
   `FINANCIADO`. Ao trocar de parcelado ela acompanha N; ao sair dele, ou sem saldo, é apagada.
 - O item fica no preço da condição sem entrada. Com entrada, a soma dos itens difere de `valorTotal`.
@@ -548,9 +558,9 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | PUT | `/vendas/{id}` | Atualizar dados iniciais (filial, vendedor, score, etc.) |
 | POST | `/vendas/{id}/itens` | Adicionar item ao carrinho |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item do carrinho |
-| POST | `/vendas/{id}/pagamentos` | Registrar pagamento |
-| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento (remover o último voucher desliga o Renova) |
-| PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo }`; exige voucher) |
+| POST | `/vendas/{id}/pagamentos` | Registrar pagamento (`VOUCHER` → 422) |
+| DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |
+| PATCH | `/vendas/{id}/renova` | Liga/desliga a TABELA RENOVA nos aparelhos (`{ ativo, codigoVoucher }`; ligar exige o número; número em outra venda → 409) |
 | PATCH | `/vendas/{id}/condicao-pagamento` | Troca a condição (`{ condicao }`; aceita também `{ condicaoPagamento }`) e reprecifica a venda. 422 com `pagamentosIncompativeis` se houver linha que a condição não aceita |
 | GET | `/vendas/{id}/simulacao-pagamento` | Total, parcelas, `valorParcela` e `economiaOuJuros` em cada condição, com as entradas lançadas |
 | POST | `/vendas/{id}/financiar` | Em `PARCELADO_N`, cria ou atualiza a linha `FINANCIADO` com o saldo |

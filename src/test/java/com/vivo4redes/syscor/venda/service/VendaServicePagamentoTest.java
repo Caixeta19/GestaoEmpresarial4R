@@ -8,6 +8,8 @@ import com.vivo4redes.syscor.estoque.service.PrecoCalculado;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService;
 import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.TotalVendaAlteradoException;
+import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.PagamentosIncompativeisException;
 import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
@@ -132,8 +134,7 @@ class VendaServicePagamentoTest {
     @Test
     @DisplayName("Renova: PIX R$ 9.579,10 e à vista R$ 10.699,00; valorItens no preço cheio Renova")
     void valoresRenova() {
-        pagar(FormaPagamento.VOUCHER, "300.00", "V-1");
-        service.aplicarRenova(1L, true);
+        service.aplicarRenova(1L, true, "V-1");
 
         assertThat(venda.getValorTotal()).isEqualByComparingTo("10699.00");
         assertThat(venda.getValorItens()).isEqualByComparingTo("10699.00");
@@ -145,10 +146,10 @@ class VendaServicePagamentoTest {
     }
 
     @Test
-    @DisplayName("Renova 21x com voucher de R$ 500: o voucher é entrada e o total fica em R$ 12.019,41")
-    void renovaParceladoComVoucher() {
-        pagar(FormaPagamento.VOUCHER, "500.00", "V-1");
-        service.aplicarRenova(1L, true);
+    @DisplayName("Renova 21x com entrada de R$ 500: os juros caem e o total fica em R$ 12.019,41")
+    void renovaParceladoComEntrada() {
+        pagar(FormaPagamento.DINHEIRO, "500.00");
+        service.aplicarRenova(1L, true, "V-1");
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
 
         service.financiar(1L);
@@ -162,7 +163,7 @@ class VendaServicePagamentoTest {
     @DisplayName("Entrada de R$ 2.000 em dinheiro + 21x: financiado R$ 10.334,29, total R$ 12.334,29, parcela R$ 492,11")
     void entradaEmDinheiro() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
-        pagar(FormaPagamento.DINHEIRO, "2000.00", null);
+        pagar(FormaPagamento.DINHEIRO, "2000.00");
 
         service.financiar(1L);
 
@@ -182,7 +183,7 @@ class VendaServicePagamentoTest {
         service.financiar(1L);
         assertThat(financiado().getValor()).isEqualByComparingTo("12581.12");
 
-        pagar(FormaPagamento.DINHEIRO, "2000.00", null);
+        pagar(FormaPagamento.DINHEIRO, "2000.00");
         assertThat(financiado().getValor()).isEqualByComparingTo("10334.29");
 
         service.removerPagamento(1L, pagamentos.stream()
@@ -225,7 +226,7 @@ class VendaServicePagamentoTest {
         venda.getItens().get(0).setValorChip(new BigDecimal("13.00"));
 
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
-        pagar(FormaPagamento.DINHEIRO, "2000.00", null);
+        pagar(FormaPagamento.DINHEIRO, "2000.00");
 
         assertThat(venda.getValorTotal()).isEqualByComparingTo("12347.29");
     }
@@ -235,7 +236,7 @@ class VendaServicePagamentoTest {
     void entradaAcimaDaBase() {
         venda.adicionarItem(recarga());
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
-        pagar(FormaPagamento.DINHEIRO, "11209.00", null);
+        pagar(FormaPagamento.DINHEIRO, "11209.00");
 
         service.financiar(1L);
 
@@ -248,7 +249,7 @@ class VendaServicePagamentoTest {
     void entradaAcimaDoTotal() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
 
-        assertThatThrownBy(() -> pagar(FormaPagamento.DINHEIRO, "11199.01", null))
+        assertThatThrownBy(() -> pagar(FormaPagamento.DINHEIRO, "11199.01"))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("passa do total");
     }
 
@@ -258,7 +259,7 @@ class VendaServicePagamentoTest {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
         service.financiar(1L);
 
-        pagar(FormaPagamento.DINHEIRO, "11199.00", null);
+        pagar(FormaPagamento.DINHEIRO, "11199.00");
 
         assertThat(pagamentos).noneMatch(p -> p.getTipo() == TipoPagamento.FINANCIADO);
         assertThat(venda.getValorTotal()).isEqualByComparingTo("11199.00");
@@ -271,12 +272,12 @@ class VendaServicePagamentoTest {
     @DisplayName("Condição PIX recusa o cartão; em A_VISTA, PIX + cartão pagam o preço cheio")
     void pixMaisCartao() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX);
-        assertThatThrownBy(() -> pagar(FormaPagamento.CARTAO_CREDITO, "100.00", null))
+        assertThatThrownBy(() -> pagar(FormaPagamento.CARTAO_CREDITO, "100.00"))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("não aceita CARTAO_CREDITO");
 
         service.definirCondicaoPagamento(1L, CondicaoPagamento.A_VISTA);
-        pagar(FormaPagamento.PIX, "5000.00", null);
-        pagar(FormaPagamento.CARTAO_CREDITO, "6199.00", null);
+        pagar(FormaPagamento.PIX, "5000.00");
+        pagar(FormaPagamento.CARTAO_CREDITO, "6199.00");
 
         assertThat(venda.getValorTotal()).isEqualByComparingTo("11199.00");
         assertThat(pagamentos).allMatch(p -> p.getTipo() == TipoPagamento.PAGAMENTO);
@@ -287,14 +288,14 @@ class VendaServicePagamentoTest {
     @DisplayName("Vivo Pay vale como PIX; A_VISTA recusa crédito acima de 12x")
     void vivoPayECreditoDe13x() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX);
-        pagar(FormaPagamento.VIVO_PAY, "10079.10", null);
+        pagar(FormaPagamento.VIVO_PAY, "10079.10");
         assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
 
         venda.setStatus(StatusVenda.ABERTA);
         pagamentos.clear();
         service.definirCondicaoPagamento(1L, CondicaoPagamento.A_VISTA);
         assertThatThrownBy(() -> service.adicionarPagamento(1L,
-                new PagamentoVendaRequestDTO(FormaPagamento.CARTAO_CREDITO, new BigDecimal("100.00"), 13, null)))
+                new PagamentoVendaRequestDTO(FormaPagamento.CARTAO_CREDITO, new BigDecimal("100.00"), 13)))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("13x");
     }
 
@@ -303,7 +304,7 @@ class VendaServicePagamentoTest {
     void parceladoRecusaCredito() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
 
-        assertThatThrownBy(() -> pagar(FormaPagamento.CARTAO_CREDITO, "100.00", null))
+        assertThatThrownBy(() -> pagar(FormaPagamento.CARTAO_CREDITO, "100.00"))
                 .isInstanceOf(NegocioException.class).hasMessageContaining("saldo financiado");
         assertThat(pagamentos).isEmpty();
     }
@@ -311,8 +312,8 @@ class VendaServicePagamentoTest {
     @Test
     @DisplayName("Trocar a condição com linha incompatível dá 422 com a lista e não muda nada")
     void trocaComLinhaIncompativel() {
-        pagar(FormaPagamento.CARTAO_CREDITO, "1000.00", null);
-        pagar(FormaPagamento.DINHEIRO, "500.00", null);
+        pagar(FormaPagamento.CARTAO_CREDITO, "1000.00");
+        pagar(FormaPagamento.DINHEIRO, "500.00");
 
         assertThatThrownBy(() -> service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX))
                 .isInstanceOfSatisfying(PagamentosIncompativeisException.class, e -> {
@@ -326,7 +327,7 @@ class VendaServicePagamentoTest {
     @Test
     @DisplayName("Linhas compatíveis trocam de tipo junto com a condição")
     void trocaDeTipo() {
-        pagar(FormaPagamento.DINHEIRO, "2000.00", null);
+        pagar(FormaPagamento.DINHEIRO, "2000.00");
 
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
         assertThat(pagamentos.get(0).getTipo()).isEqualTo(TipoPagamento.ENTRADA);
@@ -368,7 +369,7 @@ class VendaServicePagamentoTest {
     @Test
     @DisplayName("Simulação traz todas as condições, considerando as entradas lançadas")
     void simulacao() {
-        pagar(FormaPagamento.DINHEIRO, "2000.00", null);
+        pagar(FormaPagamento.DINHEIRO, "2000.00");
 
         List<SimulacaoPagamentoDTO> simulacao = service.simularPagamento(1L);
 
@@ -392,7 +393,7 @@ class VendaServicePagamentoTest {
     @Test
     @DisplayName("Simulação ignora na condição a linha que ela não aceita")
     void simulacaoIgnoraLinhaIncompativel() {
-        pagar(FormaPagamento.CARTAO_CREDITO, "2000.00", null);
+        pagar(FormaPagamento.CARTAO_CREDITO, "2000.00");
 
         assertThat(opcao(service.simularPagamento(1L), CondicaoPagamento.PARCELADO_21).total())
                 .isEqualByComparingTo("12581.12");
@@ -402,7 +403,7 @@ class VendaServicePagamentoTest {
     @DisplayName("Resposta traz valorItens, ajusteCondicao, saldo e o tipo dos pagamentos")
     void resposta() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
-        pagar(FormaPagamento.DINHEIRO, "2000.00", null);
+        pagar(FormaPagamento.DINHEIRO, "2000.00");
         service.financiar(1L);
 
         VendaResponseDTO dto = VendaResponseDTO.from(venda, pagamentos);
@@ -416,8 +417,48 @@ class VendaServicePagamentoTest {
                 .containsExactly(TipoPagamento.ENTRADA, TipoPagamento.FINANCIADO);
     }
 
-    private void pagar(FormaPagamento forma, String valor, String voucher) {
-        service.adicionarPagamento(1L, new PagamentoVendaRequestDTO(forma, new BigDecimal(valor), 1, voucher));
+    @Test
+    @DisplayName("Tabela nova com o carrinho aberto: finalizar grava o novo total e recusa; depois do ajuste, finaliza")
+    void finalizarComTabelaNova() {
+        pagar(FormaPagamento.DINHEIRO, "11199.00");
+        precos(TabelaPreco.REGULAR, "11999.00", null, "10799.10", "13480.00");
+
+        assertThatThrownBy(() -> service.finalizar(1L, finalizar()))
+                .isInstanceOf(TotalVendaAlteradoException.class)
+                .hasMessageContaining("11199.00").hasMessageContaining("11999.00");
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("11999.00");
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.ABERTA);
+
+        pagar(FormaPagamento.DINHEIRO, "800.00");
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+    }
+
+    @Test
+    @DisplayName("Tabela nova no parcelado: o financiado acompanha, mas a primeira tentativa de finalizar é recusada")
+    void finalizarParceladoComTabelaNova() {
+        service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
+        service.financiar(1L);
+        precos(TabelaPreco.REGULAR, "11999.00", null, "10799.10", "13480.00");
+
+        assertThatThrownBy(() -> service.finalizar(1L, finalizar())).isInstanceOf(TotalVendaAlteradoException.class);
+        assertThat(financiado().getValor()).isEqualByComparingTo("13480.00");
+
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+    }
+
+    @Test
+    @DisplayName("Venda já finalizada não é reprecificada: finalizar de novo só recusa a transição")
+    void finalizarDeNovoNaoReprecifica() {
+        pagar(FormaPagamento.DINHEIRO, "11199.00");
+        service.finalizar(1L, finalizar());
+        precos(TabelaPreco.REGULAR, "11999.00", null, "10799.10", "13480.00");
+
+        assertThatThrownBy(() -> service.finalizar(1L, finalizar())).isInstanceOf(TransicaoStatusInvalidaException.class);
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("11199.00");
+    }
+
+    private void pagar(FormaPagamento forma, String valor) {
+        service.adicionarPagamento(1L, new PagamentoVendaRequestDTO(forma, new BigDecimal(valor), 1));
     }
 
     private PagamentoVenda financiado() {

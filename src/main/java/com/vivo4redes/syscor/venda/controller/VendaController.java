@@ -98,11 +98,11 @@ public class VendaController {
         return ResponseEntity.ok(responder(venda));
     }
 
-    /** Liga/desliga a TABELA RENOVA (exige voucher lançado) e devolve a venda reprecificada. */
+    /** Liga/desliga a TABELA RENOVA (ligar exige o número do voucher) e devolve a venda reprecificada. */
     @PatchMapping("/{id}/renova")
     public ResponseEntity<VendaResponseDTO> aplicarRenova(
             @PathVariable Long id, @Valid @RequestBody RenovaRequestDTO dto) {
-        var venda = vendaService.aplicarRenova(id, dto.ativo());
+        var venda = vendaService.aplicarRenova(id, dto.ativo(), dto.codigoVoucher());
         return ResponseEntity.ok(responder(venda));
     }
 

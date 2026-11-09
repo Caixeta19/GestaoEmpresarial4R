@@ -134,6 +134,7 @@ class VendaServicePrecoTest {
                 .categoria(CategoriaItemVenda.SERVICO_VIVO).descricaoProduto("Plano Controle")
                 .quantidade(BigDecimal.ONE).valorUnitario(new BigDecimal("50.00")).build());
 
+        assertThat(venda.getItens().get(venda.getItens().size() - 1).getValorUnitario()).isEqualByComparingTo("0");
         verifyNoInteractions(precoVigenteService);
         verify(estoqueService, never()).reservarNaVenda(any());
     }

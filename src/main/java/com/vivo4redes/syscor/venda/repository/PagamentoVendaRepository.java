@@ -16,6 +16,18 @@ public interface PagamentoVendaRepository extends JpaRepository<PagamentoVenda, 
 
     List<PagamentoVenda> findByVendaIdOrderByIdAsc(Long vendaId);
 
+    /** Outras vendas não canceladas com esse voucher em linha de pagamento (histórico anterior à V28). */
+    @Query("""
+        select v.id from PagamentoVenda p
+        join p.venda v
+        where p.forma = com.vivo4redes.syscor.venda.enums.FormaPagamento.VOUCHER
+          and p.codigoVoucher = :codigo
+          and v.status <> com.vivo4redes.syscor.venda.enums.StatusVenda.CANCELADA
+          and v.id <> :vendaId
+        order by v.id
+        """)
+    List<Long> buscarOutrasVendasComVoucher(@Param("codigo") String codigo, @Param("vendaId") Long vendaId);
+
     @Query("""
         SELECT COALESCE(SUM(p.valor), 0)
         FROM PagamentoVenda p

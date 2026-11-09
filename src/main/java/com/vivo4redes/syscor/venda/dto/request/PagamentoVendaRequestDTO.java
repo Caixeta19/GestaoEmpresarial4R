@@ -3,7 +3,6 @@ package com.vivo4redes.syscor.venda.dto.request;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
-import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
@@ -11,7 +10,7 @@ import java.math.BigDecimal;
 
 public record PagamentoVendaRequestDTO(
 
-        @NotNull(message = "forma é obrigatória (CARTAO_CREDITO, CARTAO_DEBITO, PIX, VIVO_PAY, DINHEIRO, BOLETO ou VOUCHER)")
+        @NotNull(message = "forma é obrigatória (CARTAO_CREDITO, CARTAO_DEBITO, PIX, VIVO_PAY, DINHEIRO ou BOLETO)")
         FormaPagamento forma,
 
         @NotNull(message = "valor é obrigatório")
@@ -20,10 +19,6 @@ public record PagamentoVendaRequestDTO(
         BigDecimal valor,
 
         @Min(value = 1, message = "parcelas deve ser pelo menos 1")
-        Integer parcelas,
-
-        /** Obrigatório quando forma = VOUCHER. */
-        @Size(max = 60, message = "codigoVoucher deve ter no máximo 60 caracteres")
-        String codigoVoucher
+        Integer parcelas
 ) {
 }

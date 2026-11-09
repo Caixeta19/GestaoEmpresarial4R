@@ -178,9 +178,8 @@ class VendaServiceCondicaoPagamentoTest {
     @DisplayName("Ligar o Renova respeita a condição da venda, e o acessório não é reprecificado")
     void aplicarRenovaRespeitaCondicao() {
         service.definirCondicaoPagamento(1L, CondicaoPagamento.PIX);
-        pagamentos.add(pagamento(FormaPagamento.VOUCHER, "300.00"));
 
-        service.aplicarRenova(1L, true);
+        service.aplicarRenova(1L, true, "V-1");
 
         assertThat(aparelho.getValorUnitario()).isEqualByComparingTo("9579.10");
         assertThat(acessorio.getValorUnitario()).isEqualByComparingTo("179.91");

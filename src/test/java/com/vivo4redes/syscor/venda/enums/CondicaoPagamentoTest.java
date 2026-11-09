@@ -20,11 +20,11 @@ class CondicaoPagamentoTest {
     }
 
     @Test
-    @DisplayName("PIX aceita só PIX, Vivo Pay e voucher")
+    @DisplayName("PIX aceita só PIX e Vivo Pay")
     void linhasDoPix() {
         assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.PIX, 1)).isTrue();
         assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.VIVO_PAY, 1)).isTrue();
-        assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.VOUCHER, 1)).isTrue();
+        assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.VOUCHER, 1)).isFalse();
         assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.CARTAO_CREDITO, 1)).isFalse();
         assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.CARTAO_DEBITO, 1)).isFalse();
         assertThat(CondicaoPagamento.PIX.aceita(FormaPagamento.DINHEIRO, 1)).isFalse();
@@ -32,10 +32,10 @@ class CondicaoPagamentoTest {
     }
 
     @Test
-    @DisplayName("A_VISTA aceita todas as formas, com crédito até 12x")
+    @DisplayName("A_VISTA aceita todas as formas menos voucher, com crédito até 12x")
     void linhasDoAVista() {
         for (FormaPagamento forma : FormaPagamento.values()) {
-            assertThat(CondicaoPagamento.A_VISTA.aceita(forma, 1)).isTrue();
+            assertThat(CondicaoPagamento.A_VISTA.aceita(forma, 1)).isEqualTo(forma != FormaPagamento.VOUCHER);
         }
         assertThat(CondicaoPagamento.A_VISTA.aceita(FormaPagamento.CARTAO_CREDITO, 12)).isTrue();
         assertThat(CondicaoPagamento.A_VISTA.aceita(FormaPagamento.CARTAO_CREDITO, 13)).isFalse();
@@ -50,7 +50,7 @@ class CondicaoPagamentoTest {
         assertThat(condicao.aceita(FormaPagamento.PIX, 1)).isTrue();
         assertThat(condicao.aceita(FormaPagamento.VIVO_PAY, 1)).isTrue();
         assertThat(condicao.aceita(FormaPagamento.CARTAO_DEBITO, 1)).isTrue();
-        assertThat(condicao.aceita(FormaPagamento.VOUCHER, 1)).isTrue();
+        assertThat(condicao.aceita(FormaPagamento.VOUCHER, 1)).isFalse();
         assertThat(condicao.aceita(FormaPagamento.CARTAO_CREDITO, 21)).isFalse();
         assertThat(condicao.aceita(FormaPagamento.BOLETO, 1)).isFalse();
     }
