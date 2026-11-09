@@ -454,6 +454,7 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 | 14 | Primeiro acesso aceita a senha fixa 00000000 para qualquer usuário com primeiroAcesso = true | UsuarioDetailsService.loadUserByUsername | Gerar senha temporária aleatória por usuário (gravada em hash, com validade) e obrigar a troca |
 | 15 | Sem token, ou com token inválido ou expirado, a API respondia 403, e não 401 | `SecurityConfig` não definia `authenticationEntryPoint` | ✅ **Corrigido.** `HttpStatusEntryPoint(UNAUTHORIZED)`; o 403 fica reservado para a falta de perfil |
 | 16 | Usuário inativado continuava acessando as rotas enquanto o token valia | `JwtAuthFilter` não conferia `isEnabled()` | ✅ **Corrigido.** O filtro recusa o inativo a cada requisição; um stream SSE já aberto só cai na próxima conexão |
+| 17 | Com token válido, erros que passam pelo despacho de erro (`/error`) respondiam 401 em vez do status real (ex.: 404 com `Accept: text/event-stream`) | O `JwtAuthFilter` não roda no despacho `ERROR`, que chegava sem usuário à autorização | ✅ **Corrigido.** `SecurityConfig` libera `DispatcherType.ERROR`, que só renderiza um erro de uma requisição já filtrada |
 
 ## 10. Plano de construção
 
