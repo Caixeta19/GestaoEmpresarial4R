@@ -121,6 +121,26 @@ class AutenticacaoHttpIntegracaoTest {
         assertThat(r.getResponse().getStatus()).isNotIn(401, 403);
     }
 
+    // ------------------------------------------------------------------ usuário inativado com token válido
+
+    @Test
+    @DisplayName("Inativado pela flag ativo: o token deixa de valer")
+    void inativoPelaFlag() throws Exception {
+        assertTokenRecusadoDepoisDe(u -> u.setAtivo(false));
+    }
+
+    @Test
+    @DisplayName("Inativado pelo cargo: o token deixa de valer")
+    void inativoPeloCargo() throws Exception {
+        assertTokenRecusadoDepoisDe(u -> u.setCargo("INATIVO"));
+    }
+
+    @Test
+    @DisplayName("Inativado pela situação: o token deixa de valer")
+    void inativoPelaSituacao() throws Exception {
+        assertTokenRecusadoDepoisDe(u -> u.setSituacao("INATIVO"));
+    }
+
     // ------------------------------------------------------------------ apoio
 
     private void assertTokenRecusadoDepoisDe(Consumer<Usuario> inativar) throws Exception {
