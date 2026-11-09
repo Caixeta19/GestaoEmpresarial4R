@@ -54,9 +54,12 @@ public class UsuarioService {
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Vendedor"));
     }
 
+    /** Só quem consegue se autenticar: a lista alimenta o select de vendedor na autenticação da venda. */
     @Transactional(readOnly = true)
     public List<Usuario> listarAtivos() {
-        return usuarioRepository.findByAtivoTrueOrderByNomeAsc();
+        return usuarioRepository.findByAtivoTrueOrderByNomeAsc().stream()
+                .filter(Usuario::podeAcessar)
+                .toList();
     }
 
     /** Usuário do JWT da requisição. Inativo com token ainda válido também é recusado. */

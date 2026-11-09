@@ -590,6 +590,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/filiais` | Cadastrar filial |
 | GET | `/filiais/{id}` | Buscar filial |
 | POST | `/usuarios` | Cadastrar usuário/vendedor |
+| GET | `/usuarios` | Listar quem pode se autenticar (sem inativos pela flag, pelo cargo ou pela situação) |
 | GET | `/usuarios/{id}` | Buscar usuário |
 | GET | `/estoque/consolidado` | Estoque consolidado por produto (`disponivel`, `reservado`, `defeito`; `avariado` é alias obsoleto de `defeito`) |
 | GET | `/estoque/alertas` | Produtos em nível crítico de estoque |

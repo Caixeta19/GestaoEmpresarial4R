@@ -286,6 +286,17 @@ class VendaAutenticacaoIntegracaoTest {
     }
 
     @Test
+    @DisplayName("GET /usuarios não lista quem tem situação INATIVO")
+    void listaSemInativos() throws Exception {
+        outroVendedor.setSituacao("INATIVO");
+        usuarios.save(outroVendedor);
+
+        JsonNode lista = enviar(get("/usuarios"), null).corpo;
+
+        assertThat(lista.findValuesAsText("login")).contains(logado.getLogin()).doesNotContain(outroVendedor.getLogin());
+    }
+
+    @Test
     @DisplayName("Sem token ou com token inválido a venda não abre: 403, diferente do 401 da senha errada")
     void semTokenNaoAbre() throws Exception {
         String abertura = json.writeValueAsString(corpoAbertura());

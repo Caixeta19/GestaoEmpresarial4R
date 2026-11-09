@@ -87,6 +87,18 @@ class UsuarioServiceAutenticacaoTest {
         assertThatThrownBy(() -> service.usuarioLogado()).isInstanceOf(AutenticacaoInvalidaException.class);
     }
 
+    @Test
+    @DisplayName("Listar ativos: tira quem tem cargo ou situação INATIVO e mantém a ordem")
+    void listarAtivosTiraInativos() {
+        Usuario ana = usuario().nome("Ana").build();
+        Usuario bia = usuario().nome("Bia").cargo("inativo").build();
+        Usuario caio = usuario().nome("Caio").situacao("INATIVO").build();
+        Usuario davi = usuario().nome("Davi").situacao(null).build();
+        when(usuarioRepository.findByAtivoTrueOrderByNomeAsc()).thenReturn(List.of(ana, bia, caio, davi));
+
+        assertThat(service.listarAtivos()).containsExactly(ana, davi);
+    }
+
     static Stream<Usuario> inativos() {
         return Stream.of(
                 usuario().ativo(false).build(),
