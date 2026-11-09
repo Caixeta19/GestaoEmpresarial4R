@@ -9,4 +9,8 @@ public class AutenticacaoInvalidaException extends BusinessException {
     public AutenticacaoInvalidaException() {
         super("E-mail ou senha do vendedor inválidos.");
     }
+
+    public AutenticacaoInvalidaException(String mensagem) {
+        super(mensagem);
+    }
 }

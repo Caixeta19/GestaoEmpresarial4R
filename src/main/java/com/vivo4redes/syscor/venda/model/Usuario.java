@@ -94,4 +94,8 @@ public class Usuario {
     @Column(length = 255)
     private String cidade;
 
+    /** Mesma regra para o login e para a autenticação na venda: inativo pela flag, pelo cargo ou pela situação não entra. */
+    public boolean podeAcessar() {
+        return ativo && !"INATIVO".equalsIgnoreCase(cargo) && !"INATIVO".equalsIgnoreCase(situacao);
+    }
 }

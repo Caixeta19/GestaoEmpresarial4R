@@ -1,14 +1,12 @@
 package com.vivo4redes.syscor.venda.dto.request;
-import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.venda.enums.StatusScoreCliente;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
 /**
- * Edita os campos da tela "Início" de uma venda já aberta (trocar cliente,
+ * Edita os campos da tela "Início" de uma venda ABERTA (trocar cliente,
  * filial, flag de estoque avançado, score, número de série/nota do
- * comprovante). Exige reautenticação do vendedor, como qualquer
- * salvar/alterar nessa tela.
+ * comprovante). Não pede senha, e uma autenticação enviada pelo front antigo
+ * é ignorada.
  */
 public record DadosIniciaisVendaRequestDTO(
 
@@ -25,10 +23,6 @@ public record DadosIniciaisVendaRequestDTO(
 
         String numeroSerieNota,
 
-        String numeroNota,
-
-        @Valid
-        @NotNull(message = "autenticacaoVendedor é obrigatória")
-        AutenticacaoUsuarioDTO autenticacaoUsuario
+        String numeroNota
 ) {
 }

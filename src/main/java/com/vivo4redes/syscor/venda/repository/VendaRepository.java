@@ -32,7 +32,7 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
 
     List<Venda> findByUsuarioId(Long usuarioId);
 
-    @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "itens"})
+    @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "finalizadoPor", "itens"})
     @Query("select v from Venda v where v.id = :id")
     Optional<Venda> buscarComDetalhesPorId(@Param("id") Long id);
 
@@ -63,7 +63,7 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
         """)
     List<Long> buscarOutrasVendasComVoucher(@Param("codigo") String codigo, @Param("vendaId") Long vendaId);
 
-    @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "itens"})
+    @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "finalizadoPor", "itens"})
     @Query("select distinct v from Venda v order by v.criadoEm desc")
     List<Venda> listarComDetalhes();
 
