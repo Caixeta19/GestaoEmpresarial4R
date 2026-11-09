@@ -12,6 +12,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -84,6 +85,7 @@ public class Venda {
     private String numeroNota;
 
     @OneToMany(mappedBy = "venda", cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 100) // listas do documental carregam os itens de várias vendas por consulta
     @Builder.Default
     private List<ItemVenda> itens = new ArrayList<>();
 
