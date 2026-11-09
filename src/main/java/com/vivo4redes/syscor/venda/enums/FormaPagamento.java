@@ -6,7 +6,7 @@ public enum FormaPagamento {
     PIX,
     DINHEIRO,
     BOLETO,
-    /** Voucher do fabricante (com código). Junto com o Desconto fabricante, liga a TABELA RENOVA. */
+    /** Só para o histórico: o voucher deixou de ser forma de pagamento (V28); o número fica em Venda.codigoVoucher. */
     VOUCHER,
     /** Na tabela da Telefônica vale como PIX. */
     VIVO_PAY

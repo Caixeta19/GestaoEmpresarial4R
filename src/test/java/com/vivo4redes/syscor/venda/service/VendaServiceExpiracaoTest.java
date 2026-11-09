@@ -116,7 +116,7 @@ class VendaServiceExpiracaoTest {
         venda.setValorTotal(new BigDecimal("100.00"));
         when(pagamentoVendaRepository.findByVendaIdOrderByIdAsc(anyLong())).thenReturn(List.of());
 
-        service.adicionarPagamento(1L, new PagamentoVendaRequestDTO(null, new BigDecimal("50.00"), 1, null));
+        service.adicionarPagamento(1L, new PagamentoVendaRequestDTO(null, new BigDecimal("50.00"), 1));
 
         assertThat(venda.getAtualizadoEm()).isAfter(antes);
         verify(vendaRepository).save(venda);

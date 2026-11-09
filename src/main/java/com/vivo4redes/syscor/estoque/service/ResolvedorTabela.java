@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component;
 /**
  * Regra 3: qual tabela da Telefônica vale para o item da venda. Único lugar dessa decisão — mude aqui.
  * <p>
- * Decisão de 04/11/2026: todo item entra pela REGULAR. O aparelho passa para a RENOVA quando a venda está com
- * o Renova ligado (Desconto fabricante + Voucher na aba Pagamento). Só vale para aparelho (PRODUTO_VIVO) com
- * preço por plano: acessório, chip, serviço e itens das abas sem plano (SEM_PLANO) continuam na REGULAR.
+ * Todo item entra pela REGULAR. O aparelho passa para a RENOVA quando a venda está com o Renova ligado (número do
+ * voucher no bloco Renova da aba Pagamento). Só vale para aparelho (PRODUTO_VIVO) com preço por plano: acessório,
+ * chip, serviço e itens das abas sem plano (SEM_PLANO) continuam na REGULAR.
  */
 @Component
 public class ResolvedorTabela {

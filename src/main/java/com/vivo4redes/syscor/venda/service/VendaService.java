@@ -25,6 +25,7 @@ import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.exception.TotalVendaAlteradoException;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.VendaSemItemException;
+import com.vivo4redes.syscor.exception.VoucherJaUsadoException;
 import com.vivo4redes.syscor.venda.model.Cliente;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.service.CalculadoraCondicaoPagamento;
@@ -50,11 +51,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 @Service
 public class VendaService {
 
     private static final java.time.ZoneId ZONA = java.time.ZoneId.of("America/Sao_Paulo");
+    private static final int TAMANHO_MAXIMO_VOUCHER = 60;
 
     private final VendaRepository vendaRepository;
     private final ClienteService clienteService;
@@ -274,8 +277,8 @@ public class VendaService {
             throw new VendaSemItemException();
         }
 
-        if (venda.isRenova() && !temVoucher(vendaId)) {
-            throw new NegocioException("Venda com Renova precisa de um pagamento por voucher.");
+        if (venda.isRenova() && vazio(venda.getCodigoVoucher())) {
+            throw new NegocioException("Venda com Renova precisa do número do voucher");
         }
         if (venda.getStatus() == StatusVenda.ABERTA) {
             exigirTotalVigente(venda);
@@ -416,6 +419,9 @@ public class VendaService {
     public Venda adicionarPagamento(Long vendaId, PagamentoVendaRequestDTO dto) {
         Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
+        if (dto.forma() == FormaPagamento.VOUCHER) {
+            throw new NegocioException("Voucher não é forma de pagamento: informe o número no bloco Renova.");
+        }
 
         CondicaoPagamento condicao = venda.getCondicaoPagamento();
         int parcelas = dto.parcelas() == null ? 1 : dto.parcelas();
@@ -428,19 +434,12 @@ public class VendaService {
                     + venda.getValorTotal().subtract(jaPago) + ").");
         }
 
-        boolean voucher = dto.forma() == FormaPagamento.VOUCHER;
-        String codigoVoucher = dto.codigoVoucher() == null ? "" : dto.codigoVoucher().trim();
-        if (voucher && codigoVoucher.isEmpty()) {
-            throw new NegocioException("Informe o código do voucher.");
-        }
-
         PagamentoVenda pagamento = PagamentoVenda.builder()
                 .venda(venda)
                 .forma(dto.forma())
                 .valor(dto.valor())
-                .parcelas(voucher ? 1 : parcelas)
+                .parcelas(parcelas)
                 .tipo(tipoDaLinha(condicao))
-                .codigoVoucher(voucher ? codigoVoucher : null)
                 .build();
         pagamentoVendaRepository.save(pagamento);
         reprecificar(venda);
@@ -466,10 +465,6 @@ public class VendaService {
         }
         pagamentoVendaRepository.delete(pagamento);
         pagamentoVendaRepository.flush();
-        // Sem voucher não há Renova: os aparelhos voltam para a REGULAR.
-        if (venda.isRenova() && pagamento.getForma() == FormaPagamento.VOUCHER && !temVoucher(vendaId)) {
-            venda.setRenova(false);
-        }
         reprecificar(venda);
         registrarAtividade(venda);
 
@@ -478,28 +473,50 @@ public class VendaService {
 
     /**
      * Liga/desliga a TABELA RENOVA nos aparelhos da venda e reprecifica.
-     * Ligar exige um pagamento por voucher e ao menos um aparelho com preço por plano; aparelho em plano
-     * pré-pago recusa o Renova (422). Os pagamentos não são alterados: se passarem do novo total, a resposta
-     * traz o aviso e a venda só finaliza depois do ajuste.
+     * Ligar exige o número do voucher, livre em outras vendas, e ao menos um aparelho com preço por plano; aparelho
+     * em plano pré-pago recusa o Renova (422). Desligar limpa o número. Os pagamentos não são alterados: se passarem
+     * do novo total, a resposta traz o aviso e a venda só finaliza depois do ajuste.
      */
     @Transactional
-    public Venda aplicarRenova(Long vendaId, boolean ativo) {
+    public Venda aplicarRenova(Long vendaId, boolean ativo, String codigoVoucher) {
         Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
 
+        String codigo = null;
         if (ativo) {
-            if (!temVoucher(vendaId)) {
-                throw new NegocioException("Lance o voucher na aba Pagamento antes de aplicar o Renova.");
-            }
+            codigo = numeroDoVoucher(codigoVoucher);
             boolean temAparelho = venda.getItens().stream()
                     .anyMatch(i -> i.getEstoque() != null && resolvedorTabela.elegivelRenova(i.getCategoria(), i.getGrupoPlano()));
             if (!temAparelho) {
                 throw new NegocioException("A venda não tem aparelho com preço por plano para aplicar o Renova.");
             }
+            exigirVoucherLivre(vendaId, codigo);
         }
         venda.setRenova(ativo);
+        venda.setCodigoVoucher(codigo);
         reprecificar(venda);
         return vendaRepository.save(venda);
+    }
+
+    private String numeroDoVoucher(String codigoVoucher) {
+        String codigo = codigoVoucher == null ? "" : codigoVoucher.trim();
+        if (codigo.isEmpty()) {
+            throw new NegocioException("Informe o número do voucher.");
+        }
+        if (codigo.length() > TAMANHO_MAXIMO_VOUCHER) {
+            throw new NegocioException("O número do voucher deve ter no máximo " + TAMANHO_MAXIMO_VOUCHER + " caracteres.");
+        }
+        return codigo;
+    }
+
+    /** Confere as vendas com o número na venda e o histórico anterior à V28, com o voucher em linha de pagamento. */
+    private void exigirVoucherLivre(Long vendaId, String codigo) {
+        Stream.concat(vendaRepository.buscarOutrasVendasComVoucher(codigo, vendaId).stream(),
+                        pagamentoVendaRepository.buscarOutrasVendasComVoucher(codigo, vendaId).stream())
+                .min(Long::compare)
+                .ifPresent(outraVenda -> {
+                    throw new VoucherJaUsadoException(outraVenda);
+                });
     }
 
     /**
@@ -613,10 +630,6 @@ public class VendaService {
                     + "lance só as entradas e use o financiamento.");
         }
         throw new NegocioException("A condição " + condicao + " não aceita " + forma + " em " + parcelas + "x.");
-    }
-
-    private boolean temVoucher(Long vendaId) {
-        return listarPagamentos(vendaId).stream().anyMatch(p -> p.getForma() == FormaPagamento.VOUCHER);
     }
 
     /**

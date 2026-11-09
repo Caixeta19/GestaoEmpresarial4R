@@ -6,6 +6,9 @@ import jakarta.validation.constraints.NotNull;
 public record RenovaRequestDTO(
 
         @NotNull(message = "ativo é obrigatório")
-        Boolean ativo
+        Boolean ativo,
+
+        /** Número do voucher: obrigatório ao ligar (validado no service) e ignorado ao desligar. */
+        String codigoVoucher
 ) {
 }

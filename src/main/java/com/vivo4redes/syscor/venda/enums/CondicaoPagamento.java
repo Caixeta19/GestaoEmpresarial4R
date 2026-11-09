@@ -21,10 +21,9 @@ public enum CondicaoPagamento {
     PARCELADO_20(20, "1.1176012"),
     PARCELADO_21(21, "1.1234148");
 
-    private static final Set<FormaPagamento> FORMAS_PIX =
-            EnumSet.of(FormaPagamento.PIX, FormaPagamento.VIVO_PAY, FormaPagamento.VOUCHER);
+    private static final Set<FormaPagamento> FORMAS_PIX = EnumSet.of(FormaPagamento.PIX, FormaPagamento.VIVO_PAY);
     private static final Set<FormaPagamento> FORMAS_ENTRADA = EnumSet.of(FormaPagamento.DINHEIRO, FormaPagamento.PIX,
-            FormaPagamento.VIVO_PAY, FormaPagamento.CARTAO_DEBITO, FormaPagamento.VOUCHER);
+            FormaPagamento.VIVO_PAY, FormaPagamento.CARTAO_DEBITO);
 
     private final int parcelas;
     private final BigDecimal fator;
@@ -66,6 +65,7 @@ public enum CondicaoPagamento {
     public boolean aceita(FormaPagamento forma, int parcelasDaLinha) {
         if (this == PIX) return FORMAS_PIX.contains(forma);
         if (parcelado()) return FORMAS_ENTRADA.contains(forma);
+        if (forma == FormaPagamento.VOUCHER) return false;
         return forma != FormaPagamento.CARTAO_CREDITO || parcelasDaLinha <= parcelas;
     }
 

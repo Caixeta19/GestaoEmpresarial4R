@@ -37,6 +37,8 @@ public record VendaResponseDTO(
         Instant criadoEm,
         /** Renova ligado (aparelhos com preço por plano na TABELA RENOVA). */
         boolean renova,
+        /** Número do voucher do Renova; null com o Renova desligado. */
+        String codigoVoucher,
         /** Soma do desconto do fabricante dos aparelhos na Renova (controle; já embutido no total). */
         BigDecimal descontoFabricante,
         /** valorTotal − soma dos pagamentos. Negativo quando os pagamentos passam do total. */
@@ -81,6 +83,7 @@ public record VendaResponseDTO(
         }
     }
 
+    /** {@code codigoVoucher} só vem preenchido nas linhas VOUCHER de vendas antigas. */
     public record PagamentoDTO(Long id, FormaPagamento forma, BigDecimal valor, Integer parcelas, String codigoVoucher,
                                TipoPagamento tipo) {
         static PagamentoDTO from(PagamentoVenda p) {
@@ -121,6 +124,7 @@ public record VendaResponseDTO(
                 v.getAvaliacaoProcedencia(),
                 v.getCriadoEm(),
                 v.isRenova(),
+                v.getCodigoVoucher(),
                 v.getDescontoFabricante(),
                 saldo,
                 aviso,

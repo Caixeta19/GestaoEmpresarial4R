@@ -41,7 +41,7 @@ public class PagamentoVenda {
     @Builder.Default
     private TipoPagamento tipo = TipoPagamento.PAGAMENTO;
 
-    /** Código do voucher (só na forma VOUCHER). */
+    /** Código do voucher nas linhas VOUCHER antigas; o número atual fica em Venda.codigoVoucher. */
     @Column(name = "codigo_voucher", length = 60)
     private String codigoVoucher;
 

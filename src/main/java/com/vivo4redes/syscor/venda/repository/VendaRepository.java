@@ -53,6 +53,16 @@ public interface VendaRepository extends JpaRepository<Venda, Long> {
         """)
     List<Long> buscarIdsCarrinhosAbandonados(@Param("limite") Instant limite);
 
+    /** Outras vendas não canceladas com esse número de voucher. */
+    @Query("""
+        select v.id from Venda v
+        where v.codigoVoucher = :codigo
+          and v.status <> com.vivo4redes.syscor.venda.enums.StatusVenda.CANCELADA
+          and v.id <> :vendaId
+        order by v.id
+        """)
+    List<Long> buscarOutrasVendasComVoucher(@Param("codigo") String codigo, @Param("vendaId") Long vendaId);
+
     @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "itens"})
     @Query("select distinct v from Venda v order by v.criadoEm desc")
     List<Venda> listarComDetalhes();

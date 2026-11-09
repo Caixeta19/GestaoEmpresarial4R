@@ -41,6 +41,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.unprocessableEntity().body(corpo);
     }
 
+    // 409: número do voucher já usado em outra venda
+    @ExceptionHandler(VoucherJaUsadoException.class)
+    public ResponseEntity<Map<String, Object>> handleVoucherJaUsado(VoucherJaUsadoException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(corpo(HttpStatus.CONFLICT, ex.getMessage()));
+    }
+
     // 401: credenciais inválidas (login / reautenticação do vendedor)
     @ExceptionHandler(AutenticacaoInvalidaException.class)
     public ResponseEntity<Map<String, Object>> handleAutenticacao(AutenticacaoInvalidaException ex) {
