@@ -625,8 +625,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | 200 | Consulta bem-sucedida |
 | 201 | Recurso criado com sucesso |
 | 400 | Corpo inválido (`@Valid`/`ConstraintViolationException`) |
-| 401 | Senha do vendedor errada ou usuário logado inativo (`AutenticacaoInvalidaException`) |
-| 403 | Sem token, ou token inválido ou expirado |
+| 401 | Sem token, token inválido ou expirado, usuário inativado, login recusado ou senha do vendedor errada |
 | 404 | Recurso não encontrado (`RecursoNaoEncontradoException`) |
 | 422 | Violação de regra de negócio (`BusinessException` e subclasses) |
 | 500 | Erro não tratado — inclui hoje as 3 exceções que não estendem `BusinessException` (ver [Backlog](#13-backlog--pendências-conhecidas)) |

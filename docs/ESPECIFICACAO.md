@@ -119,7 +119,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | --- | --- | --- |
 | RN.05 | Senha sempre em hash BCrypt, nunca em texto | `SecurityConfig`, `UsuarioService` |
 | RN.06 | E-mail de vendedor único (`VendedorDuplicadoException`) | `UsuarioService` |
-| RN.07 | Login por `login`/`email`/`usuario` + senha devolve JWT de 60 min e a flag `primeiroAcesso` | `AuthController`, `JwtService` |
+| RN.07 | Login por `login`/`email`/`usuario` + senha devolve JWT de 60 min e a flag `primeiroAcesso`. Senha errada, usuário inexistente ou inativo → 401 com a mesma mensagem | `AuthController`, `JwtService`, `GlobalExceptionHandler` |
 | RN.08 | No primeiro acesso o usuário troca a senha (mínimo 8 caracteres); a flag vira `false` | `AuthController` |
 | RN.09 | Finalizar ou mudar status de venda exige reautenticação do vendedor (login + senha); abrir e editar não pedem senha, e uma autenticação enviada é ignorada. Usuário inativo pela flag `ativo`, pelo cargo ou pela situação `INATIVO` não se autentica | `VendaService.exigirVendedorAutenticado`, `Usuario.podeAcessar` |
 | RN.10 | **(a fazer)** Autorização por cargo: o papel `ROLE_<CARGO>` já é montado no login, falta aplicá-lo nas rotas | — |
@@ -259,8 +259,8 @@ Formato padrão devolvido pelo `GlobalExceptionHandler`:
 | HTTP | Quando acontece | Exceção |
 | --- | --- | --- |
 | 400 | Corpo inválido, JSON malformado, tipo errado no parâmetro, documento inválido | `MethodArgumentNotValidException`, `DocumentoInvalidoException` |
-| 401 | Senha do vendedor errada na reautenticação, ou usuário logado inativo | `AutenticacaoInvalidaException` |
-| 403 | Sem token, ou token inválido ou expirado (ver bug 15). **(a fazer)** Usuário sem perfil para a rota | Spring Security |
+| 401 | Sem token, token inválido ou expirado, usuário inativado, login recusado, ou senha do vendedor errada na reautenticação | `SecurityConfig`, `JwtAuthFilter`, `AuthenticationException`, `AutenticacaoInvalidaException` |
+| 403 | **(a fazer)** Usuário sem perfil para a rota | — |
 | 404 | Recurso inexistente | `RecursoNaoEncontradoException` |
 | 422 | Regra de negócio violada (carrinho não editável, venda sem item, transição inválida, duplicidade, serial indisponível) | `BusinessException` e subclasses |
 | 500 | Erro não tratado (mensagem genérica) | `Exception` |
@@ -452,8 +452,8 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 | 12 | `tb_inventario_item.item_estoque_id` manteve o nome antigo, enquanto `itens_venda` foi renomeado para `estoque_geral_id` (V20) | V19, V20, `InventarioItem` | Padronizar o nome numa V21 (opcional) |
 | 13 | README desatualizado (estoque, segurança, financeiro, migrations) | `README.md` | Reescrever a partir deste documento |
 | 14 | Primeiro acesso aceita a senha fixa 00000000 para qualquer usuário com primeiroAcesso = true | UsuarioDetailsService.loadUserByUsername | Gerar senha temporária aleatória por usuário (gravada em hash, com validade) e obrigar a troca |
-| 15 | Sem token, ou com token inválido ou expirado, a API responde 403, e não 401 | `SecurityConfig` não define `authenticationEntryPoint`; `VendaAutenticacaoIntegracaoTest` | Definir `HttpStatusEntryPoint(UNAUTHORIZED)`, alinhado com o front, que hoje recebe 401 só para senha errada ou usuário inativo |
-| 16 | Usuário inativado continua acessando as rotas enquanto o token vale | `JwtAuthFilter` não confere `isEnabled()`; só abrir carrinho, finalizar e mudar status recusam o inativo | Conferir `isEnabled()` no filtro |
+| 15 | Sem token, ou com token inválido ou expirado, a API respondia 403, e não 401 | `SecurityConfig` não definia `authenticationEntryPoint` | ✅ **Corrigido.** `HttpStatusEntryPoint(UNAUTHORIZED)`; o 403 fica reservado para a falta de perfil |
+| 16 | Usuário inativado continuava acessando as rotas enquanto o token valia | `JwtAuthFilter` não conferia `isEnabled()` | ✅ **Corrigido.** O filtro recusa o inativo a cada requisição; um stream SSE já aberto só cai na próxima conexão |
 
 ## 10. Plano de construção
 
