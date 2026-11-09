@@ -8,6 +8,8 @@ import com.vivo4redes.syscor.estoque.service.PrecoCalculado;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService;
 import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.exception.NegocioException;
+import com.vivo4redes.syscor.exception.TotalVendaAlteradoException;
+import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.PagamentosIncompativeisException;
 import com.vivo4redes.syscor.venda.dto.AutenticacaoUsuarioDTO;
 import com.vivo4redes.syscor.venda.dto.request.FinalizarVendaRequestDTO;
@@ -414,6 +416,46 @@ class VendaServicePagamentoTest {
         assertThat(dto.saldo()).isEqualByComparingTo("0.00");
         assertThat(dto.pagamentos()).extracting(VendaResponseDTO.PagamentoDTO::tipo)
                 .containsExactly(TipoPagamento.ENTRADA, TipoPagamento.FINANCIADO);
+    }
+
+    @Test
+    @DisplayName("Tabela nova com o carrinho aberto: finalizar grava o novo total e recusa; depois do ajuste, finaliza")
+    void finalizarComTabelaNova() {
+        pagar(FormaPagamento.DINHEIRO, "11199.00", null);
+        precos(TabelaPreco.REGULAR, "11999.00", null, "10799.10", "13480.00");
+
+        assertThatThrownBy(() -> service.finalizar(1L, finalizar()))
+                .isInstanceOf(TotalVendaAlteradoException.class)
+                .hasMessageContaining("11199.00").hasMessageContaining("11999.00");
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("11999.00");
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.ABERTA);
+
+        pagar(FormaPagamento.DINHEIRO, "800.00", null);
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+    }
+
+    @Test
+    @DisplayName("Tabela nova no parcelado: o financiado acompanha, mas a primeira tentativa de finalizar é recusada")
+    void finalizarParceladoComTabelaNova() {
+        service.definirCondicaoPagamento(1L, CondicaoPagamento.PARCELADO_21);
+        service.financiar(1L);
+        precos(TabelaPreco.REGULAR, "11999.00", null, "10799.10", "13480.00");
+
+        assertThatThrownBy(() -> service.finalizar(1L, finalizar())).isInstanceOf(TotalVendaAlteradoException.class);
+        assertThat(financiado().getValor()).isEqualByComparingTo("13480.00");
+
+        assertThat(service.finalizar(1L, finalizar()).getStatus()).isEqualTo(StatusVenda.PENDENTE);
+    }
+
+    @Test
+    @DisplayName("Venda já finalizada não é reprecificada: finalizar de novo só recusa a transição")
+    void finalizarDeNovoNaoReprecifica() {
+        pagar(FormaPagamento.DINHEIRO, "11199.00", null);
+        service.finalizar(1L, finalizar());
+        precos(TabelaPreco.REGULAR, "11999.00", null, "10799.10", "13480.00");
+
+        assertThatThrownBy(() -> service.finalizar(1L, finalizar())).isInstanceOf(TransicaoStatusInvalidaException.class);
+        assertThat(venda.getValorTotal()).isEqualByComparingTo("11199.00");
     }
 
     private void pagar(FormaPagamento forma, String valor, String voucher) {

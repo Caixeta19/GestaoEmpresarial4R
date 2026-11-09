@@ -22,6 +22,7 @@ import com.vivo4redes.syscor.exception.CarrinhoNaoEditavelException;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.PagamentosIncompativeisException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.exception.TotalVendaAlteradoException;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
 import com.vivo4redes.syscor.exception.VendaSemItemException;
 import com.vivo4redes.syscor.venda.model.Cliente;
@@ -260,9 +261,13 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
-    @Transactional
+    /**
+     * Fecha o carrinho pela tabela vigente. Se o total mudou (tabela nova, por exemplo), grava o total novo e recusa
+     * com 422: o vendedor confere antes de cobrar. Por isso essa exceção não desfaz a transação.
+     */
+    @Transactional(noRollbackFor = TotalVendaAlteradoException.class)
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
-        Venda venda = buscarPorId(vendaId);
+        Venda venda = buscarParaEdicao(vendaId);
         exigirVendedorAutenticado(dto.autenticacaoVendedor());
 
         if (venda.getItens().isEmpty()) {
@@ -271,6 +276,9 @@ public class VendaService {
 
         if (venda.isRenova() && !temVoucher(vendaId)) {
             throw new NegocioException("Venda com Renova precisa de um pagamento por voucher.");
+        }
+        if (venda.getStatus() == StatusVenda.ABERTA) {
+            exigirTotalVigente(venda);
         }
         BigDecimal totalPago = somarPagamentos(vendaId);
         if (totalPago.compareTo(venda.getValorTotal()) != 0) {
@@ -655,6 +663,14 @@ public class VendaService {
         venda.setAjusteCondicao(total.ajuste());
         venda.setValorParcela(total.valorParcela());
         atualizarFinanciado(linhas, condicao, total.financiado());
+    }
+
+    private void exigirTotalVigente(Venda venda) {
+        BigDecimal anterior = venda.getValorTotal();
+        reprecificar(venda);
+        if (anterior.compareTo(venda.getValorTotal()) != 0) {
+            throw new TotalVendaAlteradoException(anterior, venda.getValorTotal());
+        }
     }
 
     /** O que compõe o total da venda numa condição; {@code aoPrecificar} recebe cada item de tabela. */
