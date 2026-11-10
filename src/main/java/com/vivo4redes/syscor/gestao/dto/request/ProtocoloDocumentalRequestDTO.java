@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.gestao.dto.request;
 
 import com.vivo4redes.syscor.gestao.enums.SituacaoServico;
+import com.vivo4redes.syscor.gestao.enums.StatusGed;
 import lombok.Builder;
 
 import java.time.LocalDate;
@@ -24,6 +25,13 @@ public record ProtocoloDocumentalRequestDTO(
         LocalDate dataAtivacao,
         LocalDate dataBaixa,
         String numeroProtocoloGedPortabilidade,
-        LocalDate dataInstalacao
+        LocalDate dataInstalacao,
+        StatusGed statusGed,
+        String motivoReprovacao,
+        Boolean servicoInstalado,
+        LocalDate dataAgendadaInstalacao,
+        String armario,
+        Boolean comissaoAparelho,
+        LocalDate dataUltimaAtivacao
 ) {
 }

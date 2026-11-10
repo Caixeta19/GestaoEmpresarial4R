@@ -80,6 +80,15 @@ public class ProtocoloDocumentalService {
         protocolo.setDataBaixa(dto.dataBaixa());
         protocolo.setNumeroProtocoloGedPortabilidade(dto.numeroProtocoloGedPortabilidade());
         protocolo.setDataInstalacao(dto.dataInstalacao());
+        protocolo.setStatusGed(dto.statusGed());
+        protocolo.setMotivoReprovacao(dto.motivoReprovacao());
+        protocolo.setServicoInstalado(dto.servicoInstalado());
+        protocolo.setDataAgendadaInstalacao(dto.dataAgendadaInstalacao());
+        protocolo.setArmario(dto.armario());
+        if (dto.comissaoAparelho() != null) {
+            protocolo.setComissaoAparelho(dto.comissaoAparelho());
+        }
+        protocolo.setDataUltimaAtivacao(dto.dataUltimaAtivacao());
         protocolo.setAlteradoPor(usuarioService.usuarioLogado());
 
         protocolo = protocoloRepository.save(protocolo);

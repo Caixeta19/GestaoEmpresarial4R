@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.gestao.dto.response;
 
 import com.vivo4redes.syscor.gestao.enums.SituacaoServico;
+import com.vivo4redes.syscor.gestao.enums.StatusGed;
 import com.vivo4redes.syscor.gestao.enums.TipoPlano;
 import com.vivo4redes.syscor.gestao.model.ProtocoloDocumental;
 import com.vivo4redes.syscor.gestao.service.RegrasDocumental;
@@ -51,7 +52,14 @@ public record ProtocoloDocumentalResponseDTO(
         LocalDate dataBaixa,
         String numeroProtocoloGedPortabilidade,
         LocalDate dataInstalacao,
-        String alteradoPorNome
+        String alteradoPorNome,
+        StatusGed statusGed,
+        String motivoReprovacao,
+        Boolean servicoInstalado,
+        LocalDate dataAgendadaInstalacao,
+        String armario,
+        Boolean comissaoAparelho,
+        LocalDate dataUltimaAtivacao
 ) {
 
     public static ProtocoloDocumentalResponseDTO from(Venda venda, ProtocoloDocumental protocolo) {
@@ -96,7 +104,14 @@ public record ProtocoloDocumentalResponseDTO(
                 temProtocolo ? protocolo.getDataBaixa() : null,
                 temProtocolo ? protocolo.getNumeroProtocoloGedPortabilidade() : null,
                 temProtocolo ? protocolo.getDataInstalacao() : null,
-                temProtocolo && protocolo.getAlteradoPor() != null ? protocolo.getAlteradoPor().getNome() : null
+                temProtocolo && protocolo.getAlteradoPor() != null ? protocolo.getAlteradoPor().getNome() : null,
+                temProtocolo ? protocolo.getStatusGed() : null,
+                temProtocolo ? protocolo.getMotivoReprovacao() : null,
+                temProtocolo ? protocolo.getServicoInstalado() : null,
+                temProtocolo ? protocolo.getDataAgendadaInstalacao() : null,
+                temProtocolo ? protocolo.getArmario() : null,
+                temProtocolo ? protocolo.getComissaoAparelho() : null,
+                temProtocolo ? protocolo.getDataUltimaAtivacao() : null
         );
     }
 }

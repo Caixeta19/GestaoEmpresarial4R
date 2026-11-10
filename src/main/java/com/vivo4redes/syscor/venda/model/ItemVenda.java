@@ -127,6 +127,26 @@ public class ItemVenda {
     @Column(name = "serial_confirmado")
     private Boolean serialConfirmado;
 
+    // ---- Relatório de Gestão Documental (V34)
+    /** Smartphone, Voz, Modem, Internet Fibra, TV GVT, Fixa GVT ou Outros serviços. */
+    @Column(name = "tipo_linha", length = 30)
+    private String tipoLinha;
+
+    @Column(name = "valor_plano", precision = 12, scale = 2)
+    private BigDecimal valorPlano;
+
+    @Column(name = "valor_plano_antigo", precision = 12, scale = 2)
+    private BigDecimal valorPlanoAntigo;
+
+    @Column(name = "numero_portado", length = 20)
+    private String numeroPortado;
+
+    @Column(name = "fidelizacao")
+    private Boolean fidelizacao;
+
+    @Column(name = "cod")
+    private Boolean cod;
+
     // ---- Como o preço foi calculado (tabela vigente da Telefônica)
     @Enumerated(EnumType.STRING)
     @Column(name = "grupo_plano", length = 30)
