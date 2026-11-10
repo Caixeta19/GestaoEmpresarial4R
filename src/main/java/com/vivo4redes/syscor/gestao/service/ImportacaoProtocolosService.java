@@ -131,7 +131,12 @@ public class ImportacaoProtocolosService {
                 tem ? atual.getSituacaoServico() : null,
                 tem ? atual.getGerarComissao() : null,
                 tem && atual.getMotivosCancelamento() != null ? List.of(atual.getMotivosCancelamento().split(";")) : null,
-                statusBko);
+                statusBko,
+                tem ? atual.getAtivacaoPrimeiraChamada() : null,
+                tem ? atual.getDataAtivacao() : null,
+                tem ? atual.getDataBaixa() : null,
+                tem ? atual.getNumeroProtocoloGedPortabilidade() : null,
+                tem ? atual.getDataInstalacao() : null);
     }
 
     private static List<String> lerLinhas(MultipartFile arquivo) {
