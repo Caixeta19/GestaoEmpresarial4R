@@ -245,10 +245,14 @@ CANCELADA → (terminal, sem saída)
   e `VIM_*` → POS; sem grupo de preço, vale o segmento ("Pré", "Controle", "Pós").
 - Importação em lote por CSV (`NUMERO_VENDA;PROTOCOLO_GED;STATUS_BKO;NUMERO_ACESSO;DATA_DIGITALIZACAO`): uma
   transação por linha, então uma linha com erro não desfaz as outras.
-- Exportação do Relatório de Gestão Documental em CSV (`;`, UTF-8 com BOM), período de até 93 dias. Lê a view
-  `vw_gestao_documental` (V33): **uma linha por item de serviço**, com as 45 colunas do relatório do sistema
-  anterior, na mesma ordem. Faturas, receita e TFP ainda saem vazias; área e rede da filial (V32) também,
-  até serem cadastradas. O Adabas é o `filiais.codigo`.
+- Exportação do Relatório de Gestão Documental (`gestao_documental.csv`, `;`, Windows-1252, LF) no layout do
+  sistema atual, período de até 93 dias. Lê a view `vw_gestao_documental` (V34): preâmbulo com emissão e revenda
+  (`syscor.revenda.nome`), cabeçalho de **55 colunas**, **uma linha por serviço** (aparelho e acessório como
+  "Troca de Aparelho") e rodapé. Datas sem hora (menos "Data de alteração"), valores com ponto, Sim/Não e as
+  colunas de número-texto entre apóstrofos. Faturas, Valor Receita e TFP ainda saem vazias.
+- V34: o item de venda ganhou tipo de linha, valor do plano e do plano antigo, nº portado, fidelização e COD; o
+  protocolo ganhou status GED, motivo de reprovação, instalação (feita, agendada, armário), comissão de aparelho
+  e data da última ativação.
 - O protocolo ganhou (V32) ativação da primeira chamada, datas de ativação, baixa e instalação, GED da
   portabilidade e o usuário que salvou por último (`alteradoPorNome` na resposta).
 
@@ -635,7 +639,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/documental/protocolos` | Buscar por número de protocolo GED |
 | GET | `/documental/protocolos/busca` | Vendas lançadas com ou sem protocolo, paginadas, com os filtros da tela (período, filiais, vendedor, nº da venda, nº de acesso, GED, líder, status BKO, tipos de plano, serviços) |
 | POST | `/documental/protocolos/importacao` | Importar protocolos em lote (CSV) → `{ total, sucessos, erros }` |
-| GET | `/documental/protocolos/exportacao` | Relatório de Gestão Documental em CSV (período obrigatório, até 93 dias) |
+| GET | `/documental/protocolos/exportacao` | Relatório de Gestão Documental (`gestao_documental.csv`, Windows-1252, 55 colunas; período obrigatório, até 93 dias) |
 | POST | `/mailing/campanhas` | Criar campanha |
 | GET | `/mailing/campanhas/modelo-planilha` | Baixar modelo de planilha de destinatários |
 | POST | `/mailing/campanhas/importar-planilha` | Importar destinatários (multipart) |
@@ -693,7 +697,7 @@ backend fora de uma rede confiável, ativar de fato o `JwtFilter` no
 |---|---|---|---|---|
 | `venda` | ✅ completo (carrinho, itens, pagamentos, status, avaliação) | ✅ máquina de estados, validação de carrinho | ✅ V1, V2, V8 | Núcleo do sistema — mais maduro |
 | `estoque` | ✅ produto, entrada de serial, alertas, inventário SAP, tabela de preços | ✅ status de serial, conciliação, resolução de SKU | ✅ V4, V5, V6 | — |
-| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31, V32, V33 (view do relatório) | — |
+| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31, V32, V33/V34 (view do relatório) | — |
 | `mailing` | ✅ criar, importar, disparar, listar campanha | ✅ fila + listener assíncrono | ✅ V7 | Depende de credenciais WhatsApp via env vars |
 | `dashboard` | ✅ 1 endpoint (`/dashboard/executivo`) | ✅ implementado, meta fixa no código | — (lê de `venda`/`estoque`) | Ver limitação de filtros abaixo |
 
