@@ -172,6 +172,19 @@ CANCELADA → (terminal, sem saída)
   importar estoque novo (só `DISPONIVEL`/`RESERVADO`; `VENDIDO` não muda).
 - **`tb_produto_preco_plano` deixou de ser usada na V24 e será removida numa migration futura.**
 
+### Acessório pelo IMEI/serial (V35)
+
+- Na aba Acessório, o item entra pela leitura do serial, como o aparelho: `POST /vendas/{id}/itens` com
+  `{ "categoria": "ACESSORIO", "imeiOuSerial": "...", "quantidade": 1 }`. O `produtoId` é opcional quando vem o serial.
+- No estoque, o acessório tem **um serial por SKU** com quantidade N. Cada leitura prende **1 unidade**
+  (`quantidade_reservada`); duas capinhas iguais são duas leituras. A linha só vira `RESERVADO` quando todas as
+  unidades estão em carrinhos e só vira `VENDIDO` quando a quantidade zera.
+- Concluir a venda tira a unidade da linha; remover o item ou cancelar o carrinho solta a reserva; cancelar a venda
+  concluída devolve a unidade. A importação do relatório não deixa a quantidade abaixo das unidades reservadas.
+- IMEI de aparelho na aba Acessório (ou serial de acessório na aba Produto Vivo) → 422. Serial sem unidade livre,
+  preso no carrinho de outra venda → 409 "Serial já está reservado na venda #id".
+- Sem serial, o acessório ainda baixa a linha inteira (fallback do modelo antigo).
+
 ### Renova (V25, V28)
 
 - Todo item entra pela **TABELA REGULAR**. O aparelho (PRODUTO_VIVO com preço por plano) passa para a
@@ -598,7 +611,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/vendas` | Listar todas as vendas |
 | GET | `/vendas/{id}` | Buscar venda por id |
 | PUT | `/vendas/{id}` | Atualizar dados iniciais (cliente, filial, score, nota), sem senha; só com a venda `ABERTA` (senão 422) |
-| POST | `/vendas/{id}/itens` | Adicionar item ao carrinho |
+| POST | `/vendas/{id}/itens` | Adicionar item ao carrinho (com `imeiOuSerial`, o `produtoId` é opcional; acessório entra 1 unidade por leitura; aba errada → 422; serial em outro carrinho → 409) |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item do carrinho |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento (`VOUCHER` → 422) |
 | DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |

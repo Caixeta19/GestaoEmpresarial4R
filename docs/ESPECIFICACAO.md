@@ -133,9 +133,9 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.11 | `numeroVenda` público de 7 dígitos gerado por sequence do banco na abertura do carrinho | `NumeroVendaGenerator`, V3 |
 | RN.12 | Item só entra ou sai com a venda em `ABERTA` (`CarrinhoNaoEditavelException`) | `VendaService` |
 | RN.13 | `valorTotal` nunca vem da API: é recalculado pela soma dos itens | `Venda.recalcularValorTotal()` |
-| RN.14 | Serviço Vivo (plano) entra sem produto e com valor 0; demais categorias exigem `produtoId` e valor > 0 | `VendaService.adicionarItem` |
+| RN.14 | Serviço Vivo (plano) entra sem produto e com valor 0; demais categorias exigem `produtoId` **ou** o `imeiOuSerial` (a linha do estoque é achada pela leitura) e valor > 0 | `VendaService.adicionarItem` |
 | RN.15 | Item com IMEI/serial tem quantidade 1; aparelho sem serial informado é recusado | `VendaService.adicionarItem` |
-| RN.16 | Acessório sem serial baixa a linha inteira do estoque; a quantidade tem que bater com a da linha | `VendaService.adicionarItem` |
+| RN.16 | Acessório entra pelo serial lido, uma unidade por leitura (RN.62). Sem serial, só como fallback, baixa a linha inteira do estoque e a quantidade tem que bater com a da linha | `VendaService.adicionarItem` |
 | RN.17 | O serial lido precisa ser da mesma linha de estoque escolhida (impede vender IMEI com preço de outro) | `VendaService.adicionarItem` |
 | RN.18 | Pagamento não pode exceder o saldo restante da venda | `VendaService.adicionarPagamento` |
 | RN.19 | Finalizar valida, nesta ordem: autenticação → ≥ 1 item → Renova com número → reprecificação/total → soma dos pagamentos igual ao total. A venda é lançada direto: vai para `CONCLUIDA` e os seriais passam de `RESERVADO` a `VENDIDO` na mesma transação; quem se autenticou passa a ser o vendedor (`usuario_id`), com `finalizado_por_id` e `finalizado_em`. Senha errada é 401 sem alterar nada; no 422 de total alterado, só o total muda | `VendaService.finalizar` |
@@ -182,6 +182,8 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.59 | Exportação do Relatório de Gestão Documental no layout do sistema atual: `gestao_documental.csv`, Windows-1252, `;`, LF e sem aspas duplas. Preâmbulo "Data da Emissão do relatório;dd/MM/aaaa HH:mm" e "Revenda: <`syscor.revenda.nome`, padrão 4 REDES>", cabeçalho de **55 colunas**, uma linha por serviço (aparelho e acessório entram como "Troca de Aparelho", só eles com Modelo e IMEI) e o rodapé "(*) Campos obrigatórios;" / "(**) Campos que podem ser alterados;". Datas dd/MM/aaaa sem hora, menos "Data de alteração" e a emissão; valores com ponto e 2 casas; Sim/Não; Sim Card, NEXT/RPON, os dois GED e Motivo Reprovação entre apóstrofos (vazio = `''`). Ordem: filial, Data Venda, avaliados antes de "Não avaliado", ID Venda. Os filtros de item (serviço, tipo de plano, nº de acesso) escolhem as linhas. Período obrigatório de no máximo 93 dias (422 fora disso) | `ExportacaoDocumentalService`, `RelatorioDocumentalRepository`, V34 |
 | RN.60 | Origem das colunas do relatório: Serviço = `<tipo> <tipo de linha> <segmento>` (Reativação sem tipo de linha; segmento Pré/Controle/Pós pelo tipo de plano); Receita = 0.00 em Troca de Simcard, Aparelho, número e titularidade, senão `max(0, valor plano − valor plano antigo)`; pré-pago = Plano "PRE PAGO", valor 0.00 e vencimento 0; sem plano antigo = "-" e 0.00. Status BKO vazio = "Não avaliado"; Situação do serviço sem protocolo = "Não avaliado"; Status GED gravado ou, sem valor, deduzido (cancelada → "Serviço cancelado", com digitalização → "Serviço Digitalizado", com GED → "Aguardando digitalização do serviço", senão "Serviço Não digitalizado"). Usuário/Data Cancelamento só em venda `CANCELADA`; Usuário Inserção = quem finalizou; Usuário Alteração e Data de alteração = último save do protocolo. Faturas, Valor Receita e TFP ainda não têm origem e saem vazias. O protocolo é por venda: seus campos se repetem em cada linha | V34, `ProtocoloDocumentalService.salvar` |
 | RN.61 | Venda lançada (`CONCLUIDA`) só pode ser cancelada no dia do lançamento, pela data de São Paulo; de dia anterior = 422 e o estoque não muda. Vale para todos os cargos. O carrinho `ABERTA` continua cancelável a qualquer hora | `VendaService.avancarStatus` |
+| RN.62 | Acessório é vendido por unidade: a linha do estoque tem um serial por SKU com `quantidade` N, e cada leitura do serial prende 1 unidade (`quantidade_reservada` + 1, V35). A linha fica `DISPONIVEL` enquanto sobra unidade livre e vira `RESERVADO` quando todas estão em carrinhos. Concluir a venda tira 1 de `quantidade` e de `quantidade_reservada` (a linha vira `VENDIDO` ao zerar); remover o item ou cancelar o carrinho solta a reserva; cancelar a venda concluída devolve 1 à `quantidade`. A importação do relatório não deixa a `quantidade` abaixo das unidades reservadas | `EstoqueGeral.reservarUnidade` / `confirmarVendaUnidade` / `liberarUnidadeReservada` / `devolverUnidadeVendida`, V35 |
+| RN.63 | A aba precisa bater com o item do estoque: `ACESSORIO` com IMEI de aparelho → 422 "Este IMEI é de um aparelho: lance na aba Produto Vivo."; `PRODUTO_VIVO` com serial de acessório → 422 "Este serial é de um acessório: lance na aba Acessório.". Serial sem unidade livre por estar no carrinho de uma venda aberta → 409 "Serial já está reservado na venda #id" | `VendaService.exigirCategoriaDoEstoque` / `exigirSerialLivre`, `SerialReservadoException` |
 
 **Financeiro**
 
@@ -363,7 +365,7 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | POST | `/vendas` | Abrir carrinho (`ABERTA`), sem senha; vendedor provisório = usuário do JWT |
 | GET | `/vendas` | Listar com filtros (`filialId`, `vendedorId`, `numeroVenda`, `dataInicio`, `dataFim`, `cliente`, `numeroAcesso`, `serialProdutoVivo`, `serialSimcard`, `modeloAcessorio`) |
 | GET / PUT | `/vendas/{id}` | Buscar / atualizar dados iniciais (cliente, filial, score, nota), sem senha; `PUT` só com a venda `ABERTA` (senão 422). A resposta da venda traz `vendedorNome`, `finalizadoPorNome` e `finalizadoEm` |
-| POST | `/vendas/{id}/itens` | Adicionar item (reserva o serial; a baixa é na conclusão) |
+| POST | `/vendas/{id}/itens` | Adicionar item (reserva o serial; a baixa é na conclusão). Com `imeiOuSerial`, o `produtoId` é opcional; acessório entra 1 unidade por leitura (RN.62). Aba errada → 422; serial em outro carrinho → 409 (RN.63) |
 | DELETE | `/vendas/{id}/itens/{itemId}` | Remover item (estorna o serial) |
 | POST | `/vendas/{id}/pagamentos` | Registrar pagamento (`VOUCHER` → 422) |
 | DELETE | `/vendas/{id}/pagamentos/{pagamentoId}` | Remover pagamento |
@@ -391,7 +393,7 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | POST | `/estoque-geral/importacoes/relatorio` | Importar relatório de estoque Vivo (multipart `arquivo`) |
 | POST | `/estoque-geral/importacoes/precos` | Atualizar preços (multipart `arquivo`) |
 | GET | `/estoque-geral/disponiveis` | Unidades disponíveis (`?busca=&filial=&limite=`) |
-| GET | `/estoque-geral/disponiveis/{serial}` | Unidade disponível por serial |
+| GET | `/estoque-geral/disponiveis/{serial}` | Unidade disponível por serial (404 se não existir ou não tiver unidade livre). Traz `quantidadeDisponivel` (unidades livres da linha) |
 | GET | `/estoque-geral/consolidado` | Saldo por modelo |
 | GET | `/estoque-geral/alertas` | Modelos críticos |
 | GET | `/produtos`, `/produtos/{id}` | Catálogo (derivado do estoque geral) |
