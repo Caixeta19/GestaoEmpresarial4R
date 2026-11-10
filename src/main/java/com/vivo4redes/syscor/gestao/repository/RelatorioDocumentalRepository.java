@@ -17,24 +17,28 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * Leitura da vw_gestao_documental (V33) com os mesmos filtros da busca. Uma linha por item de serviço: os filtros de
- * item (serviço, tipo de plano, nº de acesso) escolhem as linhas, e não a venda inteira.
+ * Leitura da vw_gestao_documental (V34) com os mesmos filtros da busca. Uma linha por serviço (aparelho e acessório
+ * entram como "Troca de Aparelho"): os filtros de item (serviço, tipo de plano, nº de acesso) escolhem as linhas, e
+ * não a venda inteira.
  */
 @Repository
 @RequiredArgsConstructor
 public class RelatorioDocumentalRepository {
 
-    /** As 45 colunas do relatório, com os nomes e a ordem da chview_gestao_documental_mt_4redes. */
+    /** As 55 colunas do relatório do sistema atual, com o texto e a ordem do cabeçalho (docs/gestao.md). */
     public static final List<String> COLUNAS = List.of(
-            "ID do Serviço", "ID da Venda", "Serviço", "Plano", "Área de loja", "REDE_ID", "REDE", "PDV_ID", "PDV",
-            "Adabas", "Cliente", "Tipo Cliente", "CPF/CNPJ do cliente", "Vendedor", "Status Vendedor", "Data da Venda",
-            "DATA_SYS", "Ativação da Primeira Chamada", "Nº de Acesso", "Data de Ativação", "Data de Baixa",
-            "Zerar Remuneração", "Data de Digitalização", "Nº Protocolo GED", "Nº Protocolo GED (Portabilidade)",
-            "Status BKO", "Observação", "Observação Importação", "Situação do Serviço", "Motivo do Cancelamento",
-            "Gerar comissão de serviço do vendedor", "Valor Remuneração", "status_primeira_fatura",
-            "status_terceira_fatura", "status_segunda_fatura", "data_primeira_fatura", "data_segunda_fatura",
-            "data_terceira_fatura", "valor_receita", "valor_considerado_tfp", "valor_penalizado_tfp",
-            "Usuário Cancelamento", "Usuário Inserção", "Usuário Alteração", "Data Instalação");
+            "Filial", "Data Venda(*)", "Data Ativação(**)", "Status BKO(*)(**)", "Serviço(*)", "ID Venda", "Modelo",
+            "IMEI", "Plano", "Valor plano(**)", "Plano Antigo", "Valor plano antigo(**)", "Vencimento Fatura(**)",
+            "Vendedor", "Cliente", "CPF/CNPJ", "Nº Acesso(*)", "Nº Portado", "Servico Instalado",
+            "Data Agendada de Instalação", "Armário", "Data Instalação", "Situação do serviço(**)", "Receita",
+            "Status GED", "Sim Card", "COD", "Fidelização", "Zerar Remuneração", "Gerar Price",
+            "Nº Solicitação NEXT / RPON", "Nº Protocolo GED(**)", "Nº Protocolo GED Portabilidade (**)",
+            "Motivo Reprovação(**)", "Data Digitalização", "Usuário Inserção", "Usuário Alteração", "Observação",
+            "Motivo Cancelamento(**)", "Comissão de Serviço do Vendedor", "Comissão de Aparelho do Vendedor(**)",
+            "Data Última Ativação(**)", "Data de alteração", "Usuário Cancelamento", "Data Cancelamento",
+            "Líder de Equipe", "Status Primeira Fatura", "Data Primeira Fatura", "Status Segunda Fatura",
+            "Data Segunda Fatura", "Status Terceira Fatura", "Data Terceira Fatura", "Valor Receita",
+            "Valor Considerado TFP", "Valor Penalizado TFP");
 
     // translate(): tira os acentos no banco para comparar como TextoUtil.normalizar
     private static final String SEM_ACENTO =
@@ -42,7 +46,7 @@ public class RelatorioDocumentalRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    /** Entrega cada linha (valores na ordem de {@link #COLUNAS}), em ordem de lançamento, venda e serviço. */
+    /** Entrega cada linha (valores na ordem de {@link #COLUNAS}), na ordem do relatório. */
     public void percorrer(FiltroDocumentalDTO f, Consumer<Object[]> linha) {
         MapSqlParameterSource p = new MapSqlParameterSource();
         List<String> where = new ArrayList<>();
@@ -70,7 +74,7 @@ public class RelatorioDocumentalRepository {
         }
         if (f.numeroVenda() != null) {
             p.addValue("numeroVenda", f.numeroVenda());
-            where.add("\"ID da Venda\" = :numeroVenda");
+            where.add("\"ID Venda\" = :numeroVenda");
         }
         if (f.statusBko() != null) {
             p.addValue("statusBko", f.statusBko().name());
@@ -79,11 +83,11 @@ public class RelatorioDocumentalRepository {
         String digitos = f.numeroAcesso() == null ? "" : f.numeroAcesso().replaceAll("\\D", "");
         if (!digitos.isEmpty()) {
             p.addValue("acesso", digitos);
-            where.add("regexp_replace(\"Nº de Acesso\", '[^0-9]', '', 'g') = :acesso");
+            where.add("regexp_replace(\"Nº Acesso(*)\", '[^0-9]', '', 'g') = :acesso");
         }
         if (temItens(f.servicos())) {
             p.addValue("servicos", f.servicos().stream().map(TextoUtil::normalizar).toList());
-            where.add(SEM_ACENTO.formatted("\"Serviço\"") + " IN (:servicos)");
+            where.add("servico_norm IN (:servicos)");
         }
         if (temItens(f.tiposPlano())) {
             p.addValue("tiposPlano", f.tiposPlano().stream().map(TipoPlano::name).toList());
@@ -91,7 +95,7 @@ public class RelatorioDocumentalRepository {
         }
         if (f.numeroProtocoloGed() != null && !f.numeroProtocoloGed().isBlank()) {
             p.addValue("ged", f.numeroProtocoloGed().trim().toUpperCase());
-            where.add("upper(trim(\"Nº Protocolo GED\")) = :ged");
+            where.add("upper(trim(\"Nº Protocolo GED(**)\")) = :ged");
         }
         if (f.liderEquipe() != null && !f.liderEquipe().isBlank()) {
             p.addValue("lider", "%" + TextoUtil.normalizar(f.liderEquipe()) + "%");
@@ -100,7 +104,8 @@ public class RelatorioDocumentalRepository {
 
         String sql = "SELECT " + COLUNAS.stream().map(c -> "\"" + c + "\"").collect(Collectors.joining(", "))
                 + " FROM vw_gestao_documental WHERE " + String.join(" AND ", where)
-                + " ORDER BY data_lancamento, \"ID da Venda\", \"ID do Serviço\"";
+                // filial, dia da venda, avaliados antes de "Não avaliado", venda e item
+                + " ORDER BY \"Filial\", \"Data Venda(*)\", (status_bko = 'Nao_avaliado'), \"ID Venda\", item_id";
         jdbc.query(sql, p, (ResultSet rs) -> linha.accept(valores(rs)));
     }
 

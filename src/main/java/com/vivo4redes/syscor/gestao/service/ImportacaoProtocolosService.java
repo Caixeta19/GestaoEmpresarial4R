@@ -136,7 +136,14 @@ public class ImportacaoProtocolosService {
                 tem ? atual.getDataAtivacao() : null,
                 tem ? atual.getDataBaixa() : null,
                 tem ? atual.getNumeroProtocoloGedPortabilidade() : null,
-                tem ? atual.getDataInstalacao() : null);
+                tem ? atual.getDataInstalacao() : null,
+                tem ? atual.getStatusGed() : null,
+                tem ? atual.getMotivoReprovacao() : null,
+                tem ? atual.getServicoInstalado() : null,
+                tem ? atual.getDataAgendadaInstalacao() : null,
+                tem ? atual.getArmario() : null,
+                tem ? atual.getComissaoAparelho() : null,
+                tem ? atual.getDataUltimaAtivacao() : null);
     }
 
     private static List<String> lerLinhas(MultipartFile arquivo) {

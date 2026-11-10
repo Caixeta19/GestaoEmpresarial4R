@@ -202,6 +202,12 @@ public class VendaService {
                 // Chip tem preço fixo de configuração (o PVP do aparelho não o inclui); o valor do front é ignorado.
                 .valorChip(dto.valorChip() == null ? null : precoVigenteService.precoChip())
                 .serialConfirmado(dto.serialConfirmado())
+                .tipoLinha(dto.tipoLinha())
+                .valorPlano(dto.valorPlano())
+                .valorPlanoAntigo(dto.valorPlanoAntigo())
+                .numeroPortado(dto.numeroPortado())
+                .fidelizacao(dto.fidelizacao())
+                .cod(dto.cod())
                 .grupoPlano(preco == null ? null : preco.grupoPlano())
                 .tabelaAplicada(preco == null ? null : preco.tabela())
                 .formaPagamento(preco == null ? null : venda.getCondicaoPagamento().formaPagamento())

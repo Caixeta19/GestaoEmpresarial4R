@@ -35,6 +35,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -300,131 +301,228 @@ class ProtocoloDocumentalIntegracaoTest {
 
     // ------------------------------------------------------------------ exportação
 
-    /** As 45 colunas da chview_gestao_documental_mt_4redes, escritas aqui de novo a partir do docs/gestao.md. */
-    private static final List<String> COLUNAS_RELATORIO = List.of(
-            "ID do Serviço", "ID da Venda", "Serviço", "Plano", "Área de loja", "REDE_ID", "REDE", "PDV_ID", "PDV",
-            "Adabas", "Cliente", "Tipo Cliente", "CPF/CNPJ do cliente", "Vendedor", "Status Vendedor", "Data da Venda",
-            "DATA_SYS", "Ativação da Primeira Chamada", "Nº de Acesso", "Data de Ativação", "Data de Baixa",
-            "Zerar Remuneração", "Data de Digitalização", "Nº Protocolo GED", "Nº Protocolo GED (Portabilidade)",
-            "Status BKO", "Observação", "Observação Importação", "Situação do Serviço", "Motivo do Cancelamento",
-            "Gerar comissão de serviço do vendedor", "Valor Remuneração", "status_primeira_fatura",
-            "status_terceira_fatura", "status_segunda_fatura", "data_primeira_fatura", "data_segunda_fatura",
-            "data_terceira_fatura", "valor_receita", "valor_considerado_tfp", "valor_penalizado_tfp",
-            "Usuário Cancelamento", "Usuário Inserção", "Usuário Alteração", "Data Instalação");
+    /** As 55 colunas do relatório do sistema atual, escritas aqui de novo a partir do docs/gestao.md. */
+    private static final String CABECALHO = "Filial;Data Venda(*);Data Ativação(**);Status BKO(*)(**);Serviço(*);ID Venda;"
+            + "Modelo;IMEI;Plano;Valor plano(**);Plano Antigo;Valor plano antigo(**);Vencimento Fatura(**);Vendedor;"
+            + "Cliente;CPF/CNPJ;Nº Acesso(*);Nº Portado;Servico Instalado;Data Agendada de Instalação;Armário;"
+            + "Data Instalação;Situação do serviço(**);Receita;Status GED;Sim Card;COD;Fidelização;Zerar Remuneração;"
+            + "Gerar Price;Nº Solicitação NEXT / RPON;Nº Protocolo GED(**);Nº Protocolo GED Portabilidade (**);"
+            + "Motivo Reprovação(**);Data Digitalização;Usuário Inserção;Usuário Alteração;Observação;"
+            + "Motivo Cancelamento(**);Comissão de Serviço do Vendedor;Comissão de Aparelho do Vendedor(**);"
+            + "Data Última Ativação(**);Data de alteração;Usuário Cancelamento;Data Cancelamento;Líder de Equipe;"
+            + "Status Primeira Fatura;Data Primeira Fatura;Status Segunda Fatura;Data Segunda Fatura;"
+            + "Status Terceira Fatura;Data Terceira Fatura;Valor Receita;Valor Considerado TFP;Valor Penalizado TFP";
 
     @Test
-    @DisplayName("Exportação: o período com a venda e status Nao_avaliado traz a venda; com Procedente, só o cabeçalho")
+    @DisplayName("Exportação: preâmbulo, cabeçalho de 55 colunas e rodapé do layout, em Windows-1252 com LF")
+    void exportacaoLayout() throws Exception {
+        MvcResult r = mvc.perform(comParametros(get("/documental/protocolos/exportacao"), doMes())).andReturn();
+
+        assertThat(r.getResponse().getStatus()).isEqualTo(200);
+        assertThat(r.getResponse().getContentType()).isEqualTo("text/csv;charset=windows-1252");
+        assertThat(r.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION)).contains("gestao_documental.csv");
+        String csv = csv(doMes());
+        assertThat(csv).doesNotContain("\r").doesNotContain("\"");
+        String[] linhas = csv.split("\n", -1);
+        assertThat(linhas[0]).matches("Data da Emissão do relatório;\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}");
+        assertThat(linhas[1]).isEmpty();
+        assertThat(linhas[2]).isEqualTo("Revenda: 4 REDES");
+        assertThat(linhas[3]).isEmpty();
+        assertThat(linhas[4]).isEqualTo(CABECALHO);
+        assertThat(linhas[4].split(";", -1)).hasSize(55);
+        assertThat(csv).endsWith("\n\n\n(*) Campos obrigatórios;\n(**) Campos que podem ser alterados;\n");
+    }
+
+    @Test
+    @DisplayName("Exportação em ISO-8859-1/Windows-1252: 'Não' e 'Situação' com um byte por letra acentuada")
+    void exportacaoAcentos() throws Exception {
+        long id = vendaLancada(null, HOJE);
+        servico(id, "61 998674575", "Alta", "PRE", "Pré", "PRE");
+
+        byte[] bytes = mvc.perform(comParametros(get("/documental/protocolos/exportacao"), doMes()))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        String texto = new String(bytes, StandardCharsets.ISO_8859_1);
+        assertThat(texto).contains("Situação do serviço(**)").contains(";Não avaliado;");
+        assertThat(new String(bytes, StandardCharsets.UTF_8)).as("não é UTF-8").doesNotContain("Situação");
+    }
+
+    @Test
+    @DisplayName("Exportação: status Nao_avaliado traz a venda recém-lançada; com Procedente, nenhuma linha")
     void exportacaoPorStatusBko() throws Exception {
         long id = vendaLancada(null, HOJE);
-        servico(id, "61 998674575", "Troca de Aparelho", "POS_INDIVIDUAL", "Pós", "PLANO POS");
+        servico(id, "61 998674575", "Troca de Plano", "POS_INDIVIDUAL", "Pós", "PLANO POS");
         Map<String, String> filtro = doMes();
         filtro.put("statusBko", "Nao_avaliado");
 
-        MvcResult r = mvc.perform(comParametros(get("/documental/protocolos/exportacao"), filtro)).andReturn();
-
-        assertThat(r.getResponse().getStatus()).isEqualTo(200);
-        assertThat(r.getResponse().getContentType()).startsWith("text/csv");
-        assertThat(r.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION)).contains(
-                "Relatorio_Gestao_Documental_" + HOJE.withDayOfMonth(1) + "_a_" + HOJE + ".csv");
         List<Map<String, String>> linhas = linhasCsv(filtro);
+
         assertThat(linhas).hasSize(1);
         Map<String, String> l = linhas.get(0);
-        assertThat(l.get("ID da Venda")).isEqualTo(numeroDa(id));
-        assertThat(l.get("Serviço")).isEqualTo("Troca de Aparelho");
+        assertThat(l.get("Filial")).isEqualTo("Filial Doc " + n);
+        assertThat(l.get("Data Venda(*)")).as("só a data").isEqualTo(HOJE.format(DD_MM_AAAA));
+        assertThat(l.get("Status BKO(*)(**)")).isEqualTo("Não avaliado");
+        assertThat(l.get("ID Venda")).isEqualTo(numeroDa(id));
         assertThat(l.get("Plano")).isEqualTo("PLANO POS");
-        assertThat(l.get("PDV_ID")).isEqualTo(String.valueOf(filialId));
-        assertThat(l.get("PDV")).isEqualTo("Filial Doc " + n);
-        assertThat(l.get("Adabas")).isEqualTo("DOC" + n);
-        assertThat(l.get("Cliente")).isEqualTo("Cliente Doc " + n);
-        assertThat(l.get("Tipo Cliente")).isEqualTo("PF");
+        assertThat(l.get("Plano Antigo")).as("sem plano antigo").isEqualTo("-");
+        assertThat(l.get("Valor plano antigo(**)")).isEqualTo("0.00");
         assertThat(l.get("Vendedor")).isEqualTo("Vendedor Doc");
-        assertThat(l.get("Status Vendedor")).isEqualTo("Ativo");
-        assertThat(l.get("Data da Venda")).as("lançamento com hora").startsWith(HOJE.format(DD_MM_AAAA) + " 12:");
-        assertThat(l.get("Nº de Acesso")).isEqualTo("61 998674575");
-        assertThat(l.get("Status BKO")).isEqualTo("Não avaliado");
-        assertThat(l.get("Nº Protocolo GED")).as("ainda sem protocolo").isEmpty();
-        assertThat(l.get("Área de loja")).as("sem origem ainda").isEmpty();
+        assertThat(l.get("Cliente")).isEqualTo("Cliente Doc " + n);
+        assertThat(l.get("Nº Acesso(*)")).isEqualTo("61 998674575");
+        assertThat(l.get("Situação do serviço(**)")).as("sem protocolo").isEqualTo("Não avaliado");
+        assertThat(l.get("Status GED")).isEqualTo("Serviço Não digitalizado");
+        assertThat(l.get("Modelo")).isEmpty();
+        assertThat(l.get("Status Primeira Fatura")).as("sem origem: vazia, mas presente").isEmpty();
 
         filtro.put("statusBko", "Procedente");
         assertThat(linhasCsv(filtro)).isEmpty();
     }
 
     @Test
-    @DisplayName("Exportação: cabeçalho com as 45 colunas do relatório, na ordem, sem as colunas técnicas")
-    void exportacaoCabecalho() throws Exception {
-        String csv = csv(doMes());
+    @DisplayName("Exportação: Serviço composto, Receita por tipo e pré-pago com PRE PAGO, 0.00 e vencimento 0")
+    void exportacaoServicoEReceita() throws Exception {
+        long id = vendaLancada(null, HOJE);
+        long trocaPlano = servico(id, "61 911110001", "Troca de Plano", "CONTROLE_BTL", "Controle", "CONTROLE 10GB");
+        valores(trocaPlano, "Smartphone", "49.00", "CONTROLE 5GB", "35.00");
+        long migracao = servico(id, "61 911110002", "Migração", "POS_INDIVIDUAL", "Pós", "POS 50GB");
+        valores(migracao, "Smartphone", "50.00", "POS 100GB", "75.00");
+        long simcard = servico(id, "61 911110003", "Troca de Simcard", "POS_INDIVIDUAL", "Pós", "POS 50GB");
+        valores(simcard, "Voz", "99.00", null, null);
+        long reativacao = servico(id, "61 911110004", "Reativação", "CONTROLE_BTL", "Controle", "CONTROLE 10GB");
+        valores(reativacao, "Smartphone", "60.00", null, null);
+        long pre = servico(id, "61 911110005", "Alta", "PRE", "Pré", "PRE MENSAL");
+        valores(pre, "Voz", "20.00", null, null);
+        jdbc.update("UPDATE itens_venda SET vencimento_fatura = '10' WHERE id = ?", pre);
 
-        assertThat(csv).startsWith("﻿");
-        String cabecalho = csv.substring(1, csv.indexOf("\r\n"));
-        assertThat(cabecalho.split(";", -1)).containsExactlyElementsOf(COLUNAS_RELATORIO);
-        assertThat(cabecalho.split(";", -1)).hasSize(45);
+        Map<String, Map<String, String>> porAcesso = new HashMap<>();
+        linhasCsv(doMes()).forEach(l -> porAcesso.put(l.get("Nº Acesso(*)"), l));
+
+        assertThat(porAcesso.get("61 911110001").get("Serviço(*)")).isEqualTo("Troca de Plano Smartphone Controle");
+        assertThat(porAcesso.get("61 911110001").get("Valor plano(**)")).isEqualTo("49.00");
+        assertThat(porAcesso.get("61 911110001").get("Receita")).as("49.00 - 35.00").isEqualTo("14.00");
+        assertThat(porAcesso.get("61 911110002").get("Receita")).as("50.00 - 75.00, nunca negativa").isEqualTo("0.00");
+        assertThat(porAcesso.get("61 911110003").get("Serviço(*)")).isEqualTo("Troca de Simcard Voz Pós");
+        assertThat(porAcesso.get("61 911110003").get("Receita")).as("troca de simcard").isEqualTo("0.00");
+        assertThat(porAcesso.get("61 911110004").get("Serviço(*)")).as("reativação sem tipo de linha")
+                .isEqualTo("Reativação Controle");
+        Map<String, String> l = porAcesso.get("61 911110005");
+        assertThat(l.get("Serviço(*)")).isEqualTo("Alta Voz Pré");
+        assertThat(l.get("Plano")).isEqualTo("PRE PAGO");
+        assertThat(l.get("Valor plano(**)")).isEqualTo("0.00");
+        assertThat(l.get("Vencimento Fatura(**)")).isEqualTo("0");
+        assertThat(l.get("Receita")).isEqualTo("0.00");
     }
 
     @Test
-    @DisplayName("Exportação: uma linha por serviço (venda com 2 serviços = 2 linhas); o filtro de serviço escolhe a linha")
+    @DisplayName("Exportação: aparelho + 2 serviços = 3 linhas com o mesmo ID Venda; só a Troca de Aparelho tem Modelo e IMEI")
     void exportacaoUmaLinhaPorServico() throws Exception {
         long id = vendaLancada(null, HOJE);
         servico(id, "61 911110001", "Alta", "PRE", "Pré", "PRE MENSAL");
         servico(id, "61 911110002", "Migração", "CONTROLE_BTL", "Controle", "CONTROLE 10GB");
         jdbc.update("""
-                INSERT INTO itens_venda (venda_id, categoria, produto_id, descricao_produto, quantidade, valor_unitario)
-                VALUES (?, 'ACESSORIO', 1, 'Capa', 1, 50)""", id);
+                INSERT INTO itens_venda (venda_id, categoria, produto_id, descricao_produto, quantidade, valor_unitario,
+                                         serial_imei, grupo_plano)
+                VALUES (?, 'PRODUTO_VIVO', 1, 'Galaxy Teste', 1, 1500, ?, 'CONTROLE_BTL')""", id, "35000000000000" + n);
 
         List<Map<String, String>> linhas = linhasCsv(doMes());
 
-        assertThat(linhas).as("o acessório não entra").hasSize(2);
-        assertThat(linhas).extracting(l -> l.get("ID da Venda")).containsOnly(numeroDa(id));
-        assertThat(linhas).extracting(l -> l.get("Serviço")).containsExactly("Alta", "Migração");
-        assertThat(linhas).extracting(l -> l.get("ID do Serviço")).doesNotHaveDuplicates();
+        assertThat(linhas).hasSize(3);
+        assertThat(linhas).extracting(l -> l.get("ID Venda")).containsOnly(numeroDa(id));
+        Map<String, String> aparelho = linhas.stream().filter(l -> l.get("Serviço(*)").startsWith("Troca de Aparelho"))
+                .findFirst().orElseThrow();
+        assertThat(aparelho.get("Serviço(*)")).isEqualTo("Troca de Aparelho Controle");
+        assertThat(aparelho.get("Modelo")).isEqualTo("Galaxy Teste");
+        assertThat(aparelho.get("IMEI")).isEqualTo("35000000000000" + n);
+        assertThat(aparelho.get("Receita")).isEqualTo("0.00");
+        assertThat(linhas).filteredOn(l -> l != aparelho).allSatisfy(l -> {
+            assertThat(l.get("Modelo")).isEmpty();
+            assertThat(l.get("IMEI")).isEmpty();
+        });
 
         Map<String, String> soMigracao = doMes();
         soMigracao.put("servicos", "migracao");
-        assertThat(linhasCsv(soMigracao)).extracting(l -> l.get("Serviço")).containsExactly("Migração");
+        assertThat(linhasCsv(soMigracao)).extracting(l -> l.get("Serviço(*)")).containsExactly("Migração Controle");
+        Map<String, String> soAparelho = doMes();
+        soAparelho.put("servicos", "Troca de Aparelho");
+        assertThat(linhasCsv(soAparelho)).extracting(l -> l.get("Modelo")).containsExactly("Galaxy Teste");
         Map<String, String> soPre = doMes();
         soPre.put("tiposPlano", "PRE");
-        assertThat(linhasCsv(soPre)).extracting(l -> l.get("Plano")).containsExactly("PRE MENSAL");
+        assertThat(linhasCsv(soPre)).extracting(l -> l.get("Plano")).containsExactly("PRE PAGO");
     }
 
     @Test
-    @DisplayName("Exportação: campos novos do protocolo, usuário de alteração, Sim/Não e remuneração só LIBERADO")
+    @DisplayName("Exportação: ordem filial, data, avaliados antes de Não avaliado e ID Venda")
+    void exportacaoOrdem() throws Exception {
+        long naoAvaliadaAntes = vendaLancada(null, HOJE);
+        long procedenteDepois = vendaLancada("Procedente", HOJE);
+        servico(naoAvaliadaAntes, "61 911110001", "Alta", "PRE", "Pré", "PRE");
+        servico(procedenteDepois, "61 911110002", "Alta", "PRE", "Pré", "PRE");
+
+        assertThat(linhasCsv(doMes())).extracting(l -> l.get("ID Venda"))
+                .containsExactly(numeroDa(procedenteDepois), numeroDa(naoAvaliadaAntes));
+    }
+
+    @Test
+    @DisplayName("Exportação: protocolo GED '' quando vazio e '123' quando preenchido; campos novos e Sim/Não")
     void exportacaoCamposDoProtocolo() throws Exception {
         long id = vendaLancada(null, HOJE);
-        servico(id, "61 998674575", "Alta", "PRE", "Pré", "PRE");
+        long item = servico(id, "61 998674575", "Alta", "CONTROLE_BTL", "Controle", "CONTROLE");
+        jdbc.update("UPDATE itens_venda SET simcard_4g = '8955000011', num_ordem_next = '1-ABC', numero_portado = "
+                + "'61 33334444', fidelizacao = TRUE, cod = FALSE WHERE id = ?", item);
+
+        Map<String, String> antes = linhasCsv(doMes()).get(0);
+        assertThat(antes.get("Nº Protocolo GED(**)")).isEqualTo("''");
+        assertThat(antes.get("Nº Protocolo GED Portabilidade (**)")).isEqualTo("''");
+        assertThat(antes.get("Motivo Reprovação(**)")).isEqualTo("''");
+        assertThat(antes.get("Sim Card")).isEqualTo("'8955000011'");
+        assertThat(antes.get("Nº Solicitação NEXT / RPON")).isEqualTo("'1-ABC'");
+        assertThat(antes.get("Data de alteração")).isEmpty();
+
         Map<String, Object> corpo = new HashMap<>();
-        corpo.put("numeroProtocoloGed", "GED-" + n);
+        corpo.put("numeroProtocoloGed", "123");
         corpo.put("numeroProtocoloGedPortabilidade", "PORT-" + n);
-        corpo.put("ativacaoPrimeiraChamada", true);
         corpo.put("dataAtivacao", "2026-11-02");
-        corpo.put("dataBaixa", "2026-11-03");
         corpo.put("dataInstalacao", "2026-11-04");
+        corpo.put("dataAgendadaInstalacao", "2026-11-03");
+        corpo.put("dataUltimaAtivacao", "2026-11-05");
+        corpo.put("armario", "ARM-7");
+        corpo.put("servicoInstalado", true);
+        corpo.put("motivoReprovacao", "Documento ilegível");
+        corpo.put("comissaoAparelho", false);
         corpo.put("zerarRemuneracao", false);
+        corpo.put("observacoes", "linha 1\nlinha 2; fim");
         corpo.put("motivosCancelamento", List.of("Desistência", "Fraude"));
+        corpo.put("situacaoServico", "CONFIRMADO");
+        corpo.put("liderEquipe", "Ana Líder");
         Resposta r = enviar(put("/documental/protocolos/{id}", id), corpo);
         assertThat(r.status).isEqualTo(200);
-        assertThat(r.corpo.get("alteradoPorNome").asText()).isEqualTo("Vendedor Doc");
-        JsonNode detalhe = enviar(get("/documental/protocolos/{id}", id), null).corpo;
-        assertThat(detalhe.get("numeroProtocoloGedPortabilidade").asText()).isEqualTo("PORT-" + n);
-        assertThat(detalhe.get("ativacaoPrimeiraChamada").asBoolean()).isTrue();
-        assertThat(detalhe.get("dataInstalacao").asText()).isEqualTo("2026-11-04");
-
-        long execucao = jdbc.queryForObject("INSERT INTO tb_execucao_remuneracao (nome_arquivo) VALUES ('t.csv') RETURNING id", Long.class);
-        jdbc.update("INSERT INTO tb_item_remuneracao (execucao_id, numero_acesso_vivo, valor_comissao, status, venda_id) "
-                + "VALUES (?, '61998674575', 35.5, 'LIBERADO', ?), (?, '(61) 99867-4575', 10, 'GLOSADO_GED', ?)",
-                execucao, id, execucao, id);
+        assertThat(r.corpo.get("armario").asText()).isEqualTo("ARM-7");
+        assertThat(r.corpo.get("comissaoAparelho").asBoolean()).isFalse();
 
         Map<String, String> l = linhasCsv(doMes()).get(0);
-        assertThat(l.get("Nº Protocolo GED")).isEqualTo("GED-" + n);
-        assertThat(l.get("Nº Protocolo GED (Portabilidade)")).isEqualTo("PORT-" + n);
-        assertThat(l.get("Ativação da Primeira Chamada")).isEqualTo("Sim");
-        assertThat(l.get("Zerar Remuneração")).isEqualTo("Não");
-        assertThat(l.get("Gerar comissão de serviço do vendedor")).isEqualTo("Sim");
-        assertThat(l.get("Data de Ativação")).isEqualTo("02/11/2026");
-        assertThat(l.get("Data de Baixa")).isEqualTo("03/11/2026");
+        assertThat(l.get("Nº Protocolo GED(**)")).isEqualTo("'123'");
+        assertThat(l.get("Nº Protocolo GED Portabilidade (**)")).isEqualTo("'PORT-" + n + "'");
+        assertThat(l.get("Motivo Reprovação(**)")).isEqualTo("'Documento ilegível'");
+        assertThat(l.get("Status GED")).as("GED sem digitalização").isEqualTo("Aguardando digitalização do serviço");
+        assertThat(l.get("Data Ativação(**)")).isEqualTo("02/11/2026");
+        assertThat(l.get("Data Agendada de Instalação")).isEqualTo("03/11/2026");
         assertThat(l.get("Data Instalação")).isEqualTo("04/11/2026");
-        assertThat(l.get("Motivo do Cancelamento")).isEqualTo("Desistência, Fraude");
+        assertThat(l.get("Data Última Ativação(**)")).isEqualTo("05/11/2026");
+        assertThat(l.get("Armário")).isEqualTo("ARM-7");
+        assertThat(l.get("Nº Portado")).isEqualTo("61 33334444");
+        assertThat(l.get("Servico Instalado")).isEqualTo("Sim");
+        assertThat(l.get("Fidelização")).isEqualTo("Sim");
+        assertThat(l.get("COD")).isEqualTo("Não");
+        assertThat(l.get("Zerar Remuneração")).isEqualTo("Não");
+        assertThat(l.get("Gerar Price")).isEqualTo("Não");
+        assertThat(l.get("Comissão de Serviço do Vendedor")).isEqualTo("Sim");
+        assertThat(l.get("Comissão de Aparelho do Vendedor(**)")).isEqualTo("Não");
+        assertThat(l.get("Situação do serviço(**)")).isEqualTo("Confirmado");
+        assertThat(l.get("Observação")).as("sem quebra de linha nem ;").isEqualTo("linha 1 linha 2, fim");
+        assertThat(l.get("Motivo Cancelamento(**)")).isEqualTo("Desistência, Fraude");
         assertThat(l.get("Usuário Alteração")).isEqualTo("Vendedor Doc");
-        assertThat(l.get("Valor Remuneração")).as("só o LIBERADO").isEqualTo("35,50");
-        assertThat(l.get("Situação do Serviço")).isEqualTo("CONFIRMADO");
+        assertThat(l.get("Líder de Equipe")).isEqualTo("Ana Líder");
+        assertThat(l.get("Data de alteração")).as("com hora").matches("\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}");
     }
 
     @Test
@@ -440,7 +538,7 @@ class ProtocoloDocumentalIntegracaoTest {
 
         for (Map<String, Object> linha : jdbc.queryForList("""
                 SELECT i.grupo_plano, i.segmento, w.tipo_plano FROM vw_gestao_documental w
-                JOIN itens_venda i ON i.id = w."ID do Serviço" WHERE w.venda_id = ?""", id)) {
+                JOIN itens_venda i ON i.id = w.item_id WHERE w.venda_id = ?""", id)) {
             String grupo = (String) linha.get("grupo_plano");
             String esperado = TipoPlano.de(grupo == null ? null : GrupoPlano.valueOf(grupo), (String) linha.get("segmento"))
                     .map(Enum::name).orElse(null);
@@ -499,12 +597,18 @@ class ProtocoloDocumentalIntegracaoTest {
         return id;
     }
 
-    private void servico(long vendaId, String acesso, String tipoServico, String grupo, String segmento, String plano) {
-        jdbc.update("""
+    private long servico(long vendaId, String acesso, String tipoServico, String grupo, String segmento, String plano) {
+        return jdbc.queryForObject("""
                 INSERT INTO itens_venda (venda_id, categoria, descricao_produto, quantidade, valor_unitario,
                                          numero_acesso, tipo_servico, grupo_plano, segmento, plano)
-                VALUES (?, 'SERVICO_VIVO', 'Serviço', 1, 0, ?, ?, ?, ?, ?)
-                """, vendaId, acesso, tipoServico, grupo, segmento, plano);
+                VALUES (?, 'SERVICO_VIVO', 'Serviço', 1, 0, ?, ?, ?, ?, ?) RETURNING id
+                """, Long.class, vendaId, acesso, tipoServico, grupo, segmento, plano);
+    }
+
+    /** Tipo de linha, valor do plano e plano antigo (com o valor) de um item de serviço. */
+    private void valores(long itemId, String tipoLinha, String valorPlano, String planoAntigo, String valorPlanoAntigo) {
+        jdbc.update("UPDATE itens_venda SET tipo_linha = ?, valor_plano = ?::NUMERIC, plano_antigo = ?, "
+                + "valor_plano_antigo = ?::NUMERIC WHERE id = ?", tipoLinha, valorPlano, planoAntigo, valorPlanoAntigo, itemId);
     }
 
     private String numeroDa(long vendaId) {
@@ -528,15 +632,18 @@ class ProtocoloDocumentalIntegracaoTest {
     private String csv(Map<String, String> filtro) throws Exception {
         MvcResult r = mvc.perform(comParametros(get("/documental/protocolos/exportacao"), filtro)).andReturn();
         assertThat(r.getResponse().getStatus()).as("exportação").isEqualTo(200);
-        return new String(r.getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
+        return new String(r.getResponse().getContentAsByteArray(), Charset.forName("windows-1252"));
     }
 
-    /** Linhas de dados do CSV (sem o cabeçalho), cada uma como coluna -> valor. */
+    /**
+     * Linhas de dados do CSV, cada uma como coluna -> valor: depois do preâmbulo (4 linhas) e do cabeçalho, até a
+     * primeira linha vazia (antes do rodapé).
+     */
     private List<Map<String, String>> linhasCsv(Map<String, String> filtro) throws Exception {
-        String[] linhas = csv(filtro).substring(1).split("\r\n");
-        String[] cabecalho = linhas[0].split(";", -1);
+        String[] linhas = csv(filtro).split("\n", -1);
+        String[] cabecalho = linhas[4].split(";", -1);
         List<Map<String, String>> resultado = new ArrayList<>();
-        for (int i = 1; i < linhas.length; i++) {
+        for (int i = 5; i < linhas.length && !linhas[i].isEmpty(); i++) {
             String[] campos = linhas[i].split(";", -1);
             assertThat(campos).as("linha " + i).hasSize(cabecalho.length);
             Map<String, String> linha = new HashMap<>();

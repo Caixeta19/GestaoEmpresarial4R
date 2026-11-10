@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.gestao.model;
 
 import com.vivo4redes.syscor.gestao.enums.SituacaoServico;
+import com.vivo4redes.syscor.gestao.enums.StatusGed;
 import com.vivo4redes.syscor.venda.model.Usuario;
 import com.vivo4redes.syscor.venda.model.Venda;
 import jakarta.persistence.*;
@@ -78,6 +79,30 @@ public class ProtocoloDocumental {
 
     @Column(name = "data_instalacao")
     private LocalDate dataInstalacao;
+
+    /** Nulo = o relatório deduz do protocolo. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status_ged", length = 30)
+    private StatusGed statusGed;
+
+    @Column(name = "motivo_reprovacao", length = 200)
+    private String motivoReprovacao;
+
+    @Column(name = "servico_instalado")
+    private Boolean servicoInstalado;
+
+    @Column(name = "data_agendada_instalacao")
+    private LocalDate dataAgendadaInstalacao;
+
+    @Column(name = "armario", length = 60)
+    private String armario;
+
+    @Column(name = "comissao_aparelho", nullable = false)
+    @Builder.Default
+    private Boolean comissaoAparelho = true;
+
+    @Column(name = "data_ultima_ativacao")
+    private LocalDate dataUltimaAtivacao;
 
     /** Último usuário que salvou o protocolo (tela ou importação). */
     @ManyToOne(fetch = FetchType.LAZY)

@@ -65,6 +65,18 @@ public record ItemVendaRequestDTO(
         BigDecimal valorChip,
         Boolean serialConfirmado,
 
+        /** Relatório documental: Smartphone, Voz, Modem, Internet Fibra, TV GVT, Fixa GVT ou Outros serviços. */
+        String tipoLinha,
+        @PositiveOrZero(message = "valorPlano não pode ser negativo")
+        @Digits(integer = 10, fraction = 2, message = "valorPlano deve ter no máximo 2 casas decimais")
+        BigDecimal valorPlano,
+        @PositiveOrZero(message = "valorPlanoAntigo não pode ser negativo")
+        @Digits(integer = 10, fraction = 2, message = "valorPlanoAntigo deve ter no máximo 2 casas decimais")
+        BigDecimal valorPlanoAntigo,
+        String numeroPortado,
+        Boolean fidelizacao,
+        Boolean cod,
+
         /** Ignorado: o preço do item segue a condição de pagamento da venda. Mantido até o syscor-frontend migrar. */
         FormaPagamento formaPagamento,
 

@@ -57,6 +57,9 @@ management:
 
 # Segredos SEMPRE por variável de ambiente / cofre, nunca no repositório.
 syscor:
+  revenda:
+    # "Revenda: <nome>" no relatório de Gestão Documental.
+    nome: ${SYSCOR_REVENDA_NOME:4 REDES}
   jwt:
     secret: ${SYSCOR_JWT_SECRET}
   precos:

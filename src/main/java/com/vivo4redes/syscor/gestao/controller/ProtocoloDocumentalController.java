@@ -21,7 +21,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -82,7 +81,10 @@ public class ProtocoloDocumentalController {
         return ResponseEntity.ok(importacaoService.importar(arquivo));
     }
 
-    /** CSV (";", UTF-8 com BOM) com os mesmos filtros da busca; período obrigatório de até 93 dias. */
+    /**
+     * gestao_documental.csv no layout do sistema atual (";", Windows-1252, 55 colunas), com os mesmos filtros da
+     * busca; período obrigatório de até 93 dias.
+     */
     @GetMapping("/exportacao")
     public ResponseEntity<byte[]> exportar(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicio,
@@ -101,7 +103,7 @@ public class ProtocoloDocumentalController {
                 numeroAcesso, numeroProtocoloGed, liderEquipe, statusBko, tiposPlano, servicos, incluirCanceladas);
         ExportacaoDocumentalService.Arquivo arquivo = exportacaoService.exportar(filtro);
         return ResponseEntity.ok()
-                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .contentType(new MediaType("text", "csv", ExportacaoDocumentalService.CHARSET))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename(arquivo.nome()).build().toString())
                 .header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS, HttpHeaders.CONTENT_DISPOSITION)

@@ -68,7 +68,9 @@ public record VendaResponseDTO(
             String simcard3g, String simcard4g, Boolean clientePossuiSimcard, Boolean simcardDoado,
             BigDecimal descontoChip, BigDecimal valorChip, Boolean serialConfirmado,
             GrupoPlano grupoPlano, TabelaPreco tabelaAplicada, FormaPagamento formaPagamento, Integer parcelas,
-            TabelaPreco tabelaPrecoAplicada, BigDecimal descontoFabricante
+            TabelaPreco tabelaPrecoAplicada, BigDecimal descontoFabricante,
+            String tipoLinha, BigDecimal valorPlano, BigDecimal valorPlanoAntigo, String numeroPortado,
+            Boolean fidelizacao, Boolean cod
     ) {
         static ItemDTO from(ItemVenda i) {
             return new ItemDTO(
@@ -81,7 +83,9 @@ public record VendaResponseDTO(
                     i.getSimcard3g(), i.getSimcard4g(), i.getClientePossuiSimcard(), i.getSimcardDoado(),
                     i.getDescontoChip(), i.getValorChip(), i.getSerialConfirmado(),
                     i.getGrupoPlano(), i.getTabelaAplicada(), i.getFormaPagamento(), i.getParcelas(),
-                    i.getTabelaAplicada(), i.getDescontoFabricante()
+                    i.getTabelaAplicada(), i.getDescontoFabricante(),
+                    i.getTipoLinha(), i.getValorPlano(), i.getValorPlanoAntigo(), i.getNumeroPortado(),
+                    i.getFidelizacao(), i.getCod()
             );
         }
     }
