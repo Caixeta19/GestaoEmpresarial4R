@@ -190,7 +190,7 @@ class VendaServiceCondicaoPagamentoTest {
     void itemNovoSegueCondicao() {
         venda.setCondicaoPagamento(CondicaoPagamento.PIX);
         when(estoqueService.buscarPorId(11L)).thenReturn(fone);
-        when(estoqueService.reservarNaVenda("FONE-1")).thenReturn(fone);
+        when(estoqueService.reservarUnidadeNaVenda("FONE-1")).thenReturn(fone);
 
         service.adicionarItem(1L, ItemVendaRequestDTO.builder().categoria(CategoriaItemVenda.ACESSORIO).produtoId(11L)
                 .descricaoProduto("Fone").quantidade(BigDecimal.ONE).imeiOuSerial("FONE-1")
