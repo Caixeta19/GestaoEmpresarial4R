@@ -19,6 +19,8 @@ public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long
     // 1. Verificações e buscas básicas por serial
     boolean existsBySerial(String serial);
 
+    Optional<EstoqueGeral> findBySerial(String serial);
+
     List<EstoqueGeral> findBySerialIn(List<String> seriais);
 
     Optional<EstoqueGeral> findBySerialAndStatus(String serial, StatusEstoque status);

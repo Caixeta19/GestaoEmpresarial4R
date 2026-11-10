@@ -110,6 +110,11 @@ public class EstoqueGeral {
     @Builder.Default
     private Integer quantidade = 1;
 
+    /** Unidades desta linha presas em carrinhos abertos (acessório vendido por unidade). */
+    @Column(name = "quantidade_reservada", nullable = false)
+    @Builder.Default
+    private Integer quantidadeReservada = 0;
+
     // ---- Valores e custos
     @Column(name = "valor_venda", precision = 12, scale = 2)
     private BigDecimal valorVenda;
@@ -146,6 +151,7 @@ public class EstoqueGeral {
         if (status == null) status = StatusEstoque.DISPONIVEL;
         if (filialEstoque == null || filialEstoque.isBlank()) filialEstoque = DEPOSITO_PADRAO;
         if (quantidade == null) quantidade = 1;
+        if (quantidadeReservada == null) quantidadeReservada = 0;
     }
 
     // ---- Comportamento de domínio (nomes sem get/is para não virarem propriedades)
@@ -154,9 +160,9 @@ public class EstoqueGeral {
         return status == StatusEstoque.DISPONIVEL;
     }
 
-    /** Item entrou no carrinho: DISPONIVEL -> RESERVADO. */
+    /** Item entrou no carrinho: DISPONIVEL -> RESERVADO (a linha inteira). */
     public void reservar() {
-        if (status != StatusEstoque.DISPONIVEL) {
+        if (status != StatusEstoque.DISPONIVEL || reservadas() > 0) {
             throw new NegocioException("O IMEI/Serial '" + serial + "' não está disponível para venda (status atual: "
                     + status + ").");
         }
@@ -184,5 +190,80 @@ public class EstoqueGeral {
         }
         this.status = StatusEstoque.DISPONIVEL;
         this.dataVenda = null;
+    }
+
+    // ---- Venda por unidade (acessório: um serial por SKU, com quantidade N)
+
+    /** Unidades que ainda podem entrar num carrinho. */
+    public int quantidadeLivre() {
+        if (status != StatusEstoque.DISPONIVEL) return 0;
+        return Math.max(qtd() - reservadas(), 0);
+    }
+
+    /** Uma leitura do serial no carrinho: prende 1 unidade; a linha só vira RESERVADO quando não sobra nenhuma livre. */
+    public void reservarUnidade() {
+        if (quantidadeLivre() <= 0) {
+            throw new NegocioException("O serial '" + serial + "' não tem unidade disponível para venda (status atual: "
+                    + status + ", em estoque: " + qtd() + ", reservadas: " + reservadas() + ").");
+        }
+        quantidadeReservada = reservadas() + 1;
+        if (qtd() - reservadas() == 0) status = StatusEstoque.RESERVADO;
+    }
+
+    /** Venda concluída: a unidade reservada sai do estoque; a linha só vira VENDIDO quando a quantidade zera. */
+    public void confirmarVendaUnidade() {
+        if (reservadas() <= 0 && status == StatusEstoque.RESERVADO) {
+            confirmarVenda(); // reserva antiga da linha inteira (antes da venda por unidade)
+            return;
+        }
+        if (reservadas() <= 0) {
+            throw new NegocioException("O serial '" + serial + "' não tem unidade reservada para esta venda.");
+        }
+        quantidadeReservada = reservadas() - 1;
+        quantidade = Math.max(qtd() - 1, 0);
+        dataVenda = LocalDateTime.now();
+        recalcularStatusPelaQuantidade();
+    }
+
+    /** Item removido do carrinho ou carrinho cancelado: a unidade reservada volta a ficar livre. */
+    public void liberarUnidadeReservada() {
+        if (reservadas() <= 0) {
+            if (status == StatusEstoque.RESERVADO) liberar(); // reserva antiga da linha inteira
+            return;
+        }
+        quantidadeReservada = reservadas() - 1;
+        recalcularStatusPelaQuantidade();
+    }
+
+    /** Venda concluída cancelada: a unidade vendida volta para a linha. */
+    public void devolverUnidadeVendida() {
+        if (status == StatusEstoque.DEFEITO) {
+            throw new NegocioException("O IMEI/Serial '" + serial + "' está com DEFEITO e não pode voltar a DISPONIVEL.");
+        }
+        quantidade = qtd() + 1;
+        recalcularStatusPelaQuantidade();
+    }
+
+    /**
+     * Status da linha vendida por unidade a partir das quantidades: sem unidade = VENDIDO; todas presas em carrinho =
+     * RESERVADO; sobra alguma = DISPONIVEL. DEFEITO não muda.
+     */
+    public void recalcularStatusPelaQuantidade() {
+        if (status == StatusEstoque.DEFEITO) return;
+        if (qtd() == 0) {
+            status = reservadas() > 0 ? StatusEstoque.RESERVADO : StatusEstoque.VENDIDO;
+        } else if (qtd() - reservadas() <= 0) {
+            status = StatusEstoque.RESERVADO;
+        } else {
+            status = StatusEstoque.DISPONIVEL;
+        }
+    }
+
+    private int qtd() {
+        return quantidade == null ? 1 : quantidade;
+    }
+
+    private int reservadas() {
+        return quantidadeReservada == null ? 0 : quantidadeReservada;
     }
 }
