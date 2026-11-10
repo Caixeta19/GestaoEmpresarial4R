@@ -22,6 +22,14 @@ public enum StatusAvaliacaoProcedencia {
         return rotulo;
     }
 
+    /**
+     * Não avaliado, Em avaliação e Improcedente podem mudar para qualquer status (a venda improcedente volta para
+     * análise depois da correção); Procedente é final. Repetir o mesmo status é sempre permitido.
+     */
+    public boolean podeMudarPara(StatusAvaliacaoProcedencia novo) {
+        return novo == this || this != Procedente;
+    }
+
     /** Aceita o literal do enum ou o rótulo, sem diferenciar acento, maiúsculas nem espaço/underscore. */
     public static Optional<StatusAvaliacaoProcedencia> deTexto(String texto) {
         String id = TextoUtil.identificador(texto);
