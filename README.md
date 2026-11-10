@@ -245,7 +245,12 @@ CANCELADA → (terminal, sem saída)
   e `VIM_*` → POS; sem grupo de preço, vale o segmento ("Pré", "Controle", "Pós").
 - Importação em lote por CSV (`NUMERO_VENDA;PROTOCOLO_GED;STATUS_BKO;NUMERO_ACESSO;DATA_DIGITALIZACAO`): uma
   transação por linha, então uma linha com erro não desfaz as outras.
-- Exportação do Relatório de Gestão Documental em CSV (`;`, UTF-8 com BOM), período de até 93 dias.
+- Exportação do Relatório de Gestão Documental em CSV (`;`, UTF-8 com BOM), período de até 93 dias. Lê a view
+  `vw_gestao_documental` (V33): **uma linha por item de serviço**, com as 45 colunas do relatório do sistema
+  anterior, na mesma ordem. Faturas, receita e TFP ainda saem vazias; área e rede da filial (V32) também,
+  até serem cadastradas. O Adabas é o `filiais.codigo`.
+- O protocolo ganhou (V32) ativação da primeira chamada, datas de ativação, baixa e instalação, GED da
+  portabilidade e o usuário que salvou por último (`alteradoPorNome` na resposta).
 
 ### Mailing (WhatsApp)
 
@@ -688,7 +693,7 @@ backend fora de uma rede confiável, ativar de fato o `JwtFilter` no
 |---|---|---|---|---|
 | `venda` | ✅ completo (carrinho, itens, pagamentos, status, avaliação) | ✅ máquina de estados, validação de carrinho | ✅ V1, V2, V8 | Núcleo do sistema — mais maduro |
 | `estoque` | ✅ produto, entrada de serial, alertas, inventário SAP, tabela de preços | ✅ status de serial, conciliação, resolução de SKU | ✅ V4, V5, V6 | — |
-| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31 | — |
+| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31, V32, V33 (view do relatório) | — |
 | `mailing` | ✅ criar, importar, disparar, listar campanha | ✅ fila + listener assíncrono | ✅ V7 | Depende de credenciais WhatsApp via env vars |
 | `dashboard` | ✅ 1 endpoint (`/dashboard/executivo`) | ✅ implementado, meta fixa no código | — (lê de `venda`/`estoque`) | Ver limitação de filtros abaixo |
 
