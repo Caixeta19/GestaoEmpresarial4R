@@ -12,6 +12,7 @@ import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.model.Venda;
 import com.vivo4redes.syscor.venda.repository.VendaRepository;
+import com.vivo4redes.syscor.venda.service.UsuarioService;
 import com.vivo4redes.syscor.venda.service.VendaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -35,6 +36,7 @@ public class ProtocoloDocumentalService {
     private final ProtocoloDocumentalRepository protocoloRepository;
     private final VendaService vendaService;
     private final VendaRepository vendaRepository;
+    private final UsuarioService usuarioService;
 
     /** Só venda lançada (CONCLUIDA) recebe protocolo: carrinho aberto ainda muda, e venda cancelada não tem o que documentar. */
     @Transactional
@@ -73,6 +75,12 @@ public class ProtocoloDocumentalService {
         protocolo.setMotivosCancelamento(
                 dto.motivosCancelamento() == null || dto.motivosCancelamento().isEmpty()
                         ? null : String.join(";", dto.motivosCancelamento()));
+        protocolo.setAtivacaoPrimeiraChamada(dto.ativacaoPrimeiraChamada());
+        protocolo.setDataAtivacao(dto.dataAtivacao());
+        protocolo.setDataBaixa(dto.dataBaixa());
+        protocolo.setNumeroProtocoloGedPortabilidade(dto.numeroProtocoloGedPortabilidade());
+        protocolo.setDataInstalacao(dto.dataInstalacao());
+        protocolo.setAlteradoPor(usuarioService.usuarioLogado());
 
         protocolo = protocoloRepository.save(protocolo);
         return ProtocoloDocumentalResponseDTO.from(venda, protocolo);
@@ -102,14 +110,6 @@ public class ProtocoloDocumentalService {
         Page<Venda> vendas = vendaRepository.findAll(BuscaDocumentalSpecs.de(filtro), pageable);
         Map<Long, ProtocoloDocumental> protocolos = protocolosDas(vendas.getContent());
         return vendas.map(v -> ProtocoloDocumentalResponseDTO.from(v, protocolos.get(v.getId())));
-    }
-
-    /** Todas as vendas dos filtros, sem paginação (exportação). */
-    @Transactional(readOnly = true)
-    public List<ProtocoloDocumentalResponseDTO> listar(FiltroDocumentalDTO filtro) {
-        List<Venda> vendas = vendaRepository.findAll(BuscaDocumentalSpecs.de(filtro));
-        Map<Long, ProtocoloDocumental> protocolos = protocolosDas(vendas);
-        return vendas.stream().map(v -> ProtocoloDocumentalResponseDTO.from(v, protocolos.get(v.getId()))).toList();
     }
 
     private Map<Long, ProtocoloDocumental> protocolosDas(List<Venda> vendas) {

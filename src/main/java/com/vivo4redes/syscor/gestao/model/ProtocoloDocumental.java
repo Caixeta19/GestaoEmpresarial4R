@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.gestao.model;
 
 import com.vivo4redes.syscor.gestao.enums.SituacaoServico;
+import com.vivo4redes.syscor.venda.model.Usuario;
 import com.vivo4redes.syscor.venda.model.Venda;
 import jakarta.persistence.*;
 import lombok.*;
@@ -62,6 +63,26 @@ public class ProtocoloDocumental {
 
     @Column(name = "motivos_cancelamento", columnDefinition = "TEXT")
     private String motivosCancelamento;
+
+    @Column(name = "ativacao_primeira_chamada")
+    private Boolean ativacaoPrimeiraChamada;
+
+    @Column(name = "data_ativacao")
+    private LocalDate dataAtivacao;
+
+    @Column(name = "data_baixa")
+    private LocalDate dataBaixa;
+
+    @Column(name = "numero_protocolo_ged_portabilidade", length = 50)
+    private String numeroProtocoloGedPortabilidade;
+
+    @Column(name = "data_instalacao")
+    private LocalDate dataInstalacao;
+
+    /** Último usuário que salvou o protocolo (tela ou importação). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "alterado_por_id")
+    private Usuario alteradoPor;
 
     @CreationTimestamp
     @Column(name = "criado_em", nullable = false, updatable = false)

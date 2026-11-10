@@ -19,6 +19,11 @@ public record ProtocoloDocumentalRequestDTO(
         SituacaoServico situacaoServico,
         Boolean gerarComissao,
         List<String> motivosCancelamento,
-        String statusBko
+        String statusBko,
+        Boolean ativacaoPrimeiraChamada,
+        LocalDate dataAtivacao,
+        LocalDate dataBaixa,
+        String numeroProtocoloGedPortabilidade,
+        LocalDate dataInstalacao
 ) {
 }

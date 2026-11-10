@@ -45,7 +45,13 @@ public record ProtocoloDocumentalResponseDTO(
         Long filialId,
         String filialNome,
         BigDecimal valorTotal,
-        TipoPlano tipoPlano
+        TipoPlano tipoPlano,
+        Boolean ativacaoPrimeiraChamada,
+        LocalDate dataAtivacao,
+        LocalDate dataBaixa,
+        String numeroProtocoloGedPortabilidade,
+        LocalDate dataInstalacao,
+        String alteradoPorNome
 ) {
 
     public static ProtocoloDocumentalResponseDTO from(Venda venda, ProtocoloDocumental protocolo) {
@@ -84,7 +90,13 @@ public record ProtocoloDocumentalResponseDTO(
                 venda.getFilial().getId(),
                 venda.getFilial().getNome(),
                 venda.getValorTotal(),
-                tipoPlano
+                tipoPlano,
+                temProtocolo ? protocolo.getAtivacaoPrimeiraChamada() : null,
+                temProtocolo ? protocolo.getDataAtivacao() : null,
+                temProtocolo ? protocolo.getDataBaixa() : null,
+                temProtocolo ? protocolo.getNumeroProtocoloGedPortabilidade() : null,
+                temProtocolo ? protocolo.getDataInstalacao() : null,
+                temProtocolo && protocolo.getAlteradoPor() != null ? protocolo.getAlteradoPor().getNome() : null
         );
     }
 }
