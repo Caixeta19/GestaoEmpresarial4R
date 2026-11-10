@@ -18,12 +18,14 @@ public record EstoqueDisponivelResponseDTO(
         String cor,
         String codigoAcessorio,
         String filialEstoque,
-        BigDecimal valorVenda
+        BigDecimal valorVenda,
+        /** Unidades livres da linha (acessório tem um serial por SKU com quantidade N). */
+        Integer quantidadeDisponivel
 ) {
     public static EstoqueDisponivelResponseDTO from(EstoqueGeral e) {
         return new EstoqueDisponivelResponseDTO(
                 e.getId(), e.getSerial(), e.getTipoProduto(), e.getCategoria(), e.getMarca(),
                 e.getModeloComercial(), e.getCor(), e.getCodigoAcessorio(), e.getFilialEstoque(),
-                e.getValorVenda());
+                e.getValorVenda(), e.quantidadeLivre());
     }
 }

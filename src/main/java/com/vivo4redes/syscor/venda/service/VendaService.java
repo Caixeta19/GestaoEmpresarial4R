@@ -18,12 +18,14 @@ import com.vivo4redes.syscor.venda.enums.FormaPagamento;
 import com.vivo4redes.syscor.venda.enums.StatusAvaliacaoProcedencia;
 import com.vivo4redes.syscor.venda.enums.StatusVenda;
 import com.vivo4redes.syscor.venda.enums.TipoPagamento;
+import com.vivo4redes.syscor.estoque.enums.StatusEstoque;
 import com.vivo4redes.syscor.exception.CarrinhoNaoEditavelException;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.PagamentosIncompativeisException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.exception.TotalVendaAlteradoException;
 import com.vivo4redes.syscor.exception.TransicaoStatusInvalidaException;
+import com.vivo4redes.syscor.exception.SerialReservadoException;
 import com.vivo4redes.syscor.exception.VendaSemItemException;
 import com.vivo4redes.syscor.exception.VoucherJaUsadoException;
 import com.vivo4redes.syscor.venda.model.Cliente;
@@ -119,18 +121,20 @@ public class VendaService {
         boolean precoPelaTabela = dto.categoria() == CategoriaItemVenda.PRODUTO_VIVO
                 || dto.categoria() == CategoriaItemVenda.ACESSORIO;
 
+        // Item com IMEI/Serial é uma unidade física: a quantidade só pode ser 1.
+        String serialInformado = dto.imeiOuSerial() == null ? null : dto.imeiOuSerial().trim();
+        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
+
         if (!servico) {
-            if (dto.produtoId() == null) {
-                throw new NegocioException("produtoId é obrigatório para itens que não são serviço.");
+            // Com o serial, o produtoId é opcional: a linha do estoque é achada pela leitura.
+            if (dto.produtoId() == null && !informouSerial) {
+                throw new NegocioException("Informe o IMEI/Serial (ou o produtoId) para itens que não são serviço.");
             }
             if (!precoPelaTabela && (dto.valorUnitario() == null || dto.valorUnitario().compareTo(BigDecimal.ZERO) <= 0)) {
                 throw new NegocioException("valorUnitario deve ser maior que zero para recarga.");
             }
         }
 
-        // Item com IMEI/Serial é uma unidade física: a quantidade só pode ser 1.
-        String serialInformado = dto.imeiOuSerial() == null ? null : dto.imeiOuSerial().trim();
-        boolean informouSerial = serialInformado != null && !serialInformado.isBlank() && !serialInformado.equals("-");
         if (informouSerial && dto.quantidade().compareTo(BigDecimal.ONE) != 0) {
             throw new NegocioException("Item com IMEI/Serial deve ter quantidade igual a 1.");
         }
@@ -139,7 +143,13 @@ public class VendaService {
         EstoqueGeral linhaEstoque = null;
         PrecoCalculado preco = null;
         if (!servico) {
-            EstoqueGeral escolhida = estoqueService.buscarPorId(dto.produtoId());
+            EstoqueGeral escolhida = dto.produtoId() != null
+                    ? estoqueService.buscarPorId(dto.produtoId())
+                    : estoqueService.buscarPorSerial(serialInformado);
+            exigirCategoriaDoEstoque(dto.categoria(), escolhida);
+            if (informouSerial) {
+                exigirSerialLivre(escolhida);
+            }
             if (precoPelaTabela) {
                 // Antes da reserva: item sem preço na tabela vigente é recusado (422) sem prender a unidade.
                 preco = precoNaTabela(venda, venda.getCondicaoPagamento(), dto.categoria(), escolhida, dto.plano());
@@ -161,7 +171,10 @@ public class VendaService {
                 serialDaBaixa = escolhida.getSerial();
             }
             // Carrinho só reserva; a unidade vira VENDIDO quando a venda é CONCLUIDA.
-            linhaEstoque = estoqueService.reservarNaVenda(serialDaBaixa);
+            // Acessório lido pelo serial prende 1 unidade da linha (um serial por SKU, com quantidade N).
+            linhaEstoque = vendePorUnidade(informouSerial, escolhida)
+                    ? estoqueService.reservarUnidadeNaVenda(serialDaBaixa)
+                    : estoqueService.reservarNaVenda(serialDaBaixa);
             // O serial precisa ser o da linha escolhida (evita vender o IMEI de um item com a descrição/preço de outro).
             if (!escolhida.getId().equals(linhaEstoque.getId())) {
                 throw new NegocioException("O IMEI/Serial '" + serialDaBaixa + "' não corresponde ao item informado.");
@@ -170,8 +183,9 @@ public class VendaService {
 
         ItemVenda item = ItemVenda.builder()
                 .categoria(dto.categoria())
-                .produtoId(dto.produtoId())
-                .descricaoProduto(dto.descricaoProduto())
+                .produtoId(linhaEstoque != null ? linhaEstoque.getId() : dto.produtoId())
+                .descricaoProduto(dto.descricaoProduto() == null && linhaEstoque != null
+                        ? linhaEstoque.getModeloComercial() : dto.descricaoProduto())
                 .quantidade(dto.quantidade())
                 .valorUnitario(valorUnitarioDoItem(dto, preco))
                 .estoque(linhaEstoque)
@@ -231,7 +245,7 @@ public class VendaService {
                 .findFirst()
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Item da venda"));
 
-        liberarEstoqueDoItem(itemRemovido);
+        liberarEstoqueDoItem(itemRemovido, false);
 
         venda.removerItem(itemId);
         reprecificar(venda);
@@ -325,13 +339,14 @@ public class VendaService {
         }
         exigirCancelamentoNoDia(venda, novoStatus);
 
+        boolean estoqueJaBaixado = venda.getStatus() == StatusVenda.CONCLUIDA;
         transicionar(venda, novoStatus);
         venda.setStatusAlteradoPor(autenticado);
         venda.setStatusAlteradoEm(Instant.now());
         if (novoStatus == StatusVenda.CONCLUIDA) {
             confirmarEstoqueDaVenda(venda);
         } else if (novoStatus == StatusVenda.CANCELADA) {
-            liberarEstoqueDaVenda(venda);
+            liberarEstoqueDaVenda(venda, estoqueJaBaixado);
         }
         return vendaRepository.save(venda);
     }
@@ -383,7 +398,7 @@ public class VendaService {
         }
         Venda venda = buscarPorId(vendaId);
         transicionar(venda, StatusVenda.CANCELADA);
-        liberarEstoqueDaVenda(venda);
+        liberarEstoqueDaVenda(venda, false);
         vendaRepository.save(venda);
         return true;
     }
@@ -797,23 +812,70 @@ public class VendaService {
     /** Venda CONCLUIDA: cada unidade reservada pelos itens vira VENDIDO. */
     private void confirmarEstoqueDaVenda(Venda venda) {
         for (ItemVenda item : venda.getItens()) {
-            if (item.getEstoque() != null) {
+            if (item.getEstoque() == null) continue;
+            if (itemPorUnidade(item)) {
+                estoqueService.confirmarVendaUnidade(item.getEstoque());
+            } else {
                 estoqueService.confirmarVenda(item.getEstoque());
             }
         }
     }
 
     /** Venda cancelada: devolve ao estoque todas as unidades dos itens. */
-    private void liberarEstoqueDaVenda(Venda venda) {
+    private void liberarEstoqueDaVenda(Venda venda, boolean estoqueJaBaixado) {
         for (ItemVenda item : venda.getItens()) {
-            liberarEstoqueDoItem(item);
+            liberarEstoqueDoItem(item, estoqueJaBaixado);
         }
     }
 
-    /** Devolve ao estoque a linha que o item reservou ou vendeu (volta a DISPONIVEL). */
-    private void liberarEstoqueDoItem(ItemVenda item) {
-        if (item.getEstoque() != null) {
+    /**
+     * Devolve ao estoque o que o item reservou ou vendeu. Linha inteira volta a DISPONIVEL; acessório por unidade
+     * solta a reserva (carrinho) ou devolve a unidade vendida (venda concluída cancelada).
+     */
+    private void liberarEstoqueDoItem(ItemVenda item, boolean estoqueJaBaixado) {
+        if (item.getEstoque() == null) return;
+        if (!itemPorUnidade(item)) {
             estoqueService.liberar(item.getEstoque());
+        } else if (estoqueJaBaixado) {
+            estoqueService.devolverUnidadeVendida(item.getEstoque());
+        } else {
+            estoqueService.liberarUnidadeReservada(item.getEstoque());
+        }
+    }
+
+    /** Acessório lido pelo serial é vendido por unidade; aparelho e acessório sem leitura baixam a linha inteira. */
+    private static boolean vendePorUnidade(boolean informouSerial, EstoqueGeral linha) {
+        return informouSerial && EstoqueUtil.ehAcessorio(linha);
+    }
+
+    private static boolean itemPorUnidade(ItemVenda item) {
+        return item.getSerialImei() != null && EstoqueUtil.ehAcessorio(item.getEstoque());
+    }
+
+    /** A aba precisa bater com o item do estoque: IMEI de aparelho não entra como acessório, e vice-versa. */
+    private static void exigirCategoriaDoEstoque(CategoriaItemVenda categoria, EstoqueGeral linha) {
+        boolean acessorio = EstoqueUtil.ehAcessorio(linha);
+        if (categoria == CategoriaItemVenda.ACESSORIO && !acessorio) {
+            throw new NegocioException("Este IMEI é de um aparelho: lance na aba Produto Vivo.");
+        }
+        if (categoria == CategoriaItemVenda.PRODUTO_VIVO && acessorio) {
+            throw new NegocioException("Este serial é de um acessório: lance na aba Acessório.");
+        }
+    }
+
+    /** Serial sem unidade livre porque está no carrinho de uma venda aberta: 409 com o número dela. */
+    private void exigirSerialLivre(EstoqueGeral linha) {
+        StatusEstoque status = linha.getStatus();
+        if (status == StatusEstoque.VENDIDO || status == StatusEstoque.DEFEITO) {
+            return; // segue para o 422 da reserva ("não está disponível para venda")
+        }
+        boolean semUnidadeLivre = EstoqueUtil.ehAcessorio(linha)
+                ? linha.quantidadeLivre() <= 0
+                : !linha.disponivelParaVenda();
+        if (!semUnidadeLivre) return;
+        List<Long> vendas = vendaRepository.buscarVendasAbertasComEstoque(linha.getId());
+        if (!vendas.isEmpty()) {
+            throw new SerialReservadoException(vendas.get(0));
         }
     }
 

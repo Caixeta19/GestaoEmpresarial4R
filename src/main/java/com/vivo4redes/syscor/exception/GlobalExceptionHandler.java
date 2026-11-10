@@ -49,6 +49,13 @@ public class GlobalExceptionHandler {
                 .body(corpo(HttpStatus.CONFLICT, ex.getMessage()));
     }
 
+    // 409: IMEI/Serial já reservado no carrinho de outra venda
+    @ExceptionHandler(SerialReservadoException.class)
+    public ResponseEntity<Map<String, Object>> handleSerialReservado(SerialReservadoException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(corpo(HttpStatus.CONFLICT, ex.getMessage()));
+    }
+
     // 401: credenciais inválidas (login / reautenticação do vendedor)
     @ExceptionHandler(AutenticacaoInvalidaException.class)
     public ResponseEntity<Map<String, Object>> handleAutenticacao(AutenticacaoInvalidaException ex) {

@@ -156,6 +156,7 @@ public class EstoqueGeralService {
                     BigDecimal precoDaVenda = destino.getStatus() == StatusEstoque.VENDIDO ? destino.getValorVenda() : null;
                     aplicarLinha(destino, linha, porColuna);
                     if (destino.getStatus() == StatusEstoque.VENDIDO) destino.setValorVenda(precoDaVenda);
+                    ajustarReservasAposImportacao(destino, linha, erros);
                     destino.setSerial(serial); // garante a chave normalizada
                     paraSalvar.add(destino);
                     if (novo) inseridos++; else atualizados++;
@@ -333,6 +334,45 @@ public class EstoqueGeralService {
         return repository.save(item);
     }
 
+    /** Acessório por unidade: uma leitura do serial prende 1 unidade da linha (FOR UPDATE + @Version). */
+    @Transactional
+    public EstoqueGeral reservarUnidadeNaVenda(String serialInformado) {
+        String serial = serial(serialInformado);
+        if (serial.isBlank()) {
+            throw new NegocioException("Informe o IMEI/Serial do item.");
+        }
+        EstoqueGeral item = repository.findBySerialForUpdate(serial)
+                .orElseThrow(() -> new NegocioException("O IMEI/Serial '" + serial + "' não foi encontrado no estoque."));
+        item.reservarUnidade();
+        return repository.save(item);
+    }
+
+    /** Venda concluída: a unidade reservada sai da linha (que vira VENDIDO quando a quantidade zera). */
+    @Transactional
+    public EstoqueGeral confirmarVendaUnidade(EstoqueGeral item) {
+        EstoqueGeral travado = travar(item);
+        travado.confirmarVendaUnidade();
+        return repository.save(travado);
+    }
+
+    /** Item removido ou carrinho cancelado: a unidade reservada volta a ficar livre na linha. */
+    @Transactional
+    public void liberarUnidadeReservada(EstoqueGeral item) {
+        if (item == null) return;
+        EstoqueGeral travado = travar(item);
+        travado.liberarUnidadeReservada();
+        repository.save(travado);
+    }
+
+    /** Venda concluída cancelada: a unidade vendida volta para a linha. */
+    @Transactional
+    public void devolverUnidadeVendida(EstoqueGeral item) {
+        if (item == null) return;
+        EstoqueGeral travado = travar(item);
+        travado.devolverUnidadeVendida();
+        repository.save(travado);
+    }
+
     /** Venda concluída: a unidade reservada vira VENDIDO (com {@code data_venda}). */
     @Transactional
     public EstoqueGeral confirmarVenda(EstoqueGeral item) {
@@ -348,6 +388,24 @@ public class EstoqueGeralService {
         EstoqueGeral travado = travar(item);
         travado.liberar();
         repository.save(travado);
+    }
+
+    /**
+     * O relatório traz a quantidade da loja, mas não sabe dos carrinhos abertos: a quantidade nunca fica abaixo das
+     * unidades reservadas, e o status DISPONIVEL/RESERVADO do acessório acompanha o que sobrou livre.
+     */
+    private void ajustarReservasAposImportacao(EstoqueGeral destino, LeitorTabular.Linha linha, List<String> erros) {
+        int reservadas = destino.getQuantidadeReservada() == null ? 0 : destino.getQuantidadeReservada();
+        if (reservadas <= 0) return;
+        int quantidade = destino.getQuantidade() == null ? 1 : destino.getQuantidade();
+        if (quantidade < reservadas) {
+            registrarErro(erros, "Linha " + linha.numero() + " (serial " + destino.getSerial() + "): quantidade " + quantidade
+                    + " menor que as " + reservadas + " unidades em carrinhos abertos — mantida em " + reservadas + ".");
+            destino.setQuantidade(reservadas);
+        }
+        if (destino.getStatus() == StatusEstoque.DISPONIVEL || destino.getStatus() == StatusEstoque.RESERVADO) {
+            destino.recalcularStatusPelaQuantidade();
+        }
     }
 
     private EstoqueGeral travar(EstoqueGeral item) {
@@ -374,6 +432,13 @@ public class EstoqueGeralService {
         return repository.findBySerialAndStatus(serial(serialInformado), StatusEstoque.DISPONIVEL)
                 .map(EstoqueDisponivelResponseDTO::from)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Item disponível com esse serial"));
+    }
+
+    /** Linha pelo serial exato, em qualquer status (a venda decide entre 404, 409 e 422). */
+    @Transactional(readOnly = true)
+    public EstoqueGeral buscarPorSerial(String serialInformado) {
+        return repository.findBySerial(serial(serialInformado))
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Item de estoque com esse serial"));
     }
 
     /** Unidade por id (qualquer status) — usado pela venda para validar o item escolhido. */

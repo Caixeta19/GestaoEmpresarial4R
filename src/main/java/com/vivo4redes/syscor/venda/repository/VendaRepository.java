@@ -78,6 +78,15 @@ public interface VendaRepository extends JpaRepository<Venda, Long>, JpaSpecific
         """)
     List<Long> buscarOutrasVendasComVoucher(@Param("codigo") String codigo, @Param("vendaId") Long vendaId);
 
+    /** Carrinhos abertos com item preso a essa linha do estoque (para o 409 de serial já reservado). */
+    @Query("""
+        select distinct i.venda.id from ItemVenda i
+        where i.estoque.id = :estoqueId
+          and i.venda.status = com.vivo4redes.syscor.venda.enums.StatusVenda.ABERTA
+        order by i.venda.id
+        """)
+    List<Long> buscarVendasAbertasComEstoque(@Param("estoqueId") Long estoqueId);
+
     @EntityGraph(attributePaths = {"cliente", "filial", "usuario", "finalizadoPor", "itens"})
     @Query("select distinct v from Venda v order by v.criadoEm desc")
     List<Venda> listarComDetalhes();
