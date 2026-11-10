@@ -247,6 +247,41 @@ class ProtocoloDocumentalIntegracaoTest {
         assertThat(ids(buscar(lider))).containsExactly(id);
     }
 
+    @Test
+    @DisplayName("Reanálise: Improcedente não cancela; volta para Em avaliação com a correção na observação; Procedente é final")
+    void reanaliseDepoisDeImprocedente() throws Exception {
+        long id = vendaLancada(null, HOJE);
+        servico(id, "11911113333", "Alta", "PRE", "Pré", "PRE");
+
+        Resposta improcedente = enviar(put("/documental/protocolos/{id}", id),
+                Map.of("statusBko", "Improcedente", "observacoes", "Falta o RG do cliente"));
+        assertThat(improcedente.status).isEqualTo(200);
+        assertThat(improcedente.corpo.get("statusBko").asText()).isEqualTo("Improcedente");
+        assertThat(improcedente.corpo.get("statusVenda").asText()).as("continua lançada").isEqualTo("CONCLUIDA");
+
+        Resposta semCorrecao = enviar(put("/documental/protocolos/{id}", id),
+                Map.of("statusBko", "Em_avaliacao_pelo_BKO", "observacoes", "Falta o RG do cliente"));
+        assertThat(semCorrecao.status).as("observação igual: sem correção").isEqualTo(422);
+        assertThat(semCorrecao.corpo.get("mensagem").asText()).contains("descreva a correção");
+
+        Resposta voltou = enviar(put("/documental/protocolos/{id}", id), Map.of("statusBko", "Em_avaliacao_pelo_BKO",
+                "observacoes", "Falta o RG do cliente. Correção: RG anexado em 10/11."));
+        assertThat(voltou.status).as("dá para salvar de novo").isEqualTo(200);
+        assertThat(voltou.corpo.get("statusBko").asText()).isEqualTo("Em_avaliacao_pelo_BKO");
+        Map<String, String> emAvaliacao = daFilial();
+        emAvaliacao.put("statusBko", "Em_avaliacao_pelo_BKO");
+        assertThat(ids(buscar(emAvaliacao))).as("aparece na busca sem incluir canceladas").containsExactly(id);
+
+        assertThat(enviar(put("/documental/protocolos/{id}", id), Map.of("statusBko", "Procedente")).corpo
+                .get("statusBko").asText()).isEqualTo("Procedente");
+        assertThat(jdbc.queryForObject("SELECT status FROM vendas WHERE id = ?", String.class, id)).isEqualTo("CONCLUIDA");
+
+        Resposta depoisDeProcedente = enviar(put("/documental/protocolos/{id}", id), Map.of("statusBko", "Em_avaliacao_pelo_BKO"));
+        assertThat(depoisDeProcedente.status).as("Procedente é final").isEqualTo(422);
+        assertThat(enviar(put("/documental/protocolos/{id}", id), Map.of("statusBko", "Procedente", "liderEquipe", "Ana"))
+                .status).as("o resto do protocolo ainda pode ser salvo").isEqualTo(200);
+    }
+
     // ------------------------------------------------------------------ importação
 
     @Test

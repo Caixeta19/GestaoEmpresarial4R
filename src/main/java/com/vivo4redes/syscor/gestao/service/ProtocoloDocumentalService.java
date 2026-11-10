@@ -27,7 +27,8 @@ import java.util.stream.Collectors;
 
 /**
  * Tela "Gestão Documental" — busca as vendas lançadas, cria/atualiza o protocolo de uma venda (1:1) e delega a
- * avaliação de procedência (statusBko) para o VendaService, que cancela/estorna quando Improcedente (US-303).
+ * avaliação de procedência (statusBko) para o VendaService. O status BKO pode mudar quantas vezes for preciso
+ * (inclusive sair de Improcedente): ele não cancela a venda nem mexe no estoque.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,12 +48,14 @@ public class ProtocoloDocumentalService {
                     + venda.getNumeroVenda() + " está " + venda.getStatus() + ").");
         }
 
-        if (dto.statusBko() != null && !dto.statusBko().isBlank()) {
-            venda = vendaService.avaliarProcedencia(vendaId, parseStatusBko(dto.statusBko()));
-        }
-
         ProtocoloDocumental protocolo = protocoloRepository.findByVendaId(vendaId)
                 .orElse(null);
+
+        if (dto.statusBko() != null && !dto.statusBko().isBlank()) {
+            StatusAvaliacaoProcedencia novo = parseStatusBko(dto.statusBko());
+            exigirCorrecaoAoReabrir(venda, novo, protocolo == null ? null : protocolo.getObservacoes(), dto.observacoes());
+            venda = vendaService.avaliarProcedencia(vendaId, novo);
+        }
 
         if (protocolo == null) {
             protocolo = ProtocoloDocumental.builder().venda(venda).build();
@@ -125,6 +128,21 @@ public class ProtocoloDocumentalService {
         if (vendas.isEmpty()) return Map.of();
         return protocoloRepository.findByVendaIdIn(vendas.stream().map(Venda::getId).toList()).stream()
                 .collect(Collectors.toMap(p -> p.getVenda().getId(), Function.identity()));
+    }
+
+    /** Improcedente -> Em avaliação: quem reabre (gerente ou vendedor) descreve a correção na observação. */
+    static void exigirCorrecaoAoReabrir(Venda venda, StatusAvaliacaoProcedencia novo, String observacaoAtual,
+                                         String observacaoNova) {
+        if (RegrasDocumental.statusBko(venda) != StatusAvaliacaoProcedencia.Improcedente
+                || novo != StatusAvaliacaoProcedencia.Em_avaliacao_pelo_BKO) {
+            return;
+        }
+        String nova = observacaoNova == null ? "" : observacaoNova.trim();
+        String atual = observacaoAtual == null ? "" : observacaoAtual.trim();
+        if (nova.isEmpty() || nova.equals(atual)) {
+            throw new NegocioException("Para voltar a venda #" + venda.getNumeroVenda() + " de Improcedente para "
+                    + "Em avaliação, descreva a correção feita na observação.");
+        }
     }
 
     static StatusAvaliacaoProcedencia parseStatusBko(String texto) {

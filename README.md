@@ -129,7 +129,7 @@ vale confirmar se a dependência ainda é necessária ou se pode sair.
 ```
 ABERTA    → CONCLUIDA   (só pelo finalizar, com a senha do vendedor)
 ABERTA    → CANCELADA   (carrinho expirado ou cancelado)
-CONCLUIDA → CANCELADA   (cancelamento com senha ou procedência improcedente; devolve o estoque)
+CONCLUIDA → CANCELADA   (cancelamento com senha, só no dia do lançamento; devolve o estoque. Improcedente no BKO não cancela)
 CANCELADA → (terminal, sem saída)
 ```
 

@@ -4,9 +4,9 @@ import java.util.Set;
 
 /**
  * Workflow de status da venda: ABERTA (carrinho) → CONCLUIDA (lançada) num passo só, pelo finalizar com a senha do
- * vendedor; CANCELADA a partir de ABERTA (carrinho expirado ou cancelado) ou de CONCLUIDA (cancelamento autenticado
- * ou avaliação improcedente). PENDENTE e APROVADA ficam só por compatibilidade com o CHECK do banco: nenhuma venda
- * entra nesses status. Transições permitidas ficam explícitas aqui para não vazar regra de máquina de estados para os
+ * vendedor; CANCELADA a partir de ABERTA (carrinho expirado ou cancelado) ou de CONCLUIDA (só pelo cancelamento
+ * autenticado: a avaliação Improcedente do BKO não cancela). PENDENTE e APROVADA ficam só por compatibilidade com o
+ * CHECK do banco: nenhuma venda entra nesses status. Transições permitidas ficam explícitas aqui para não vazar regra de máquina de estados para os
  * services.
  */
 public enum StatusVenda {
@@ -35,7 +35,7 @@ public enum StatusVenda {
     CONCLUIDA {
         @Override
         public Set<StatusVenda> transicoesPermitidas() {
-            // Cancelamento com autenticação ou avaliação de procedência improcedente
+            // Só pelo cancelamento com autenticação (a avaliação Improcedente não cancela)
             return Set.of(CANCELADA);
         }
     },

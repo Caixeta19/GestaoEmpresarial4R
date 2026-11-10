@@ -323,6 +323,7 @@ public class VendaService {
         if (novoStatus == StatusVenda.CONCLUIDA) {
             throw new NegocioException("A venda é lançada pelo finalizar, com a senha do vendedor.");
         }
+        exigirCancelamentoNoDia(venda, novoStatus);
 
         transicionar(venda, novoStatus);
         venda.setStatusAlteradoPor(autenticado);
@@ -335,16 +336,34 @@ public class VendaService {
         return vendaRepository.save(venda);
     }
 
+    /**
+     * Venda lançada só é cancelada no dia do lançamento (hora de São Paulo): de dia anterior, não. O carrinho ABERTO
+     * continua cancelável a qualquer hora.
+     */
+    private static void exigirCancelamentoNoDia(Venda venda, StatusVenda novoStatus) {
+        if (novoStatus != StatusVenda.CANCELADA || venda.getStatus() != StatusVenda.CONCLUIDA) return;
+        Instant lancamento = venda.getFinalizadoEm() != null ? venda.getFinalizadoEm() : venda.getCriadoEm();
+        if (lancamento == null) return;
+        java.time.LocalDate dia = lancamento.atZone(ZONA).toLocalDate();
+        if (dia.isBefore(java.time.LocalDate.now(ZONA))) {
+            throw new NegocioException("A venda #" + venda.getNumeroVenda() + " foi lançada em "
+                    + dia.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+                    + ": só é possível cancelar a venda no dia do lançamento.");
+        }
+    }
+
     @Transactional
     public Venda avaliarProcedencia(Long vendaId, StatusAvaliacaoProcedencia resultado) {
         Venda venda = buscarPorId(vendaId);
-        venda.setAvaliacaoProcedencia(resultado);
-
-        if (resultado == StatusAvaliacaoProcedencia.Improcedente
-                && venda.getStatus() != StatusVenda.CANCELADA) {
-            transicionar(venda, StatusVenda.CANCELADA);
-            liberarEstoqueDaVenda(venda);
+        StatusAvaliacaoProcedencia atual = venda.getAvaliacaoProcedencia() == null
+                ? StatusAvaliacaoProcedencia.Nao_avaliado : venda.getAvaliacaoProcedencia();
+        if (!atual.podeMudarPara(resultado)) {
+            throw new NegocioException("A venda #" + venda.getNumeroVenda() + " já foi avaliada como Procedente: "
+                    + "o status BKO não muda mais.");
         }
+        // Só o status do BKO: a venda pode voltar a ser analisada (ex.: Improcedente -> Em avaliação), então nem
+        // Improcedente cancela a venda nem mexe no estoque. Cancelar é o cancelamento autenticado (avancarStatus).
+        venda.setAvaliacaoProcedencia(resultado);
         return vendaRepository.save(venda);
     }
 

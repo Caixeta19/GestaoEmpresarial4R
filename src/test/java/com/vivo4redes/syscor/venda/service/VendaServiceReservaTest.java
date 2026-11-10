@@ -170,15 +170,71 @@ class VendaServiceReservaTest {
     }
 
     @Test
-    @DisplayName("Procedência Improcedente em venda CONCLUIDA cancela e libera a unidade vendida")
-    void improcedenteLibera() {
+    @DisplayName("Improcedente só marca o status BKO: a venda continua lançada, o estoque não muda e dá para reanalisar")
+    void improcedenteNaoCancela() {
         Venda venda = venda(StatusVenda.CONCLUIDA);
         venda.adicionarItem(itemCom(unidade));
 
         service.avaliarProcedencia(1L, StatusAvaliacaoProcedencia.Improcedente);
 
-        verify(estoqueService).liberar(unidade);
-        assertThat(venda.getStatus()).isEqualTo(StatusVenda.CANCELADA);
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
+        assertThat(venda.getAvaliacaoProcedencia()).isEqualTo(StatusAvaliacaoProcedencia.Improcedente);
+
+        service.avaliarProcedencia(1L, StatusAvaliacaoProcedencia.Em_avaliacao_pelo_BKO);
+
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
+        assertThat(venda.getAvaliacaoProcedencia()).isEqualTo(StatusAvaliacaoProcedencia.Em_avaliacao_pelo_BKO);
+        verifyNoInteractions(estoqueService);
+    }
+
+    @Test
+    @DisplayName("Procedente é final: não volta para Em avaliação; repetir Procedente pode")
+    void procedenteEhFinal() {
+        Venda venda = venda(StatusVenda.CONCLUIDA);
+        venda.setAvaliacaoProcedencia(StatusAvaliacaoProcedencia.Procedente);
+
+        assertThatThrownBy(() -> service.avaliarProcedencia(1L, StatusAvaliacaoProcedencia.Em_avaliacao_pelo_BKO))
+                .isInstanceOf(NegocioException.class).hasMessageContaining("Procedente");
+        assertThat(venda.getAvaliacaoProcedencia()).isEqualTo(StatusAvaliacaoProcedencia.Procedente);
+
+        service.avaliarProcedencia(1L, StatusAvaliacaoProcedencia.Procedente);
+        assertThat(venda.getAvaliacaoProcedencia()).isEqualTo(StatusAvaliacaoProcedencia.Procedente);
+    }
+
+    @Test
+    @DisplayName("Venda lançada em dia anterior não pode ser cancelada e o estoque não muda")
+    void cancelarRetroativoRecusa() {
+        Venda venda = venda(StatusVenda.CONCLUIDA);
+        venda.setFinalizadoEm(java.time.Instant.now().minus(java.time.Duration.ofDays(1)).minusSeconds(60));
+        venda.adicionarItem(itemCom(unidade));
+
+        assertThatThrownBy(() -> service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CANCELADA, AUTH)))
+                .isInstanceOf(NegocioException.class).hasMessageContaining("só é possível cancelar a venda no dia do lançamento");
+
+        verifyNoInteractions(estoqueService);
+        assertThat(venda.getStatus()).isEqualTo(StatusVenda.CONCLUIDA);
+    }
+
+    @Test
+    @DisplayName("Venda lançada hoje pode ser cancelada")
+    void cancelarNoDiaPode() {
+        Venda hoje = venda(StatusVenda.CONCLUIDA);
+        hoje.setFinalizadoEm(java.time.Instant.now());
+
+        service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CANCELADA, AUTH));
+
+        assertThat(hoje.getStatus()).isEqualTo(StatusVenda.CANCELADA);
+    }
+
+    @Test
+    @DisplayName("Carrinho aberto de dia anterior continua cancelável")
+    void cancelarCarrinhoAntigoPode() {
+        Venda carrinho = venda(StatusVenda.ABERTA);
+        carrinho.setCriadoEm(java.time.Instant.now().minus(java.time.Duration.ofDays(3)));
+
+        service.avancarStatus(1L, new StatusVendaRequestDTO(StatusVenda.CANCELADA, AUTH));
+
+        assertThat(carrinho.getStatus()).isEqualTo(StatusVenda.CANCELADA);
     }
 
     private Venda venda(StatusVenda status) {
