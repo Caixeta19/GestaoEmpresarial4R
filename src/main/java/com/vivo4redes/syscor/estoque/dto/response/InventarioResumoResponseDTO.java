@@ -1,39 +1,67 @@
 package com.vivo4redes.syscor.estoque.dto.response;
 
+import com.vivo4redes.syscor.estoque.enums.StatusInventario;
 import com.vivo4redes.syscor.estoque.model.InventarioExecucao;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 
-/** Alimenta a tela de Inventário: os 3 cards (corretos/divergência/pendentes) + o detalhe linha a linha. */
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class InventarioResumoResponseDTO {
-    private Long execucaoId;
-    private String nomeArquivo;
-    private Instant dataExecucao;
-    private Integer totalLinhasSap;
-    private Integer totalCorretos;
-    private Integer totalDivergencias;
-    private Integer totalPendentes;
-    private List<InventarioItemResponseDTO> itens;
+/**
+ * Execução de inventário: cabeçalho, resumo da importação, contadores e diagnóstico. No detalhe ({@code GET /{id}})
+ * traz também a página de itens e as últimas bipagens; na listagem esses campos vêm nulos.
+ */
+public record InventarioResumoResponseDTO(
+        Long execucaoId,
+        Long filialId,
+        String filialNome,
+        String centroSap,
+        StatusInventario status,
+        String nomeArquivo,
+        Instant abertoEm,
+        String abertoPor,
+        Instant fechadoEm,
+        String fechadoPor,
+        int totalLinhasSap,
+        int linhasIgnoradasOutroCentro,
+        int linhasSemSerial,
+        List<String> centrosSemFilial,
+        TotaisInventarioDTO totais,
+        String resumoIa,
+        Instant diagnosticadoEm,
+        PaginaItens itens,
+        List<InventarioItemResponseDTO> ultimasBipagens
+) {
 
-    public static InventarioResumoResponseDTO from(InventarioExecucao e, List<InventarioItemResponseDTO> itens) {
-        return InventarioResumoResponseDTO.builder()
-                .execucaoId(e.getId())
-                .nomeArquivo(e.getNomeArquivo())
-                .dataExecucao(e.getCriadoEm())
-                .totalLinhasSap(e.getTotalLinhasSap())
-                .totalCorretos(e.getTotalCorretos())
-                .totalDivergencias(e.getTotalDivergencias())
-                .totalPendentes(e.getTotalPendentes())
-                .itens(itens)
-                .build();
+    public record PaginaItens(List<InventarioItemResponseDTO> conteudo, int pagina, int tamanho,
+                              long totalItens, int totalPaginas) {
+    }
+
+    public static InventarioResumoResponseDTO from(InventarioExecucao e, TotaisInventarioDTO totais,
+                                                   PaginaItens itens, List<InventarioItemResponseDTO> ultimasBipagens) {
+        var filial = e.getFilial();
+        List<String> centros = e.getCentrosSemFilial() == null || e.getCentrosSemFilial().isBlank()
+                ? List.of()
+                : Arrays.stream(e.getCentrosSemFilial().split(",")).map(String::trim).filter(c -> !c.isEmpty()).toList();
+        return new InventarioResumoResponseDTO(
+                e.getId(),
+                filial == null ? null : filial.getId(),
+                filial == null ? null : filial.getNome(),
+                filial == null ? null : filial.getCentroSap(),
+                e.getStatus(),
+                e.getNomeArquivo(),
+                e.getCriadoEm(),
+                e.getAbertoPor() != null ? e.getAbertoPor().getNome() : e.getExecutadoPor(),
+                e.getFechadoEm(),
+                e.getFechadoPor() == null ? null : e.getFechadoPor().getNome(),
+                e.getTotalLinhasSap(),
+                e.getLinhasIgnoradasOutroCentro(),
+                e.getLinhasSemSerial(),
+                centros,
+                totais,
+                e.getResumoIa(),
+                e.getDiagnosticadoEm(),
+                itens,
+                ultimasBipagens);
     }
 }

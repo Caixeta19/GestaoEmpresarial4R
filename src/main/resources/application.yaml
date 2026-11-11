@@ -65,6 +65,14 @@ syscor:
   precos:
     # Regra 6 da tabela da Telefônica: o PVP do aparelho NÃO inclui o chip, que tem preço fixo.
     chip: ${SYSCOR_PRECO_CHIP:13.00}
+  ia:
+    # Diagnóstico do inventário pela API do Claude. Sem chave, o inventário funciona e o diagnóstico fica indisponível.
+    api-key: ${ANTHROPIC_API_KEY:}
+    modelo: ${SYSCOR_IA_MODELO:claude-opus-5-5}
+    timeout: ${SYSCOR_IA_TIMEOUT:120s}
+    max-tokens: ${SYSCOR_IA_MAX_TOKENS:16000}
+    # Itens por chamada (no máximo 100).
+    lote: ${SYSCOR_IA_LOTE:100}
   carrinho:
     # Venda ABERTA sem atividade há mais que isso é cancelada e libera o estoque reservado.
     expiracao: ${SYSCOR_CARRINHO_EXPIRACAO:24h}

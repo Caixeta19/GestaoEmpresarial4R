@@ -20,6 +20,13 @@ public class FilialController {
         this.filialService = filialService;
     }
 
+    /** Carga do centro SAP das filiais: CSV ADABAS;CENTRO_SAP[;DEPOSITO_SAP] (multipart, campo "arquivo"). */
+    @PostMapping(value = "/centros-sap", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<com.vivo4redes.syscor.venda.dto.response.CargaCentrosSapResponseDTO> carregarCentrosSap(
+            @RequestParam("arquivo") org.springframework.web.multipart.MultipartFile arquivo) {
+        return ResponseEntity.ok(filialService.carregarCentrosSap(arquivo));
+    }
+
     @PostMapping
     public ResponseEntity<FilialResponseDTO> cadastrar(@Valid @RequestBody FilialRequestDTO dto) {
         var filial = filialService.cadastrar(dto);
