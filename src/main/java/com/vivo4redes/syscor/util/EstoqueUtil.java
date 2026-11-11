@@ -50,4 +50,39 @@ public final class EstoqueUtil {
     public static boolean ehAcessorio(EstoqueGeral e) {
         return e != null && !textoVazio(e.getCodigoAcessorio());
     }
+
+    /**
+     * Categorias do relatório do estoque vendidas na aba Acessório (sem acento, maiúsculas). Smartphone, Notebook e
+     * Tablets, TV e Box e Modem e FWT ficam na aba Produto Vivo.
+     */
+    private static final Set<String> CATEGORIAS_DE_ACESSORIO = Set.of(
+            "ESSENCIAIS", "ACESSORIOS", "AUDIO", "CASA INTELIGENTE", "BEM ESTAR", "VESTUARIO", "GAMES", "DEMAIS ELETRONICOS");
+
+    /**
+     * IMEI: 15 dígitos que não começam por 2. O serial SAP da unidade (código do material + sequência, ex.:
+     * 220181370043758) começa por 2; o IMEI começa pelo TAC do fabricante (35..., 86..., 01...).
+     */
+    private static final java.util.regex.Pattern IMEI = java.util.regex.Pattern.compile("^[013-9]\\d{14}$");
+
+    /**
+     * Vendido na aba Acessório (uma unidade por leitura do serial): tem código de acessório, ou é de uma categoria de
+     * acessório e não tem IMEI. Relógio LTE e tablet 5G têm IMEI e vão com plano, na aba Produto Vivo.
+     * <p>
+     * Não substitui {@link #ehAcessorio}: o preço e a reserva por quantidade dependem do código de acessório.
+     */
+    public static boolean vendidoComoAcessorio(EstoqueGeral e) {
+        if (e == null) return false;
+        if (ehAcessorio(e)) return true;
+        return CATEGORIAS_DE_ACESSORIO.contains(normalizarCategoria(e.getCategoria())) && !pareceImei(e.getSerial());
+    }
+
+    static boolean pareceImei(String serial) {
+        return serial != null && IMEI.matcher(limparSerial(serial)).matches();
+    }
+
+    private static String normalizarCategoria(String categoria) {
+        if (textoVazio(categoria)) return "";
+        String semAcento = java.text.Normalizer.normalize(categoria, java.text.Normalizer.Form.NFD).replaceAll("\\p{M}", "");
+        return semAcento.trim().replaceAll("\\s+", " ").toUpperCase(Locale.ROOT);
+    }
 }

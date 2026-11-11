@@ -40,4 +40,41 @@ class EstoqueUtilTest {
         assertThat(EstoqueUtil.ehAcessorio(EstoqueGeral.builder().codigoAcessorio("ACC123").build())).isTrue();
         assertThat(EstoqueUtil.ehAcessorio(null)).isFalse();
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Essenciais", "Acessórios", "Áudio", "Casa Inteligente", "Bem Estar", "Vestuário", "Games",
+            "Demais Eletrônicos", " acessorios "})
+    @DisplayName("Categoria de acessório com serial SAP (material + sequência) vai na aba Acessório")
+    void categoriaDeAcessorioComSerialSap(String categoria) {
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade(categoria, "220252761000161"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("Relógio LTE e tablet 5G têm IMEI: continuam na aba Produto Vivo")
+    void comImeiContinuaProdutoVivo() {
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade("Bem Estar", "356789012345678"))).isFalse();
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade("Notebook e Tablets", "861234567890123"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("Smartphone, TV, Box e Modem e Notebook sem IMEI ficam na aba Produto Vivo")
+    void outrasCategoriasProdutoVivo() {
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade("Smartphone", "356789012345678"))).isFalse();
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade("TV", "0ABC12345678"))).isFalse();
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade("Box e Modem e FWT", "356789012345678"))).isFalse();
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade("Notebook e Tablets", "220233240005309"))).isFalse();
+        assertThat(EstoqueUtil.vendidoComoAcessorio(unidade(null, "220233240005309"))).isFalse();
+        assertThat(EstoqueUtil.vendidoComoAcessorio(null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Com código de acessório é acessório em qualquer categoria")
+    void codigoDeAcessorioSempre() {
+        assertThat(EstoqueUtil.vendidoComoAcessorio(EstoqueGeral.builder().codigoAcessorio("'0007899716398012'")
+                .serial("7899716398012").build())).isTrue();
+    }
+
+    private static EstoqueGeral unidade(String categoria, String serial) {
+        return EstoqueGeral.builder().categoria(categoria).serial(serial).build();
+    }
 }

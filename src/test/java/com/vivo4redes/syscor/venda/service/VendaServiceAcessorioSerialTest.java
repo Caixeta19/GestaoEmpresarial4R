@@ -55,6 +55,8 @@ class VendaServiceAcessorioSerialTest {
 
     private static final String SERIAL_CAPA = "7899716398012";
     private static final String IMEI_APARELHO = "356789012345678";
+    private static final String SERIAL_SAP = "220252761000161";
+    private static final String IMEI_RELOGIO = "351111222233334";
     private static final AutenticacaoUsuarioDTO AUTH = new AutenticacaoUsuarioDTO("vendedor@4r.com", "senha");
 
     @Mock private VendaRepository vendaRepository;
@@ -168,6 +170,50 @@ class VendaServiceAcessorioSerialTest {
 
         verify(estoqueService, never()).reservarNaVenda(any());
         verify(estoqueService, never()).reservarUnidadeNaVenda(any());
+    }
+
+    @Test
+    @DisplayName("Capa com serial SAP (categoria Essenciais, sem código de acessório) entra na aba Acessório e reserva a unidade")
+    void capaComSerialSapNaAbaAcessorio() {
+        EstoqueGeral capa = EstoqueGeral.builder().id(30L).serial(SERIAL_SAP).categoria("Essenciais")
+                .modeloComercial("CAPA OVVI SILICONE").build();
+        when(estoqueService.buscarPorSerial(SERIAL_SAP)).thenReturn(capa);
+        when(estoqueService.reservarNaVenda(SERIAL_SAP)).thenAnswer(inv -> {
+            capa.reservar();
+            return capa;
+        });
+
+        service.adicionarItem(1L, acessorio(SERIAL_SAP));
+
+        ItemVenda item = venda.getItens().get(0);
+        assertThat(item.getCategoria()).isEqualTo(CategoriaItemVenda.ACESSORIO);
+        assertThat(item.getSerialImei()).isEqualTo(SERIAL_SAP);
+        assertThat(capa.getStatus()).isEqualTo(StatusEstoque.RESERVADO);
+        verify(estoqueService, never()).reservarUnidadeNaVenda(any());
+    }
+
+    @Test
+    @DisplayName("Capa com serial SAP na aba Produto Vivo: 422 para lançar na aba Acessório")
+    void capaComSerialSapNoProdutoVivo() {
+        when(estoqueService.buscarPorSerial(SERIAL_SAP)).thenReturn(EstoqueGeral.builder().id(30L).serial(SERIAL_SAP)
+                .categoria("Essenciais").build());
+
+        assertThatThrownBy(() -> service.adicionarItem(1L, ItemVendaRequestDTO.builder()
+                .categoria(CategoriaItemVenda.PRODUTO_VIVO).imeiOuSerial(SERIAL_SAP).quantidade(BigDecimal.ONE).build()))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("Este serial é de um acessório: lance na aba Acessório.");
+    }
+
+    @Test
+    @DisplayName("Relógio LTE (categoria Bem Estar, com IMEI) na aba Acessório: 422 para lançar na aba Produto Vivo")
+    void relogioLteNaAbaAcessorio() {
+        when(estoqueService.buscarPorSerial(IMEI_RELOGIO)).thenReturn(EstoqueGeral.builder().id(31L).serial(IMEI_RELOGIO)
+                .categoria("Bem Estar").modeloComercial("Galaxy Watch8 LTE 44mm").build());
+
+        assertThatThrownBy(() -> service.adicionarItem(1L, acessorio(IMEI_RELOGIO)))
+                .isInstanceOf(NegocioException.class)
+                .hasMessage("Este IMEI é de um aparelho: lance na aba Produto Vivo.");
+        verify(estoqueService, never()).reservarNaVenda(any());
     }
 
     @Test
