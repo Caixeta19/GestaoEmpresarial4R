@@ -149,14 +149,51 @@ CANCELADA → (terminal, sem saída)
 - Produto é considerado crítico quando `saldo disponível ≤ estoqueMinimo` (padrão: 2,
   se não informado).
 
-### Inventário (conciliação SAP)
+### Inventário por filial (IQ09 × sistema × bipagem, V36)
 
-- Cada upload do relatório IQ09 gera uma `InventarioExecucao` com os totalizadores.
-- Cada linha do relatório vira um `InventarioItem` com um resultado:
-  - `CORRETO` — serial existe no nosso estoque como `DISPONIVEL`, bate com o SAP.
-  - `DIVERGENCIA` — existe nos dois lados mas com estado inconsistente (ex.: já vendido
-    aqui, ainda em depósito no SAP), ou existe aqui como `DISPONIVEL` sem aparecer no SAP.
-  - `PENDENTE` — aparece no SAP mas nunca foi cadastrado no nosso sistema.
+- O inventário é **por filial** e cruza três fontes pelo serial, de forma exata (sem IA):
+  a **IQ09** do SAP, o **estoque do sistema** da filial e a **contagem física** (bipagem).
+- **Filial × centro SAP:** `filiais.centro_sap` (UNIQUE) e `filiais.deposito_sap` (opcional). Carga por CSV
+  `ADABAS;CENTRO_SAP[;DEPOSITO_SAP]` em `POST /filiais/centros-sap`. Filial sem centro → 422 "Cadastre o centro SAP
+  da filial antes de abrir o inventário".
+- **Abrir** (`POST /estoque/inventario`, multipart `filialId` + IQ09): só entram as linhas do centro (e do depósito,
+  se cadastrado) da filial; as de outro centro e as sem serial são contadas no resumo, que lista também os centros
+  do arquivo sem filial. **Uma execução aberta por filial** (outra → 409).
+  - Esperado da IQ09 = `Status usuário` **ADEP ou vazio** (no estoque da loja). RLIB, AECL e RESE ficam fora
+    (`FORA_ESTOQUE_SAP`, informativo).
+  - Esperado do sistema = estoque da filial em DISPONIVEL, RESERVADO ou DEFEITO (`filial_estoque` = nome da filial).
+- **Bipar** (`POST /{id}/bipagens`): leitor (Enter) ou câmera. `INSERT … ON CONFLICT` no UNIQUE
+  (`execucao_id`, `serial_normalizado`): o mesmo serial só conta uma vez, mesmo com vários celulares; a segunda leitura
+  volta com `jaBipado` ("Já bipado às HH:mm por X"). A contagem fica salva entre sessões.
+- **Normalização do serial:** sem apóstrofo, aspas e espaços, maiúsculas, e sem zeros à esquerda quando tem 16+ dígitos.
+- **Resultado de cada serial:**
+
+  | Resultado | IQ09 da loja | Sistema da loja | Bipado |
+  |---|---|---|---|
+  | `CONFERIDO` | ✓ | ✓ (DISPONIVEL/RESERVADO/DEFEITO) | ✓ |
+  | `PENDENTE` (durante a contagem) | ✓ ou sistema | | ✗ |
+  | `FALTA` (fechado) | ✓ | | ✗ (justificado) |
+  | `SO_NO_SISTEMA` (fechado) | ✗ | ✓ | ✗ (justificado) |
+  | `SEM_ENTRADA_SISTEMA` | ✓ | ✗ | ✓ |
+  | `SOBRA_FISICA` | ✗ | ✓ ou ✗ | ✓ |
+  | `VENDIDO_EM_ESTOQUE` | ✓ | VENDIDO | ✓ ou ✗ |
+  | `STATUS_SAP_DIVERGENTE` | status usuário fora do estoque da loja | | ✓ |
+  | `FORA_ESTOQUE_SAP` | status usuário fora do estoque da loja | | ✗ |
+
+- **Fechar** (`POST /{id}/fechar`): só com todos os pendentes bipados ou justificados (senão 422). Pendente
+  justificado vira `FALTA` (estava na IQ09) ou `SO_NO_SISTEMA` (só no sistema). Também há `cancelar`, desfazer
+  bipagem, justificativa e exportação CSV com todas as linhas.
+- **Diagnóstico pela API do Claude** (Messages API, saída JSON estruturada): roda ao fechar e pode ser refeito em
+  `POST /{id}/diagnostico`. Vão as faltas e divergências, em lotes de até 100, com contexto de produto e estoque
+  (status SAP, filial no sistema, outros centros da mesma IQ09, última venda só com número/data/status). **Nunca**
+  vai dado de cliente. A IA só sugere a causa provável (lista fechada + "outra"), a confiança e a ação; não decide
+  se um IMEI bate. Resposta inválida → nova tentativa, depois 502. Falha ao fechar não desfaz o fechamento.
+- **Configuração:** `ANTHROPIC_API_KEY` (no `.env`, fora do git), `SYSCOR_IA_MODELO` (padrão `claude-opus-5-5`),
+  `SYSCOR_IA_TIMEOUT` (120s), `SYSCOR_IA_LOTE` (100). Sem chave, o inventário funciona e mostra
+  "Diagnóstico indisponível: configure a chave da API".
+- O parser da IQ09 lê o cabeçalho do export real (`Nº de série`, `Texto breve material`, `Status do sistema`,
+  `Status usuário`, `Ctg.equipamento`…) com normalização NFKD, lê `Modificado em` como data do Excel e recusa
+  seriais em notação científica (`2.20181E+14`). Execuções antigas (V5) continuam legíveis.
 
 ### Tabela de preços
 
@@ -634,8 +671,17 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/estoque/consolidado` | Estoque consolidado por produto (`disponivel`, `reservado`, `defeito`; `avariado` é alias obsoleto de `defeito`) |
 | GET | `/estoque/alertas` | Produtos em nível crítico de estoque |
 | POST | `/estoque/entrada-seriais` | Dar entrada em seriais/IMEIs |
-| POST | `/estoque/inventario/importar-sap` | Importar relatório IQ09 (multipart) e conciliar |
-| GET | `/estoque/inventario/{execucaoId}` | Buscar resumo de uma execução de inventário |
+| POST | `/estoque/inventario` | Abrir inventário da filial (multipart `filialId` + IQ09); outro aberto → 409 |
+| GET | `/estoque/inventario?filialId=&status=` | Listar execuções |
+| GET | `/estoque/inventario/{id}?resultado=&busca=&pagina=&tamanho=` | Resumo, contadores, itens paginados e últimas 10 bipagens |
+| POST | `/estoque/inventario/{id}/bipagens` | Bipar `{ serial }` → resultado, modelo, mensagem, `jaBipado`, totais |
+| DELETE | `/estoque/inventario/{id}/bipagens/{itemId}` | Desfazer bipagem |
+| PATCH | `/estoque/inventario/{id}/itens/{itemId}/justificativa` | Justificar pendente `{ texto }` |
+| POST | `/estoque/inventario/{id}/fechar` | Fechar (422 com pendente sem justificativa) e diagnosticar |
+| POST | `/estoque/inventario/{id}/cancelar` | Cancelar |
+| POST | `/estoque/inventario/{id}/diagnostico` | Refazer o diagnóstico da IA (502 se a API falhar) |
+| GET | `/estoque/inventario/{id}/exportacao` | CSV com todas as linhas e o resultado |
+| POST | `/filiais/centros-sap` | Carga do centro SAP das filiais (CSV `ADABAS;CENTRO_SAP`) |
 | POST | `/produtos` | Cadastrar produto |
 | GET | `/produtos/{id}` | Buscar produto |
 | GET | `/produtos` | Listar produtos |
@@ -788,6 +834,6 @@ Em ordem de risco (o que mais provavelmente causa um bug em produção primeiro)
 - [ ] Dependências presentes sem uso identificado — confirmar se ainda são necessárias
       ou remover do `pom.xml`: Hibernate Envers (auditoria), AWS S3 SDK, Apache POI,
       openhtmltopdf, Spring Retry, Quartz
-- [ ] Rate limiting em endpoints de importação (`/estoque/inventario/importar-sap`,
+- [ ] Rate limiting em endpoints de importação (`/estoque/inventario`, `/filiais/centros-sap`,
       `/produtos/precos/importar-telefonica`, `/mailing/campanhas/importar-planilha`) —
       todos aceitam upload multipart sem limite de frequência
