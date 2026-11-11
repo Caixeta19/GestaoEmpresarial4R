@@ -56,6 +56,22 @@ public class GlobalExceptionHandler {
                 .body(corpo(HttpStatus.CONFLICT, ex.getMessage()));
     }
 
+    // 409: a filial já tem inventário aberto
+    @ExceptionHandler(InventarioAbertoException.class)
+    public ResponseEntity<Map<String, Object>> handleInventarioAberto(InventarioAbertoException ex) {
+        Map<String, Object> corpo = corpo(HttpStatus.CONFLICT, ex.getMessage());
+        corpo.put("execucaoId", ex.getExecucaoId());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(corpo);
+    }
+
+    // 502: a API do Claude falhou no diagnóstico do inventário
+    @ExceptionHandler(DiagnosticoIaException.class)
+    public ResponseEntity<Map<String, Object>> handleDiagnosticoIa(DiagnosticoIaException ex) {
+        log.warn("Diagnóstico da IA falhou: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(corpo(HttpStatus.BAD_GATEWAY, ex.getMessage()));
+    }
+
     // 401: credenciais inválidas (login / reautenticação do vendedor)
     @ExceptionHandler(AutenticacaoInvalidaException.class)
     public ResponseEntity<Map<String, Object>> handleAutenticacao(AutenticacaoInvalidaException ex) {

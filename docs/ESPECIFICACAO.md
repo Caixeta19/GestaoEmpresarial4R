@@ -164,8 +164,8 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 
 | ID | Regra | Onde |
 | --- | --- | --- |
-| RN.30 | Cada upload do IQ09 gera uma `InventarioExecucao` com totalizadores | `InventarioService` |
-| RN.31 | Cada linha vira `CORRETO` (disponível aqui e no SAP), `DIVERGENCIA` (estados diferentes, ou disponível aqui e ausente no SAP) ou `PENDENTE` (no SAP, nunca cadastrado aqui) | `ResultadoConciliacaoInventario` |
+| RN.30 | Inventário é por filial: abrir importa a IQ09 e só usa as linhas do centro SAP (e depósito, se cadastrado) da filial; as de outro centro e as sem serial são contadas no resumo, que lista os centros sem filial. Filial sem `centro_sap` → 422; uma execução ABERTO/EM_CONTAGEM por filial (outra → 409). Ciclo: ABERTO → EM_CONTAGEM (1ª bipagem) → FECHADO ou CANCELADO | `InventarioService.abrir`, V36 |
+| RN.31 | Cruzamento exato pelo serial normalizado (sem apóstrofo/espaços, maiúsculo, sem zeros à esquerda com 16+ dígitos). Esperado = IQ09 da loja (status usuário ADEP ou vazio) ∪ estoque da filial (DISPONIVEL/RESERVADO/DEFEITO). Resultados: CONFERIDO, PENDENTE, FALTA, SO_NO_SISTEMA, SEM_ENTRADA_SISTEMA, SOBRA_FISICA, VENDIDO_EM_ESTOQUE, STATUS_SAP_DIVERGENTE, FORA_ESTOQUE_SAP (CORRETO/DIVERGENCIA só nas execuções antigas) | `InventarioClassificador`, `SerialInventario` |
 | RN.32 | Linha da tabela da Telefônica sem SKU correspondente é mantida com `encontrado = false` | `TabelaPrecoService` |
 
 **Protocolo documental**
@@ -184,6 +184,9 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RN.61 | Venda lançada (`CONCLUIDA`) só pode ser cancelada no dia do lançamento, pela data de São Paulo; de dia anterior = 422 e o estoque não muda. Vale para todos os cargos. O carrinho `ABERTA` continua cancelável a qualquer hora | `VendaService.avancarStatus` |
 | RN.62 | Acessório é vendido por unidade: a linha do estoque tem um serial por SKU com `quantidade` N, e cada leitura do serial prende 1 unidade (`quantidade_reservada` + 1, V35). A linha fica `DISPONIVEL` enquanto sobra unidade livre e vira `RESERVADO` quando todas estão em carrinhos. Concluir a venda tira 1 de `quantidade` e de `quantidade_reservada` (a linha vira `VENDIDO` ao zerar); remover o item ou cancelar o carrinho solta a reserva; cancelar a venda concluída devolve 1 à `quantidade`. A importação do relatório não deixa a `quantidade` abaixo das unidades reservadas | `EstoqueGeral.reservarUnidade` / `confirmarVendaUnidade` / `liberarUnidadeReservada` / `devolverUnidadeVendida`, V35 |
 | RN.63 | A aba precisa bater com o item do estoque: `ACESSORIO` com IMEI de aparelho → 422 "Este IMEI é de um aparelho: lance na aba Produto Vivo."; `PRODUTO_VIVO` com serial de acessório → 422 "Este serial é de um acessório: lance na aba Acessório.". Serial sem unidade livre por estar no carrinho de uma venda aberta → 409 "Serial já está reservado na venda #id" | `VendaService.exigirCategoriaDoEstoque` / `exigirSerialLivre`, `SerialReservadoException` |
+| RN.64 | Bipagem conta uma vez por serial: `INSERT … ON CONFLICT (execucao_id, serial_normalizado)`; a leitura repetida volta `jaBipado` com hora e autor. Fechar exige pendentes = 0 sem justificativa (422); pendente justificado vira FALTA (IQ09) ou SO_NO_SISTEMA (só sistema) | `InventarioService.bipar` / `fechar` |
+| RN.65 | Diagnóstico das faltas e divergências pela API do Claude (saída JSON estruturada), em lotes de até 100, ao fechar e por `POST /{id}/diagnostico`. A IA só sugere causa (lista fechada + OUTRA), confiança e ação; não decide o cruzamento. Nunca recebe dado de cliente. IMEI que não veio no pedido é descartado; resposta inválida → nova tentativa, depois 502; sem chave → "Diagnóstico indisponível: configure a chave da API" | `InventarioDiagnosticoService`, `ClaudeDiagnosticoIaClient` |
+| RN.66 | IQ09: colunas pelo cabeçalho normalizado (NFKD, sem `º°.()`), `Modificado em` como data do Excel, serial sempre texto; serial em notação científica recusa o arquivo | `RelatorioSapParser` |
 
 **Financeiro**
 
@@ -225,7 +228,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RF.08 | Busca de vendas com filtros (filial, vendedor, número, período, cliente, acesso, serial, simcard, acessório) | Feito |
 | RF.09 | Importar relatório de estoque Vivo e tabela de preços para o estoque geral | Feito |
 | RF.10 | Consultar estoque disponível por serial, modelo, marca ou filial; consolidado e alertas | Feito |
-| RF.11 | Importar IQ09 do SAP e conciliar | Feito |
+| RF.11 | Inventário por filial: IQ09 × sistema × bipagem, fechamento com justificativa, CSV e diagnóstico pela IA | Feito (backend) |
 | RF.12 | Importar tabela de preços da Telefônica por oferta | Feito |
 | RF.13 | Protocolo documental por venda | Feito |
 | RF.14 | Abrir, fechar, reabrir e listar caixas | Feito |
@@ -291,7 +294,7 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `itens_venda` | venda | Itens com categoria, valores, campos telecom (plano, DDD, acesso, GED, simcard) e `estoque_geral_id`. V34 (relatório documental): tipo de linha, valor do plano e do plano antigo, nº portado, fidelização e COD | V1, V4, V8, V13, V14, V19, V20, V34 |
 | `pagamentos_venda` | venda | Pagamentos por forma e tipo (`PAGAMENTO`, `ENTRADA`, `FINANCIADO`); `codigo_voucher` só no histórico | V8, V25, V27, V28 |
 | `tb_estoque_geral` | estoque | Unidade de estoque: classificação, serial único, filial, compra, custos, status (`DISPONIVEL`, `VENDIDO`, `RESERVADO`, `DEFEITO`), `version` | V19, V21, V22, V23 |
-| `tb_inventario_execucao` / `tb_inventario_item` | estoque | Execuções e linhas da conciliação SAP | V5 |
+| `tb_inventario_execucao` / `tb_inventario_item` / `tb_inventario_serial_outro_centro` | estoque | Execução por filial (status, totais, resumo da IA), um item por serial (IQ09, sistema, bipagem, justificativa, diagnóstico) e os seriais da mesma IQ09 em outros centros | V5, V36 |
 | `tb_tabela_preco_execucao` | estoque | Uma linha por upload da tabela da Telefônica; a mais recente é a vigente (`vigencia_em DATE`) | V6, V24 |
 | `tb_preco_item` | estoque | Preço por Nome Comercial × tabela (`REGULAR`/`RENOVA`) × grupo do plano: cheio, PIX e 13x–21x (`parcelas JSONB`) | V24 |
 | `tb_plano_vivo` / `tb_produto_vivo` | estoque | Abas PLANOS (plano → grupo de preço) e PRODUTOS (Cod_Sap → Nome Comercial), por execução | V24 |
@@ -309,6 +312,7 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 - `vendas` N:1 `clientes`, `filiais`, `usuarios`; `vendas` 1:N `itens_venda` (cascade) e `pagamentos_venda`; `vendas` 1:1 `tb_protocolo_documental`.
 - `itens_venda` N:1 `tb_estoque_geral` (nulo para serviço).
 - `tb_inventario_item` N:1 `tb_estoque_geral` (nulo quando `PENDENTE`).
+- `tb_inventario_execucao` N:1 `filiais` (nulo nas execuções antigas); `filiais.centro_sap` liga a filial ao `Centro` da IQ09.
 - `tb_item_remuneracao.venda_id` aponta para a venda localizada pelo número de acesso.
 - `transacao_bancaria` N:1 `webhook_log` e N:1 `tb_titulo_financeiro`.
 
@@ -325,7 +329,8 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `StatusScoreCliente` | NAO\_REALIZADA, CONSULTANDO, APROVADO, REPROVADO |
 | `TipoPessoa` | FISICA, JURIDICA |
 | `StatusEstoque` | DISPONIVEL, VENDIDO, RESERVADO, DEFEITO |
-| `ResultadoConciliacaoInventario` | CORRETO, DIVERGENCIA, PENDENTE |
+| `ResultadoConciliacaoInventario` | PENDENTE, CONFERIDO, FALTA, SEM_ENTRADA_SISTEMA, SOBRA_FISICA, VENDIDO_EM_ESTOQUE, SO_NO_SISTEMA, STATUS_SAP_DIVERGENTE, FORA_ESTOQUE_SAP; CORRETO e DIVERGENCIA (execuções antigas) |
+| `StatusInventario` | ABERTO, EM_CONTAGEM, FECHADO, CANCELADO |
 | `SituacaoServico` | CONFIRMADO, CANCELADO |
 | `StatusCampanha` / `StatusEnvio` | RASCUNHO, ENVIANDO, CONCLUIDA, FALHOU / PENDENTE, ENVIADO, FALHA |
 | `TipoTitulo` / `StatusTitulo` | RECEBER, PAGAR / ABERTO, BAIXADO, DIVERGENTE |
@@ -397,8 +402,17 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | GET | `/estoque-geral/consolidado` | Saldo por modelo |
 | GET | `/estoque-geral/alertas` | Modelos críticos |
 | GET | `/produtos`, `/produtos/{id}` | Catálogo (derivado do estoque geral) |
-| POST | `/estoque/inventario/importar-sap` | Importar IQ09 e conciliar |
-| GET | `/estoque/inventario/{execucaoId}` | Resumo da execução |
+| POST | `/estoque/inventario` | Abrir inventário da filial (multipart `filialId` + IQ09) |
+| GET | `/estoque/inventario` | Listar execuções (`filialId`, `status`) |
+| GET | `/estoque/inventario/{id}` | Resumo, contadores, itens (`resultado`, `busca`, `pagina`, `tamanho`) e últimas bipagens |
+| POST | `/estoque/inventario/{id}/bipagens` | Bipar `{ serial }` |
+| DELETE | `/estoque/inventario/{id}/bipagens/{itemId}` | Desfazer bipagem |
+| PATCH | `/estoque/inventario/{id}/itens/{itemId}/justificativa` | Justificar pendente |
+| POST | `/estoque/inventario/{id}/fechar` | Fechar e diagnosticar |
+| POST | `/estoque/inventario/{id}/cancelar` | Cancelar |
+| POST | `/estoque/inventario/{id}/diagnostico` | Refazer diagnóstico (502 se a API falhar) |
+| GET | `/estoque/inventario/{id}/exportacao` | CSV |
+| POST | `/filiais/centros-sap` | Carga `ADABAS;CENTRO_SAP[;DEPOSITO_SAP]` |
 | POST | `/produtos/precos/importar-telefonica` | Importar tabela da Telefônica (relatório da importação, com `divergenciasCondicao`) |
 | GET | `/produtos/precos/vigente` | Execução vigente e totais |
 | GET | `/produtos/precos/planos?busca=&disponivelAlta=` | Planos da vigente (combo "Plano Ativo / Linha") |

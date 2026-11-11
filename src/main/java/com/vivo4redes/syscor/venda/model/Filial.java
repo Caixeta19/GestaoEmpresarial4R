@@ -33,4 +33,12 @@ public class Filial {
     @Column(nullable = false)
     @Builder.Default
     private boolean ativo = true;
+
+    /** Centro SAP da filial (coluna "Centro" da IQ09, ex.: 039G). Não é o código Adabas. */
+    @Column(name = "centro_sap", length = 10, unique = true)
+    private String centroSap;
+
+    /** Depósito SAP da filial (opcional): se preenchido, o inventário filtra também por ele. */
+    @Column(name = "deposito_sap", length = 10)
+    private String depositoSap;
 }

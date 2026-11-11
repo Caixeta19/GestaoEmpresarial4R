@@ -2,8 +2,8 @@ package com.vivo4redes.syscor.venda.dto.response;
 
 import com.vivo4redes.syscor.venda.model.Filial;
 
-public record FilialResponseDTO(Long id, String codigo, String nome, boolean ativo) {
+public record FilialResponseDTO(Long id, String codigo, String nome, boolean ativo, String centroSap, String depositoSap) {
     public static FilialResponseDTO from(Filial f) {
-        return new FilialResponseDTO(f.getId(), f.getCodigo(), f.getNome(), f.isAtivo());
+        return new FilialResponseDTO(f.getId(), f.getCodigo(), f.getNome(), f.isAtivo(), f.getCentroSap(), f.getDepositoSap());
     }
 }

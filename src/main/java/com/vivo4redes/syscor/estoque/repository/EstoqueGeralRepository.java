@@ -21,6 +21,9 @@ public interface EstoqueGeralRepository extends JpaRepository<EstoqueGeral, Long
 
     Optional<EstoqueGeral> findBySerial(String serial);
 
+    /** Inventário: estoque de uma filial (filial_estoque guarda o nome da filial) nos status informados. */
+    List<EstoqueGeral> findByFilialEstoqueAndStatusIn(String filialEstoque, java.util.Collection<StatusEstoque> status);
+
     List<EstoqueGeral> findBySerialIn(List<String> seriais);
 
     Optional<EstoqueGeral> findBySerialAndStatus(String serial, StatusEstoque status);
