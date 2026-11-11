@@ -29,7 +29,7 @@ public record SerialDisponivelResponseDTO(
                 e.getId(),                       // sem tb_produto: o id da linha faz o papel de produtoId
                 e.getCodigoAcessorio(),
                 descricao,
-                EstoqueUtil.ehAcessorio(e) ? "ACESSORIO" : "PRODUTO_VIVO",
+                EstoqueUtil.vendidoComoAcessorio(e) ? "ACESSORIO" : "PRODUTO_VIVO",
                 preco,
                 preco,
                 e.getCor(),

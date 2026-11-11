@@ -852,9 +852,12 @@ public class VendaService {
         return item.getSerialImei() != null && EstoqueUtil.ehAcessorio(item.getEstoque());
     }
 
-    /** A aba precisa bater com o item do estoque: IMEI de aparelho não entra como acessório, e vice-versa. */
+    /**
+     * A aba precisa bater com o item do estoque: IMEI de aparelho não entra como acessório, e vice-versa. Acessório =
+     * código de acessório, ou categoria de acessório sem IMEI (capa, cabo, fone com serial SAP).
+     */
     private static void exigirCategoriaDoEstoque(CategoriaItemVenda categoria, EstoqueGeral linha) {
-        boolean acessorio = EstoqueUtil.ehAcessorio(linha);
+        boolean acessorio = EstoqueUtil.vendidoComoAcessorio(linha);
         if (categoria == CategoriaItemVenda.ACESSORIO && !acessorio) {
             throw new NegocioException("Este IMEI é de um aparelho: lance na aba Produto Vivo.");
         }

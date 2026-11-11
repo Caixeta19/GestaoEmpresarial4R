@@ -20,12 +20,15 @@ public record EstoqueDisponivelResponseDTO(
         String filialEstoque,
         BigDecimal valorVenda,
         /** Unidades livres da linha (acessório tem um serial por SKU com quantidade N). */
-        Integer quantidadeDisponivel
+        Integer quantidadeDisponivel,
+        /** Vai na aba Acessório (código de acessório, ou categoria de acessório sem IMEI). */
+        boolean acessorio
 ) {
     public static EstoqueDisponivelResponseDTO from(EstoqueGeral e) {
         return new EstoqueDisponivelResponseDTO(
                 e.getId(), e.getSerial(), e.getTipoProduto(), e.getCategoria(), e.getMarca(),
                 e.getModeloComercial(), e.getCor(), e.getCodigoAcessorio(), e.getFilialEstoque(),
-                e.getValorVenda(), e.quantidadeLivre());
+                e.getValorVenda(), e.quantidadeLivre(),
+                com.vivo4redes.syscor.util.EstoqueUtil.vendidoComoAcessorio(e));
     }
 }
