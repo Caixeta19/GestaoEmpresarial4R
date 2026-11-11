@@ -221,6 +221,10 @@ CANCELADA → (terminal, sem saída)
 - IMEI de aparelho na aba Acessório (ou serial de acessório na aba Produto Vivo) → 422. Serial sem unidade livre,
   preso no carrinho de outra venda → 409 "Serial já está reservado na venda #id".
 - Sem serial, o acessório ainda baixa a linha inteira (fallback do modelo antigo).
+- Também é acessório o item **sem** `codigo_acessorio` das categorias Essenciais, Acessórios, Áudio, Casa Inteligente,
+  Bem Estar, Vestuário, Games e Demais Eletrônicos que **não tem IMEI** (capa, cabo, fone, Echo com serial SAP da
+  unidade). Relógio LTE e tablet 5G têm IMEI e continuam na aba Produto Vivo, assim como Smartphone, Notebook e Tablets,
+  TV e Box e Modem e FWT. `/estoque-geral/disponiveis` traz `acessorio: true/false` com essa regra.
 
 ### Renova (V25, V28)
 
