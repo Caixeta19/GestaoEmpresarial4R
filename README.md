@@ -310,6 +310,19 @@ CANCELADA → (terminal, sem saída)
 - O protocolo ganhou (V32) ativação da primeira chamada, datas de ativação, baixa e instalação, GED da
   portabilidade e o usuário que salvou por último (`alteradoPorNome` na resposta).
 
+### Relatórios Venda de Produtos, Venda de Serviços e Vendas (V37)
+
+- A venda lançada aparece assim que é finalizada. **Produtos**: item `PRODUTO_VIVO`, `ACESSORIO` ou `RECARGA`;
+  **Serviços**: `SERVICO_VIVO` ou item com tipo de serviço e nº de acesso; **Vendas**: uma linha por venda. Venda
+  mista entra nos dois primeiros. A cancelada depois de lançada sai de Produtos/Serviços e fica em Vendas como
+  "Cancelada"; carrinho cancelado não é venda.
+- Views `vw_relatorio_itens` e `vw_relatorio_vendas` (só leitura). Tela com filtros (filiais, período, "Considerar"
+  Data de Venda/Ativação, vendedor, cliente, status), **Resumo Analítico** ou **Sintético**, campos escolhidos e
+  exportação Excel (`.xlsx`, até 93 dias). Produtos agrupa por Tipo de Produto ou Categoria, com subtotal de
+  quantidade, venda, custo e lucro. Serviços filtra por Segmento Comercial (`SegmentoComercial`).
+- Só entram campos com origem no banco: os fiscais (ICMS, IPI, PIS, Cofins, chave de acesso), voucher com valor,
+  multiplicador, devolução e saúde da bateria ficam fora até haver dado. Produto Open não tem como ser distinguido.
+
 ### Mailing (WhatsApp)
 
 - Campanha nasce `RASCUNHO`, muda pra `ENVIANDO` ao disparar, e fecha em `CONCLUIDA` ou
@@ -703,6 +716,10 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/documental/protocolos/busca` | Vendas lançadas com ou sem protocolo, paginadas, com os filtros da tela (período, filiais, vendedor, nº da venda, nº de acesso, GED, líder, status BKO, tipos de plano, serviços) |
 | POST | `/documental/protocolos/importacao` | Importar protocolos em lote (CSV) → `{ total, sucessos, erros }` |
 | GET | `/documental/protocolos/exportacao` | Relatório de Gestão Documental (`gestao_documental.csv`, Windows-1252, 55 colunas; período obrigatório, até 93 dias) |
+| GET | `/relatorios/{produtos\|servicos\|vendas}/busca` | Tabela paginada do relatório, com filtros, modo analítico/sintético e campos escolhidos |
+| GET | `/relatorios/{tipo}/contagem` | Total de registros com os mesmos filtros |
+| GET | `/relatorios/{tipo}/exportacao` | Excel `.xlsx` com as colunas escolhidas (período obrigatório, até 93 dias) |
+| GET | `/relatorios/{tipo}/opcoes` | Campos, segmentos e tipos de produto disponíveis |
 | POST | `/mailing/campanhas` | Criar campanha |
 | GET | `/mailing/campanhas/modelo-planilha` | Baixar modelo de planilha de destinatários |
 | POST | `/mailing/campanhas/importar-planilha` | Importar destinatários (multipart) |
