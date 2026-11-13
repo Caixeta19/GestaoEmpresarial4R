@@ -349,6 +349,11 @@ CANCELADA → (terminal, sem saída)
   caixa aberto do dia). **Conferir** (`AGUARDANDO` → `CONFERIDO`) e **reabrir** (justificativa de no mínimo 10; volta a `ABERTO`, zera a
   conferência e a divergência, mas não as tentativas do dia) ficam em `tb_caixa_historico`. Cancelar venda já lançada exige o caixa dela
   `ABERTO` (409 `CAIXA_FECHADO`).
+- **Sangria e suprimento (V40):** só no dinheiro e só com o caixa aberto. Entram no esperado (suprimentos no movimento, sangrias nas
+  saídas). `POST /financeiro/caixa/{id}/lancamentos` com `tipo`, `valor`, `conta` ou `descricao`, `observacao` e `chaveIdempotencia`
+  (repetir a chave devolve o lançamento já feito, 200). A sangria não pode passar do dinheiro do caixa (422 sem citar o saldo). Quem lança é
+  quem fecha; **estornar** (`POST .../{lid}/estornar`, justificativa de no mínimo 10) é só do financeiro e do admin e gera uma contrapartida:
+  nenhuma linha é apagada. Os lançamentos aparecem no movimento detalhado do caixa e continuam depois de reabrir.
 - **Fechamento cego:** com o caixa aberto, só quem vê o esperado (financeiro, gerente de área, auditoria e admin) recebe `movimento`,
   `entradas`, `saidas` e o esperado; o gerente da loja recebe `null` em todas as formas (somados, dariam o esperado) e o movimento
   detalhado do caixa aberto lhe dá 403. A abertura ele mesmo informou. Depois de fechado todos veem. Os valores digitados em cada recusa

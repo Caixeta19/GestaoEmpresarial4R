@@ -294,6 +294,12 @@ class CaixaIntegracaoTest {
         }
         assertThat(enviar(get("/financeiro/caixa/permissoes"), null, gerenteArea).corpo.get("conferirReabrir").asBoolean())
                 .as("gerente de área não confere nem reabre").isFalse();
+        for (Usuario u : List.of(financeiro, admin)) {
+            assertThat(enviar(get("/financeiro/caixa/permissoes"), null, u).corpo.get("estornarLancamento").asBoolean()).as(u.getLogin()).isTrue();
+        }
+        for (Usuario u : List.of(auditor, gerenteArea, gerente, vendedor)) {
+            assertThat(enviar(get("/financeiro/caixa/permissoes"), null, u).corpo.get("estornarLancamento").asBoolean()).as(u.getLogin()).isFalse();
+        }
         for (Usuario u : List.of(gerente, vendedor)) {
             JsonNode p = enviar(get("/financeiro/caixa/permissoes"), null, u).corpo;
             assertThat(p.get("conferirReabrir").asBoolean()).as(u.getLogin()).isFalse();
@@ -600,6 +606,175 @@ class CaixaIntegracaoTest {
         assertThat(enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, gerente).status).isEqualTo(200);
     }
 
+    // ------------------------------------------------------------------ sangria, suprimento e estorno
+    @Test
+    @DisplayName("Sangria e suprimento entram no esperado do dinheiro (abertura + suprimentos + entradas − sangrias); o gerente continua sem recebê-lo e fecha com o novo valor")
+    void lancamentosAtualizamOEsperado() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+        assertThat(finalizar(vendaProntaParaFinalizar(vendedor, "DINHEIRO"), vendedor, null).status).isEqualTo(200);
+
+        Resposta suprimento = lancar(gerente, caixa, "SUPRIMENTO", "100.00", "Conta Matriz", "k-sup-1");
+        assertThat(suprimento.status).isEqualTo(201);
+        assertThat(suprimento.corpo.get("tipo").asText()).isEqualTo("SUPRIMENTO");
+        assertThat(suprimento.corpo.get("criadoPor").asText()).isEqualTo(gerente.getNome());
+        assertThat(lancar(gerente, caixa, "SANGRIA", "30.00", "Depósito no banco", "k-sang-1").status).isEqualTo(201);
+
+        JsonNode visto = enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo;
+        assertThat(forma(visto, "DINHEIRO", "movimento")).isEqualByComparingTo("100.00");
+        assertThat(forma(visto, "DINHEIRO", "saidas")).isEqualByComparingTo("30.00");
+        assertThat(forma(visto, "DINHEIRO", "esperadoConferencia")).isEqualByComparingTo("1120.00");
+
+        JsonNode doGerente = enviar(get("/financeiro/caixa/{id}", caixa), null, gerente).corpo;
+        assertThat(formaNo(doGerente, "DINHEIRO").get("esperadoConferencia").isNull()).isTrue();
+        assertThat(formaNo(doGerente, "DINHEIRO").get("movimento").isNull()).isTrue();
+        assertThat(formaNo(doGerente, "DINHEIRO").get("saidas").isNull()).isTrue();
+
+        assertThat(fechar(gerente, caixa, "1050.00", null).status).as("sem contar os lançamentos").isEqualTo(422);
+        Resposta ok = fechar(gerente, caixa, "1120.00", null);
+        assertThat(ok.status).isEqualTo(200);
+        assertThat(ok.corpo.get("totalContabilizado").decimalValue()).isEqualByComparingTo("1120.00");
+    }
+
+    @Test
+    @DisplayName("Sangria maior que o dinheiro do caixa: 422 sem citar o saldo; igual ao saldo vale; valor, conta e tipo são validados")
+    void validacaoDosLancamentos() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+
+        Resposta maior = lancar(gerente, caixa, "SANGRIA", "50.01", "Banco", "k1");
+        assertThat(maior.status).isEqualTo(422);
+        assertThat(maior.corpo.get("mensagem").asText()).contains("dinheiro disponível").doesNotContain("50");
+        assertThat(lancar(gerente, caixa, "SANGRIA", "0.00", "Banco", "k2").status).as("valor zero").isEqualTo(422);
+        assertThat(lancar(gerente, caixa, "SUPRIMENTO", "-5.00", "Banco", "k3").status).as("valor negativo").isEqualTo(422);
+        assertThat(lancar(gerente, caixa, "SANGRIA", "10.00", null, "k4").status).as("sem conta nem descrição").isEqualTo(422);
+        assertThat(lancar(gerente, caixa, "ESTORNO", "10.00", "Banco", "k5").status).as("estorno tem endpoint próprio").isEqualTo(422);
+        assertThat(lancar(gerente, caixa, "SANGRIA", "10.00", "Banco", "").status).as("sem chave de idempotência").isEqualTo(400);
+        assertThat(lancamentos(caixa)).isZero();
+
+        assertThat(lancar(gerente, caixa, "SANGRIA", "50.00", "Banco", "k6").status).as("igual ao saldo").isEqualTo(201);
+        assertThat(lancar(gerente, caixa, "SANGRIA", "0.01", "Banco", "k7").status).as("caixa sem dinheiro").isEqualTo(422);
+        assertThat(lancamentos(caixa)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Idempotência: repetir a chave devolve o lançamento já feito (200) e o esperado não dobra")
+    void lancamentoDuplicado() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+
+        Resposta primeiro = lancar(gerente, caixa, "SUPRIMENTO", "100.00", "Conta Matriz", "k-duplo-clique");
+        Resposta segundo = lancar(gerente, caixa, "SUPRIMENTO", "100.00", "Conta Matriz", "k-duplo-clique");
+
+        assertThat(primeiro.status).isEqualTo(201);
+        assertThat(segundo.status).isEqualTo(200);
+        assertThat(segundo.corpo.get("id").asLong()).isEqualTo(primeiro.corpo.get("id").asLong());
+        assertThat(lancamentos(caixa)).isEqualTo(1);
+        assertThat(forma(enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo, "DINHEIRO", "esperadoConferencia"))
+                .isEqualByComparingTo("150.00");
+    }
+
+    @Test
+    @DisplayName("Quem lança: gerente da própria filial, auditoria, financeiro, gerente de área e admin; gerente de outra filial e vendedor não")
+    void quemLanca() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+
+        assertThat(lancar(vendedor, caixa, "SUPRIMENTO", "1.00", "Matriz", "v").status).isEqualTo(403);
+        assertThat(lancar(gerenteOutraFilial, caixa, "SUPRIMENTO", "1.00", "Matriz", "go").status).isEqualTo(403);
+        int i = 0;
+        for (Usuario quem : List.of(gerente, auditor, financeiro, gerenteArea, admin)) {
+            assertThat(lancar(quem, caixa, "SUPRIMENTO", "1.00", "Matriz", "ok-" + (++i)).status).as(quem.getLogin()).isEqualTo(201);
+        }
+        assertThat(enviar(get("/financeiro/caixa/{id}/lancamentos", caixa), null, gerente).corpo).hasSize(5);
+        assertThat(enviar(get("/financeiro/caixa/{id}/lancamentos", caixa), null, gerenteOutraFilial).status).isEqualTo(403);
+        assertThat(enviar(get("/financeiro/caixa/{id}/lancamentos", caixa), null, vendedor).status).isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("Estorno: só financeiro e admin, com justificativa; desfaz o efeito sem apagar a linha; um por lançamento")
+    void estorno() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+        long suprimento = lancar(gerente, caixa, "SUPRIMENTO", "100.00", "Conta Matriz", "k1").corpo.get("id").asLong();
+        long sangria = lancar(gerente, caixa, "SANGRIA", "30.00", "Banco", "k2").corpo.get("id").asLong();
+
+        assertThat(estornar(gerente, caixa, sangria, "Sangria lançada na filial errada", "e0").status).isEqualTo(403);
+        assertThat(estornar(auditor, caixa, sangria, "Sangria lançada na filial errada", "e0").status).isEqualTo(403);
+        assertThat(estornar(financeiro, caixa, sangria, "curta", "e0").status).as("justificativa curta").isEqualTo(422);
+        assertThat(estornar(financeiro, caixa, 999_999_999L, "Lançamento que não existe aqui", "e0").status).isEqualTo(404);
+
+        Resposta estorno = estornar(financeiro, caixa, sangria, "Sangria lançada na filial errada", "e1");
+        assertThat(estorno.status).isEqualTo(201);
+        assertThat(estorno.corpo.get("tipo").asText()).isEqualTo("ESTORNO");
+        assertThat(estorno.corpo.get("estornadoDeId").asLong()).isEqualTo(sangria);
+        assertThat(forma(enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo, "DINHEIRO", "esperadoConferencia"))
+                .as("estornar a sangria devolve o dinheiro").isEqualByComparingTo("150.00");
+
+        Resposta repetido = estornar(financeiro, caixa, sangria, "Sangria lançada na filial errada", "e1");
+        assertThat(repetido.status).as("mesma chave").isEqualTo(200);
+        assertThat(repetido.corpo.get("id").asLong()).isEqualTo(estorno.corpo.get("id").asLong());
+        assertThat(estornar(financeiro, caixa, sangria, "Tentando estornar de novo a sangria", "e2").status).as("já estornado").isEqualTo(422);
+        assertThat(estornar(financeiro, caixa, estorno.corpo.get("id").asLong(), "Estorno do estorno não existe", "e3").status).isEqualTo(422);
+
+        JsonNode lista = enviar(get("/financeiro/caixa/{id}/lancamentos", caixa), null, gerente).corpo;
+        assertThat(lista).as("a linha original continua lá").hasSize(3);
+        assertThat(lista.findValuesAsText("tipo")).containsExactly("SUPRIMENTO", "SANGRIA", "ESTORNO");
+        assertThat(lista.get(1).get("estornado").asBoolean()).isTrue();
+        assertThat(lista.get(0).get("estornado").asBoolean()).isFalse();
+
+        assertThat(estornar(admin, caixa, suprimento, "Suprimento lançado em duplicidade", "e4").status).isEqualTo(201);
+        assertThat(forma(enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo, "DINHEIRO", "esperadoConferencia"))
+                .as("estornar o suprimento tira o dinheiro").isEqualByComparingTo("50.00");
+    }
+
+    @Test
+    @DisplayName("Estornar um suprimento que deixaria o dinheiro do caixa negativo: 422")
+    void estornoNegativo() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "0.00", null);
+        long suprimento = lancar(gerente, caixa, "SUPRIMENTO", "100.00", "Conta Matriz", "k1").corpo.get("id").asLong();
+        assertThat(lancar(gerente, caixa, "SANGRIA", "100.00", "Banco", "k2").status).isEqualTo(201);
+
+        Resposta r = estornar(financeiro, caixa, suprimento, "Suprimento lançado no caixa errado", "e1");
+
+        assertThat(r.status).isEqualTo(422);
+        assertThat(r.corpo.get("mensagem").asText()).contains("negativo");
+    }
+
+    @Test
+    @DisplayName("Com o caixa fechado não se lança nem se estorna (409 CAIXA_FECHADO); reabrir mantém os lançamentos")
+    void lancamentosECaixaFechado() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+        long suprimento = lancar(gerente, caixa, "SUPRIMENTO", "10.00", "Conta Matriz", "k1").corpo.get("id").asLong();
+        assertThat(fechar(gerente, caixa, "60.00", null).status).isEqualTo(200);
+
+        Resposta lancamento = lancar(gerente, caixa, "SUPRIMENTO", "10.00", "Conta Matriz", "k2");
+        assertThat(lancamento.status).isEqualTo(409);
+        assertThat(lancamento.corpo.get("codigo").asText()).isEqualTo("CAIXA_FECHADO");
+        assertThat(estornar(financeiro, caixa, suprimento, "Estorno depois do fechamento", "e1").status).isEqualTo(409);
+
+        assertThat(reabrir(financeiro, caixa, "Reaberto para conferir o suprimento").status).isEqualTo(200);
+        assertThat(enviar(get("/financeiro/caixa/{id}/lancamentos", caixa), null, gerente).corpo).as("reabrir mantém").hasSize(1);
+        assertThat(forma(enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo, "DINHEIRO", "esperadoConferencia"))
+                .isEqualByComparingTo("60.00");
+        assertThat(fechar(gerente, caixa, "60.00", null).status).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("Movimento detalhado traz as linhas de sangria, suprimento e estorno (sem venda), com conta e quem lançou")
+    void movimentoComLancamentos() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+        assertThat(finalizar(vendaProntaParaFinalizar(vendedor, "DINHEIRO"), vendedor, null).status).isEqualTo(200);
+        lancar(gerente, caixa, "SUPRIMENTO", "100.00", "Conta Matriz", "k1");
+        long sangria = lancar(gerente, caixa, "SANGRIA", "30.00", "Depósito no banco", "k2").corpo.get("id").asLong();
+        estornar(financeiro, caixa, sangria, "Sangria lançada na filial errada", "e1");
+
+        JsonNode movimento = enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, financeiro).corpo;
+
+        assertThat(movimento.findValuesAsText("tipo")).containsExactlyInAnyOrder("PAGAMENTO", "SUPRIMENTO", "SANGRIA", "ESTORNO");
+        for (JsonNode linha : movimento) {
+            if (linha.get("tipo").asText().equals("PAGAMENTO")) continue;
+            assertThat(linha.get("vendaId").isNull()).isTrue();
+            assertThat(linha.get("conta").asText()).isNotBlank();
+        }
+        assertThat(movimento.findValuesAsText("vendedor")).contains(gerente.getNome(), financeiro.getNome());
+    }
+
     // ------------------------------------------------------------------ conferir e reabrir
     @Test
     @DisplayName("Conferir: gerente não pode (403); quem fechou não confere o mesmo caixa; outro da auditoria e o financeiro conferem")
@@ -764,6 +939,24 @@ class CaixaIntegracaoTest {
         if (observacao != null) corpo.put("observacao", observacao);
         if (justificativa != null) corpo.put("justificativa", justificativa);
         return enviar(post("/financeiro/caixa/{id}/fechar", caixa), corpo, quem);
+    }
+
+    private Resposta lancar(Usuario quem, long caixa, String tipo, String valor, String conta, String chave) throws Exception {
+        Map<String, Object> corpo = new HashMap<>();
+        corpo.put("tipo", tipo);
+        corpo.put("valor", new BigDecimal(valor));
+        if (conta != null) corpo.put("conta", conta);
+        corpo.put("chaveIdempotencia", chave);
+        return enviar(post("/financeiro/caixa/{id}/lancamentos", caixa), corpo, quem);
+    }
+
+    private Resposta estornar(Usuario quem, long caixa, long lancamento, String justificativa, String chave) throws Exception {
+        return enviar(post("/financeiro/caixa/{id}/lancamentos/{lid}/estornar", caixa, lancamento),
+                Map.of("justificativa", justificativa, "chaveIdempotencia", chave), quem);
+    }
+
+    private long lancamentos(long caixa) {
+        return jdbc.queryForObject("select count(*) from tb_caixa_lancamento where caixa_sessao_id = ?", Long.class, caixa);
     }
 
     private long tentativas(long caixa) {

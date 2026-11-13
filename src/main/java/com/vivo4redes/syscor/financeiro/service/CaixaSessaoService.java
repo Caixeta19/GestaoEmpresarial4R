@@ -8,10 +8,13 @@ import com.vivo4redes.syscor.financeiro.dto.caixa.*;
 import com.vivo4redes.syscor.financeiro.enums.AcaoCaixa;
 import com.vivo4redes.syscor.financeiro.enums.ConferenciaCaixa;
 import com.vivo4redes.syscor.financeiro.enums.StatusCaixaSessao;
+import com.vivo4redes.syscor.financeiro.enums.TipoLancamentoCaixa;
 import com.vivo4redes.syscor.financeiro.model.CaixaHistorico;
+import com.vivo4redes.syscor.financeiro.model.CaixaLancamento;
 import com.vivo4redes.syscor.financeiro.model.CaixaSessao;
 import com.vivo4redes.syscor.financeiro.model.FormaPagamentoCaixa;
 import com.vivo4redes.syscor.financeiro.repository.CaixaHistoricoRepository;
+import com.vivo4redes.syscor.financeiro.repository.CaixaLancamentoRepository;
 import com.vivo4redes.syscor.financeiro.repository.CaixaSessaoRepository;
 import com.vivo4redes.syscor.financeiro.repository.FormaPagamentoCaixaRepository;
 import com.vivo4redes.syscor.venda.enums.FormaPagamento;
@@ -75,6 +78,7 @@ public class CaixaSessaoService {
     private final UsuarioService usuarioService;
     private final CaixaPerfilService perfil;
     private final CaixaTentativaService tentativaService;
+    private final CaixaLancamentoRepository lancamentoRepository;
 
     public CaixaSessaoService(CaixaSessaoRepository caixaSessaoRepository,
                               FormaPagamentoCaixaRepository formaPagamentoCaixaRepository,
@@ -84,7 +88,8 @@ public class CaixaSessaoService {
                               FilialService filialService,
                               UsuarioService usuarioService,
                               CaixaPerfilService perfil,
-                              CaixaTentativaService tentativaService) {
+                              CaixaTentativaService tentativaService,
+                              CaixaLancamentoRepository lancamentoRepository) {
         this.caixaSessaoRepository = caixaSessaoRepository;
         this.formaPagamentoCaixaRepository = formaPagamentoCaixaRepository;
         this.historicoRepository = historicoRepository;
@@ -94,6 +99,7 @@ public class CaixaSessaoService {
         this.usuarioService = usuarioService;
         this.perfil = perfil;
         this.tentativaService = tentativaService;
+        this.lancamentoRepository = lancamentoRepository;
     }
 
     // ------------------------------------------------------------------ abrir
@@ -193,7 +199,8 @@ public class CaixaSessaoService {
     public PermissoesCaixaResponseDTO permissoes() {
         Usuario usuario = usuarioService.usuarioLogado();
         return new PermissoesCaixaResponseDTO(perfil.podeConferirReabrir(usuario), perfil.veTodasAsFiliais(usuario),
-                perfil.filialDoUsuario(usuario), perfil.veEsperadoDoAberto(usuario), perfil.podeFecharComDivergencia(usuario));
+                perfil.filialDoUsuario(usuario), perfil.veEsperadoDoAberto(usuario), perfil.podeFecharComDivergencia(usuario),
+                perfil.podeEstornar(usuario));
     }
 
     @Transactional(readOnly = true)
@@ -228,7 +235,11 @@ public class CaixaSessaoService {
         if (sessao.getStatus() == StatusCaixaSessao.ABERTO && !perfil.veEsperadoDoAberto(usuario)) {
             throw CaixaException.semPermissao("O movimento detalhado do caixa aberto só aparece depois do fechamento.");
         }
-        return pagamentoVendaRepository.listarDoCaixa(id).stream().map(CaixaSessaoService::paraMovimento).toList();
+        List<MovimentoCaixaResponseDTO> linhas = new ArrayList<>(
+                pagamentoVendaRepository.listarDoCaixa(id).stream().map(CaixaSessaoService::paraMovimento).toList());
+        lancamentoRepository.findByCaixaSessaoIdOrderByCriadoEmAscIdAsc(id).forEach(l -> linhas.add(paraMovimento(l)));
+        linhas.sort(Comparator.comparing(MovimentoCaixaResponseDTO::hora));
+        return linhas;
     }
 
     // ------------------------------------------------------------------ fechar
@@ -257,9 +268,9 @@ public class CaixaSessaoService {
             }
         }
 
-        Map<FormaPagamento, BigDecimal> entradas = entradasPorForma(id);
+        Calculo calculo = calcular(id);
         for (FormaPagamentoCaixa f : formas) {
-            if (exigida(f, entradas.getOrDefault(f.getForma(), BigDecimal.ZERO)) && !digitado.containsKey(f.getForma())) {
+            if (calculo.exigida(f) && !digitado.containsKey(f.getForma())) {
                 throw new NegocioException("Falta o valor conferido da forma " + f.getForma() + " pra fechar esse caixa.");
             }
         }
@@ -274,7 +285,7 @@ public class CaixaSessaoService {
         // Nada é alterado antes de decidir: a forma que não é exigida e não veio fecha sem diferença (esperado = 0).
         List<TentativaFechamentoDTO.Linha> linhas = new ArrayList<>();
         for (FormaPagamentoCaixa f : formas) {
-            BigDecimal esperado = esperadoConferencia(f, entradas.getOrDefault(f.getForma(), BigDecimal.ZERO));
+            BigDecimal esperado = calculo.esperado(f);
             BigDecimal conferido = digitado.getOrDefault(f.getForma(), esperado).setScale(2, RoundingMode.HALF_UP);
             linhas.add(new TentativaFechamentoDTO.Linha(f.getForma(), conferido, esperado,
                     conferido.subtract(esperado).setScale(2, RoundingMode.HALF_UP)));
@@ -495,25 +506,62 @@ public class CaixaSessaoService {
     }
 
     /**
-     * Contra o que o valor digitado é conferido, em TODAS as formas: abertura + movimento (suprimentos) + entradas
-     * (vendas lançadas no caixa) − saídas (sangrias). Nas formas que liquidam, o gerente digita o total recebido e o
-     * confere contra o extrato ou a maquininha; elas não ficam na gaveta (ver {@link #contabilizadoQueFica}).
+     * Valores de um caixa para conferir: entradas por forma (vendas lançadas no caixa) e, só no dinheiro, os suprimentos
+     * (movimento) e as sangrias (saídas) efetivos, já descontados os estornos.
+     * Esperado de qualquer forma = abertura + movimento + entradas − saídas, e é contra ele que o valor digitado é
+     * conferido; nas formas que liquidam, o digitado é o total recebido, conferido contra o extrato ou a maquininha, e
+     * elas não ficam na gaveta (ver {@link #contabilizadoQueFica}).
      */
-    private static BigDecimal esperadoConferencia(FormaPagamentoCaixa f, BigDecimal entradas) {
-        return safe(f.getAbertura()).add(safe(f.getMovimento())).add(entradas).subtract(safe(f.getSaidas()))
-                .setScale(2, RoundingMode.HALF_UP);
+    private record Calculo(Map<FormaPagamento, BigDecimal> entradas, BigDecimal suprimentos, BigDecimal sangrias) {
+
+        BigDecimal entradas(FormaPagamentoCaixa f) {
+            return entradas.getOrDefault(f.getForma(), BigDecimal.ZERO);
+        }
+
+        BigDecimal movimento(FormaPagamentoCaixa f) {
+            return safe(f.getMovimento()).add(f.getForma() == FormaPagamento.DINHEIRO ? suprimentos : BigDecimal.ZERO);
+        }
+
+        BigDecimal saidas(FormaPagamentoCaixa f) {
+            return safe(f.getSaidas()).add(f.getForma() == FormaPagamento.DINHEIRO ? sangrias : BigDecimal.ZERO);
+        }
+
+        BigDecimal esperado(FormaPagamentoCaixa f) {
+            return safe(f.getAbertura()).add(movimento(f)).add(entradas(f)).subtract(saidas(f)).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        /** Forma que precisa ser informada para fechar: o dinheiro sempre, e as demais se tiverem abertura ou movimento. */
+        boolean exigida(FormaPagamentoCaixa f) {
+            return f.getForma() == FormaPagamento.DINHEIRO
+                    || safe(f.getAbertura()).signum() != 0 || movimento(f).signum() != 0
+                    || saidas(f).signum() != 0 || entradas(f).signum() != 0;
+        }
+    }
+
+    private Calculo calcular(Long caixaId) {
+        BigDecimal suprimentos = BigDecimal.ZERO;
+        BigDecimal sangrias = BigDecimal.ZERO;
+        for (CaixaLancamento l : lancamentoRepository.findByCaixaSessaoIdOrderByCriadoEmAscIdAsc(caixaId)) {
+            // Estorno desfaz o efeito do lançamento original: estornar sangria devolve o dinheiro, estornar suprimento o tira.
+            TipoLancamentoCaixa efeito = l.getTipo() == TipoLancamentoCaixa.ESTORNO ? l.getEstornadoDe().getTipo() : l.getTipo();
+            BigDecimal sinal = l.getTipo() == TipoLancamentoCaixa.ESTORNO ? l.getValor().negate() : l.getValor();
+            if (efeito == TipoLancamentoCaixa.SUPRIMENTO) suprimentos = suprimentos.add(sinal);
+            else sangrias = sangrias.add(sinal);
+        }
+        return new Calculo(entradasPorForma(caixaId), suprimentos, sangrias);
+    }
+
+    /** O dinheiro que há (ou deve haver) no caixa agora: usado para limitar a sangria e o estorno de suprimento. */
+    public BigDecimal esperadoDoDinheiro(Long caixaId) {
+        FormaPagamentoCaixa dinheiro = formaPagamentoCaixaRepository.findByCaixaSessaoId(caixaId).stream()
+                .filter(f -> f.getForma() == FormaPagamento.DINHEIRO).findFirst()
+                .orElseThrow(() -> new NegocioException("Esse caixa não tem linha de dinheiro."));
+        return calcular(caixaId).esperado(dinheiro);
     }
 
     /** O que fica no caixa: o esperado do dinheiro; 0,00 nas formas que liquidam na conciliação. */
     private static BigDecimal contabilizadoQueFica(FormaPagamentoCaixa f, BigDecimal esperado) {
         return LIQUIDAM.contains(f.getForma()) ? BigDecimal.ZERO.setScale(2) : esperado;
-    }
-
-    /** Forma que precisa ser informada para fechar: o dinheiro sempre, e as demais se tiverem abertura ou movimento. */
-    private static boolean exigida(FormaPagamentoCaixa f, BigDecimal entradas) {
-        return f.getForma() == FormaPagamento.DINHEIRO
-                || safe(f.getAbertura()).signum() != 0 || safe(f.getMovimento()).signum() != 0
-                || safe(f.getSaidas()).signum() != 0 || entradas.signum() != 0;
     }
 
     private static Map<FormaPagamento, BigDecimal> valoresDigitados(List<ConferenciaFormaDTO> informadas) {
@@ -538,23 +586,22 @@ public class CaixaSessaoService {
         boolean fechado = sessao.getStatus() == StatusCaixaSessao.FECHADO;
         boolean veEsperado = fechado || perfil.veEsperadoDoAberto(leitor);
         List<FormaPagamentoCaixa> formas = formaPagamentoCaixaRepository.findByCaixaSessaoId(sessao.getId());
-        Map<FormaPagamento, BigDecimal> entradasPorForma = entradasPorForma(sessao.getId());
+        Calculo calculo = calcular(sessao.getId());
 
         List<FormaPagamentoCaixaResponseDTO> formasDto = formas.stream()
                 .sorted(Comparator.comparingInt(f -> FORMAS_DO_CAIXA.indexOf(f.getForma())))
                 .map(f -> {
-                    BigDecimal entradas = entradasPorForma.getOrDefault(f.getForma(), BigDecimal.ZERO);
                     boolean liquida = LIQUIDAM.contains(f.getForma());
-                    boolean exigida = exigida(f, entradas);
+                    boolean exigida = calculo.exigida(f);
                     if (!veEsperado) {
                         return new FormaPagamentoCaixaResponseDTO(
                                 f.getId(), f.getForma(), safe(f.getAbertura()), null, null, null, null, null,
                                 f.getValorConferido(), f.getDiferenca(), liquida, exigida);
                     }
-                    BigDecimal esperado = esperadoConferencia(f, entradas);
+                    BigDecimal esperado = calculo.esperado(f);
                     return new FormaPagamentoCaixaResponseDTO(
-                            f.getId(), f.getForma(), safe(f.getAbertura()), safe(f.getMovimento()), entradas,
-                            safe(f.getSaidas()), contabilizadoQueFica(f, esperado), esperado,
+                            f.getId(), f.getForma(), safe(f.getAbertura()), calculo.movimento(f), calculo.entradas(f),
+                            calculo.saidas(f), contabilizadoQueFica(f, esperado), esperado,
                             f.getValorConferido(), f.getDiferenca(), liquida, exigida);
                 }).toList();
 
@@ -590,12 +637,18 @@ public class CaixaSessaoService {
                 totalAbertura, totalContabilizado, totalDiferenca, formasDto, historico, tentativas);
     }
 
+    private static MovimentoCaixaResponseDTO paraMovimento(CaixaLancamento l) {
+        return new MovimentoCaixaResponseDTO(l.getTipo().name(), null, null, l.getCriadoEm(),
+                l.getCriadoPor() == null ? null : l.getCriadoPor().getNome(), FormaPagamento.DINHEIRO, l.getValor(), null,
+                l.getConta(), l.getDescricao());
+    }
+
     private static MovimentoCaixaResponseDTO paraMovimento(PagamentoVenda p) {
         var venda = p.getVenda();
         return new MovimentoCaixaResponseDTO(
-                venda.getId(), venda.getNumeroVenda(),
+                "PAGAMENTO", venda.getId(), venda.getNumeroVenda(),
                 venda.getFinalizadoEm() != null ? venda.getFinalizadoEm() : p.getCriadoEm(),
-                venda.getUsuario().getNome(), p.getForma(), p.getValor(), venda.getStatus());
+                venda.getUsuario().getNome(), p.getForma(), p.getValor(), venda.getStatus(), null, null);
     }
 
     private void registrar(CaixaSessao sessao, AcaoCaixa acao, Usuario usuario, String texto) {
