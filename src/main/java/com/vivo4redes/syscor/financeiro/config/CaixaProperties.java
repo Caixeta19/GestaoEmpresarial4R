@@ -19,11 +19,14 @@ public class CaixaProperties {
     /** Abrem e fecham o caixa só da própria filial. */
     private List<String> cargosGerente = new ArrayList<>();
 
-    /** Abrem e fecham em qualquer filial, e também conferem e reabrem. */
+    /** Abrem e fecham em qualquer filial, conferem e reabrem, veem o esperado e fecham com divergência. */
     private List<String> cargosAuditoria = new ArrayList<>();
 
-    /** Conferem e reabrem; não abrem nem fecham. */
+    /** Conferem, reabrem, fecham (com divergência, se preciso) e veem o esperado; não abrem. */
     private List<String> cargosFinanceiro = new ArrayList<>();
+
+    /** Gerentes de área: veem todas as filiais, recebem o esperado do caixa aberto e fecham com divergência. */
+    private List<String> cargosArea = new ArrayList<>();
 
     /** Logins com todos os poderes sobre o caixa. */
     private List<String> admins = new ArrayList<>();

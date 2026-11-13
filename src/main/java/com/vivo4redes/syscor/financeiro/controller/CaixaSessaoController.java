@@ -92,13 +92,6 @@ public class CaixaSessaoController {
         return ResponseEntity.ok(caixaSessaoService.fechar(id, dto));
     }
 
-    /** Diferença do dinheiro para o valor que o gerente contou, sem fechar (o caixa aberto não mostra o esperado). */
-    @PostMapping("/{id}/previa-fechamento")
-    public ResponseEntity<PreviaFechamentoResponseDTO> previaFechamento(
-            @PathVariable Long id, @Valid @RequestBody PreviaFechamentoRequestDTO dto) {
-        return ResponseEntity.ok(caixaSessaoService.previaFechamento(id, dto));
-    }
-
     @PostMapping("/{id}/conferir")
     public ResponseEntity<CaixaSessaoResponseDTO> conferir(@PathVariable Long id) {
         return ResponseEntity.ok(caixaSessaoService.conferir(id));

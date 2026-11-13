@@ -15,6 +15,8 @@ public record SituacaoCaixaResponseDTO(
         List<CaixaResumoDTO> caixas,
         /** O usuário logado pode abrir caixa nessa filial (mostra o botão "Abrir caixa"). */
         boolean podeAbrir,
+        /** O usuário logado pode fechar caixa nessa filial (quem abre, financeiro e gerente de área). */
+        boolean podeFechar,
         List<String> avisos
 ) {
     public record CaixaResumoDTO(Long id, String caixaPdv) {

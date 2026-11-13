@@ -26,7 +26,7 @@ public class CaixaHistorico {
     private CaixaSessao caixaSessao;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 12)
+    @Column(nullable = false, length = 30)
     private AcaoCaixa acao;
 
     @ManyToOne(fetch = FetchType.LAZY)

@@ -5,5 +5,11 @@ public enum AcaoCaixa {
     ABRIU,
     FECHOU,
     CONFEROU,
-    REABRIU
+    REABRIU,
+    /** Fechamento recusado por diferença (gravado à parte, mesmo com o 422). */
+    TENTATIVA_FECHAMENTO,
+    /** Sangria ou suprimento lançado (V40). */
+    LANCAMENTO,
+    /** Estorno de um lançamento (V40). */
+    ESTORNO
 }

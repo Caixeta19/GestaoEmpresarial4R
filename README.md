@@ -339,16 +339,21 @@ CANCELADA → (terminal, sem saída)
 - **Cálculo por sessão:** entradas = pagamentos das vendas `CONCLUIDA` lançadas no caixa (cancelada sai da soma).
   Dinheiro fica na gaveta: esperado = abertura + movimento + entradas − saídas. PIX, Vivo Pay, cartões e boleto
   liquidam na conciliação (saídas = entradas, contabilizado 0). `VOUCHER` não abre linha.
-- **Fechar:** só o dinheiro precisa de contagem (as demais formas fecham sem diferença se não vierem); diferença ≠ 0
-  exige `observacao` (mín. 10, 422); com carrinho aberto da filial no dia, 409 `CAIXA_COM_CARRINHO_ABERTO` listando os
-  números (só quando é o último caixa aberto do dia). **Conferir** (`AGUARDANDO` → `CONFERIDO`) e **reabrir** (com
-  `justificativa` de no mínimo 10, volta a `ABERTO` e zera a conferência) ficam registrados em `tb_caixa_historico`.
-  Cancelar venda já lançada exige o caixa dela `ABERTO` (409 `CAIXA_FECHADO` com o caixa fechado).
-- **Fechamento cego:** o dinheiro contado é obrigatório e nada assume o esperado. A diferença é o valor que o gerente
-  informa menos o valor das vendas lançadas no caixa (abertura + movimento + entradas − saídas). Com o caixa aberto, o
-  gerente não recebe o esperado do dinheiro (nem `entradas`, `saidas` e `movimento`, que somados o revelam); auditoria,
-  financeiro e admin recebem. `POST /{id}/previa-fechamento` devolve esperado e diferença para o valor já digitado, sem
-  gravar. Fechar com diferença sem observação dá 422 com `codigo` `CAIXA_DIFERENCA_SEM_OBSERVACAO` e a `diferenca`.
+- **Conferência por forma (V39):** o gerente digita o valor de cada forma exigida (o dinheiro sempre; as demais se tiverem abertura,
+  movimento ou entradas). O esperado de todas as formas é abertura + movimento + entradas − saídas; em PIX, Vivo Pay, cartões e boleto
+  o digitado é o total recebido, conferido contra o extrato ou a maquininha. O que fica no caixa (total contabilizado) é só o dinheiro.
+  O caixa só fecha com **diferença zero**: o gerente da loja é recusado (422 `CAIXA_COM_DIFERENCA`, só as formas que divergem, sem
+  valores) e a recusa é gravada, no máximo 5 por caixa por dia; na 6ª, 423 `CAIXA_FECHAMENTO_BLOQUEADO` ("chame o financeiro"). Financeiro,
+  gerente de área, auditoria e admin fecham com diferença informando `justificativa` (mín. 10): o caixa fica `AGUARDANDO` e marcado como
+  divergente. A observação do fechamento é opcional. Com carrinho aberto da filial no dia, 409 `CAIXA_COM_CARRINHO_ABERTO` (só no último
+  caixa aberto do dia). **Conferir** (`AGUARDANDO` → `CONFERIDO`) e **reabrir** (justificativa de no mínimo 10; volta a `ABERTO`, zera a
+  conferência e a divergência, mas não as tentativas do dia) ficam em `tb_caixa_historico`. Cancelar venda já lançada exige o caixa dela
+  `ABERTO` (409 `CAIXA_FECHADO`).
+- **Fechamento cego:** com o caixa aberto, só quem vê o esperado (financeiro, gerente de área, auditoria e admin) recebe `movimento`,
+  `entradas`, `saidas` e o esperado; o gerente da loja recebe `null` em todas as formas (somados, dariam o esperado) e o movimento
+  detalhado do caixa aberto lhe dá 403. A abertura ele mesmo informou. Depois de fechado todos veem. Os valores digitados em cada recusa
+  (`tentativasFechamento`) só aparecem a quem confere ou pode fechar com divergência. As telas de venda ainda mostram os pagamentos: o
+  fechamento cego impede ler o esperado pelo caixa, não somar as vendas à mão.
 - Filial com mais de um caixa aberto no dia: o `finalizar` recebe `caixaSessaoId` (sem ele, 422).
 
 ### Mailing (WhatsApp)
@@ -854,7 +859,8 @@ docker compose -f Docker-compose.yml up --build
 | `SYSCOR_PRECO_CHIP` | Não (padrão `13.00`) | Preço fixo do chip (`syscor.precos.chip`); o PVP do aparelho não inclui o chip |
 | `SYSCOR_CAIXA_CARGOS_GERENTE` | Não (padrão: Gerente de Vendas Júnior/Pleno/Sênior) | Cargos que abrem e fecham o caixa da própria filial, separados por vírgula |
 | `SYSCOR_CAIXA_CARGOS_AUDITORIA` | Não (padrão vazio) | Cargos da auditoria de caixa: abrem e fecham em qualquer filial, conferem e reabrem |
-| `SYSCOR_CAIXA_CARGOS_FINANCEIRO` | Não (padrão vazio) | Cargos que conferem e reabrem o caixa |
+| `SYSCOR_CAIXA_CARGOS_FINANCEIRO` | Não (padrão vazio) | Cargos que conferem, reabrem, fecham (com divergência, se preciso) e veem o esperado do caixa aberto |
+| `SYSCOR_CAIXA_CARGOS_AREA` | Não (padrão vazio) | Cargos de gerente de área: veem todas as filiais, recebem o esperado e fecham com divergência (não abrem, não conferem) |
 | `SYSCOR_CAIXA_ADMINS` | Não (padrão vazio; no perfil `dev`, `GUILHERME.CAIXETA`) | Logins com todos os poderes sobre o caixa |
 | `SYSCOR_CAIXA_BLOQUEAR_ANTERIOR_ABERTO` | Não (padrão `false`) | `true`: caixa de dia anterior ainda aberto impede vender hoje |
 
