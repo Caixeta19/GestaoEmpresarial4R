@@ -282,8 +282,8 @@ CANCELADA → (terminal, sem saída)
 - `valorItens` é o preço de tabela sem juros nem desconto PIX (na Renova, o preço cheio Renova), mais os itens
   sem tabela. `ajusteCondicao` = `valorTotal − valorItens`. Remuneração e comissão não mudaram nesta tarefa.
 - `valorParcela`: financiado ÷ N no parcelado; total ÷ 12 em `A_VISTA`; o total em `PIX`.
-- Caixa: `VIVO_PAY` é forma própria e precisa estar em `formasIniciais` ao abrir o caixa para ser conferida. A
-  linha `FINANCIADO` entra como `CARTAO_CREDITO`.
+- Caixa: `VIVO_PAY` é forma própria; o caixa abre com as seis formas (dinheiro, PIX, Vivo Pay, crédito, débito e
+  boleto). A linha `FINANCIADO` entra como `CARTAO_CREDITO`.
 
 ### Protocolo documental
 
@@ -322,6 +322,29 @@ CANCELADA → (terminal, sem saída)
   quantidade, venda, custo e lucro. Serviços filtra por Segmento Comercial (`SegmentoComercial`).
 - Só entram campos com origem no banco: os fiscais (ICMS, IPI, PIS, Cofins, chave de acesso), voucher com valor,
   multiplicador, devolução e saúde da bateria ficam fora até haver dado. Produto Open não tem como ser distinguido.
+
+### Caixa diário obrigatório (V38)
+
+- **Sem caixa aberto hoje (America/Sao_Paulo) a filial não vende:** criar carrinho, adicionar item e lançar a venda
+  respondem 409 `CAIXA_NAO_ABERTO`, para todos, admin inclusive. Caixa de dia anterior ainda aberto só gera aviso
+  (`syscor.caixa.bloquear-com-caixa-anterior-aberto=true` passa a bloquear). A venda lançada grava
+  `vendas.caixa_sessao_id`; as anteriores à V38 ficam sem caixa.
+- **Perfis** (`syscor.caixa.*`, comparados pelo cargo sem acento): gerente de vendas (Júnior/Pleno/Sênior) abre e fecha só o
+  caixa da própria filial; **auditoria de caixa** abre e fecha em qualquer filial; **conferir e reabrir** = auditoria e
+  financeiro; o admin (`syscor.caixa.admins`, por login) faz tudo. Quem fechou o caixa não o confere (o admin é exceção).
+  Perfil sem poder → 403 `CAIXA_SEM_PERMISSAO`; cada gerente só enxerga os caixas da própria filial.
+- **Abrir** (`POST /financeiro/caixa/abrir`): a data é sempre a de hoje; um caixa por dia por nome de caixa da filial
+  (409 `CAIXA_JA_ABERTO`); abre as seis formas: o **valor em dinheiro é obrigatório** (0 vale, mas tem de ser informado) e as outras formas não informadas abrem com 0. O dinheiro sugerido é o contabilizado do último
+  caixa fechado desse caixa (`GET /sugestao-abertura`); abrir com outro valor exige `justificativaAbertura` (mín. 10).
+- **Cálculo por sessão:** entradas = pagamentos das vendas `CONCLUIDA` lançadas no caixa (cancelada sai da soma).
+  Dinheiro fica na gaveta: esperado = abertura + movimento + entradas − saídas. PIX, Vivo Pay, cartões e boleto
+  liquidam na conciliação (saídas = entradas, contabilizado 0). `VOUCHER` não abre linha.
+- **Fechar:** só o dinheiro precisa de contagem (as demais formas fecham sem diferença se não vierem); diferença ≠ 0
+  exige `observacao` (mín. 10, 422); com carrinho aberto da filial no dia, 409 `CAIXA_COM_CARRINHO_ABERTO` listando os
+  números (só quando é o último caixa aberto do dia). **Conferir** (`AGUARDANDO` → `CONFERIDO`) e **reabrir** (com
+  `justificativa` de no mínimo 10, volta a `ABERTO` e zera a conferência) ficam registrados em `tb_caixa_historico`.
+  Cancelar venda já lançada exige o caixa dela `ABERTO` (409 `CAIXA_FECHADO` com o caixa fechado).
+- Filial com mais de um caixa aberto no dia: o `finalizar` recebe `caixaSessaoId` (sem ele, 422).
 
 ### Mailing (WhatsApp)
 
@@ -824,6 +847,11 @@ docker compose -f Docker-compose.yml up --build
 | `SYSCOR_CARRINHO_EXPIRACAO` | Não (padrão `24h`) | Tempo sem atividade para cancelar um carrinho `ABERTA` e liberar o estoque reservado (formato `Duration`: `30m`, `24h`, `2d`) |
 | `SYSCOR_CARRINHO_VERIFICACAO_MS` | Não (padrão `300000`) | Intervalo, em ms, entre as verificações do job de expiração |
 | `SYSCOR_PRECO_CHIP` | Não (padrão `13.00`) | Preço fixo do chip (`syscor.precos.chip`); o PVP do aparelho não inclui o chip |
+| `SYSCOR_CAIXA_CARGOS_GERENTE` | Não (padrão: Gerente de Vendas Júnior/Pleno/Sênior) | Cargos que abrem e fecham o caixa da própria filial, separados por vírgula |
+| `SYSCOR_CAIXA_CARGOS_AUDITORIA` | Não (padrão vazio) | Cargos da auditoria de caixa: abrem e fecham em qualquer filial, conferem e reabrem |
+| `SYSCOR_CAIXA_CARGOS_FINANCEIRO` | Não (padrão vazio) | Cargos que conferem e reabrem o caixa |
+| `SYSCOR_CAIXA_ADMINS` | Não (padrão vazio; no perfil `dev`, `GUILHERME.CAIXETA`) | Logins com todos os poderes sobre o caixa |
+| `SYSCOR_CAIXA_BLOQUEAR_ANTERIOR_ABERTO` | Não (padrão `false`) | `true`: caixa de dia anterior ainda aberto impede vender hoje |
 
 Sem as três variáveis do WhatsApp, a aplicação sobe normalmente — o disparo de
 campanha que falha com `NegocioException` no momento do envio, não no boot.

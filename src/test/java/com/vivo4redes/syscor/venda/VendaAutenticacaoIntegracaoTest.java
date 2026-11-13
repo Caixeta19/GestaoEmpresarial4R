@@ -3,6 +3,7 @@ package com.vivo4redes.syscor.venda;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.financeiro.CaixaTestSupport;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.model.PrecoItem;
@@ -100,6 +101,7 @@ class VendaAutenticacaoIntegracaoTest {
         clienteId = cliente("A");
         outroClienteId = cliente("B");
         filialId = filiais.save(Filial.builder().codigo("AUTH" + n).nome("Filial Auth").build()).getId();
+        CaixaTestSupport.abrirCaixaDeHoje(jdbc, filialId); // sem caixa aberto hoje a filial não vende
         logado = usuario("Logado", "logado");
         outroVendedor = usuario("Outro Vendedor", "outro");
         token = entrar(logado);

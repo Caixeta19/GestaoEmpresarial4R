@@ -22,4 +22,8 @@ public interface FilialRepository extends JpaRepository<Filial, Long> {
     List<String> listarCentrosSap();
 
     List<Filial> findByCentroSapIsNotNull();
+
+    /** Filiais cujo nome é igual ao texto (sem diferenciar maiúsculas nem espaços das pontas): o vínculo usuário → filial. */
+    @Query("select f.id from Filial f where upper(trim(f.nome)) = upper(trim(:nome))")
+    List<Long> listarIdsPorNome(@org.springframework.data.repository.query.Param("nome") String nome);
 }

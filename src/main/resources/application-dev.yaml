@@ -24,3 +24,7 @@ logging:
     org.hibernate.orm.jdbc.bind: INFO    # TRACE vaza valores de parâmetros
     org.springframework.web.cors: DEBUG
     org.springframework.security.web: DEBUG
+
+syscor:
+  caixa:
+    admins: GUILHERME.CAIXETA

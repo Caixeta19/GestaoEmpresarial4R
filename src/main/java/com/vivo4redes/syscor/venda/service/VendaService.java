@@ -38,6 +38,7 @@ import com.vivo4redes.syscor.estoque.service.PrecoCalculado;
 import com.vivo4redes.syscor.estoque.service.PrecoVigenteService;
 import com.vivo4redes.syscor.estoque.service.ResolvedorTabela;
 import com.vivo4redes.syscor.util.EstoqueUtil;
+import com.vivo4redes.syscor.financeiro.service.CaixaVendaService;
 import com.vivo4redes.syscor.venda.model.ItemVenda;
 import com.vivo4redes.syscor.venda.model.PagamentoVenda;
 import com.vivo4redes.syscor.venda.model.Usuario;
@@ -71,6 +72,7 @@ public class VendaService {
     private final PagamentoVendaRepository pagamentoVendaRepository;
     private final PrecoVigenteService precoVigenteService;
     private final ResolvedorTabela resolvedorTabela;
+    private final CaixaVendaService caixaVenda;
 
     public VendaService(VendaRepository vendaRepository,
                         ClienteService clienteService,
@@ -80,7 +82,8 @@ public class VendaService {
                         EstoqueGeralService estoqueService,
                         PagamentoVendaRepository pagamentoVendaRepository,
                         PrecoVigenteService precoVigenteService,
-                        ResolvedorTabela resolvedorTabela) {
+                        ResolvedorTabela resolvedorTabela,
+                        CaixaVendaService caixaVenda) {
         this.vendaRepository = vendaRepository;
         this.clienteService = clienteService;
         this.filialService = filialService;
@@ -90,12 +93,14 @@ public class VendaService {
         this.pagamentoVendaRepository = pagamentoVendaRepository;
         this.precoVigenteService = precoVigenteService;
         this.resolvedorTabela = resolvedorTabela;
+        this.caixaVenda = caixaVenda;
     }
 
     @Transactional
     public Venda abrirCarrinho(VendaRequestDTO dto) {
         Cliente cliente = clienteService.buscarPorId(dto.clienteId());
         var filial = filialService.buscarPorId(dto.filialId());
+        caixaVenda.exigirCaixaAbertoHoje(filial); // sem caixa aberto hoje a filial não vende
         var usuario = usuarioService.usuarioLogado();
 
         Venda venda = Venda.builder()
@@ -114,6 +119,7 @@ public class VendaService {
     public Venda adicionarItem(Long vendaId, ItemVendaRequestDTO dto) {
         Venda venda = buscarParaEdicao(vendaId);
         exigirCarrinhoEditavel(venda);
+        caixaVenda.exigirCaixaAbertoHoje(venda.getFilial());
 
         // Serviço (plano) entra com valor 0 e sem produto: a cobrança é na fatura da operadora.
         boolean servico = dto.categoria() == CategoriaItemVenda.SERVICO_VIVO;
@@ -296,6 +302,10 @@ public class VendaService {
     public Venda finalizar(Long vendaId, FinalizarVendaRequestDTO dto) {
         var vendedor = exigirVendedorAutenticado(dto.autenticacaoVendedor());
         Venda venda = buscarParaEdicao(vendaId);
+        // A venda entra no caixa aberto de hoje da filial; sem ele (ou fechado no meio do carrinho), não é lançada.
+        var caixa = venda.getStatus() == StatusVenda.ABERTA
+                ? caixaVenda.caixaParaFinalizar(venda.getFilial(), dto.caixaSessaoId())
+                : null;
 
         if (venda.getItens().isEmpty()) {
             throw new VendaSemItemException();
@@ -319,6 +329,7 @@ public class VendaService {
         venda.setUsuario(vendedor);
         venda.setFinalizadoPor(vendedor);
         venda.setFinalizadoEm(Instant.now());
+        venda.setCaixaSessao(caixa);
         return vendaRepository.save(venda);
     }
 
@@ -338,6 +349,9 @@ public class VendaService {
             throw new NegocioException("A venda é lançada pelo finalizar, com a senha do vendedor.");
         }
         exigirCancelamentoNoDia(venda, novoStatus);
+        if (novoStatus == StatusVenda.CANCELADA && venda.getStatus() == StatusVenda.CONCLUIDA) {
+            caixaVenda.exigirCaixaAbertoParaCancelar(venda); // caixa fechado: só depois de reaberto
+        }
 
         boolean estoqueJaBaixado = venda.getStatus() == StatusVenda.CONCLUIDA;
         transicionar(venda, novoStatus);

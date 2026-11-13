@@ -52,6 +52,11 @@ public class Venda {
     @JoinColumn(name = "usuario_id", nullable = false)
     private Usuario usuario;
 
+    /** Caixa em que a venda foi lançada (gravado ao finalizar); null nas vendas anteriores à V38 e nos carrinhos. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "caixa_sessao_id")
+    private com.vivo4redes.syscor.financeiro.model.CaixaSessao caixaSessao;
+
     /** Quem se autenticou para finalizar a venda; null enquanto ABERTA e nas vendas antigas. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "finalizado_por_id")

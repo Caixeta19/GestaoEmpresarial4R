@@ -48,7 +48,7 @@ public class UsuarioDetailsService implements UserDetailsService {
     }
 
     /** "GERENTE DE ÁREA" -> "GERENTE_DE_AREA" (sem acento, sem espaço), para usar em hasRole(...). */
-    static String papel(String cargo) {
+    public static String papel(String cargo) {
         if (cargo == null || cargo.isBlank()) {
             return "SEM_CARGO";
         }

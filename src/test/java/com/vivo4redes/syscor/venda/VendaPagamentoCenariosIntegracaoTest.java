@@ -3,6 +3,7 @@ package com.vivo4redes.syscor.venda;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
+import com.vivo4redes.syscor.financeiro.CaixaTestSupport;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
 import com.vivo4redes.syscor.estoque.model.PrecoItem;
@@ -109,6 +110,7 @@ class VendaPagamentoCenariosIntegracaoTest {
         clienteId = clientes.save(Cliente.builder().tipoPessoa(TipoPessoa.FISICA).nome("Cliente Teste")
                 .cpfCnpj("9000000" + n).build()).getId();
         filialId = filiais.save(Filial.builder().codigo("T" + n).nome("Filial Teste").build()).getId();
+        CaixaTestSupport.abrirCaixaDeHoje(jdbc, filialId); // sem caixa aberto hoje a filial não vende
         email = "vendedor" + n + "@teste.local";
         usuarios.save(Usuario.builder().nome("Vendedor Teste").login("vendedor" + n).email(email)
                 .senhaHash(encoder.encode(SENHA)).filial("Filial Teste").cargo("VENDEDOR").build());
