@@ -105,6 +105,20 @@ class CaixaPerfilServiceTest {
     }
 
     @Test
+    @DisplayName("Filial do usuário: só vale se o nome casa com exatamente uma filial")
+    void filialDoUsuario() {
+        Usuario g = usuario("g1", "GERENTE DE VENDAS - PLENO", "mg - salinas");
+        Usuario semFilial = usuario("g2", "GERENTE DE VENDAS - PLENO", "Filial que não existe");
+        lenient().when(filialRepository.listarIdsPorNome("Filial que não existe")).thenReturn(List.of());
+        lenient().when(filialRepository.listarIdsPorNome("Nome repetido")).thenReturn(List.of(7L, 8L));
+
+        assertThat(perfil.filialDoUsuario(g)).isEqualTo(1L);
+        assertThat(perfil.filialDoUsuario(semFilial)).isNull();
+        assertThat(perfil.filialDoUsuario(usuario("g3", "GERENTE DE VENDAS - PLENO", "Nome repetido"))).isNull();
+        assertThat(perfil.filialDoUsuario(usuario("g4", "GERENTE DE VENDAS - PLENO", null))).isNull();
+    }
+
+    @Test
     @DisplayName("Listas vazias na configuração: ninguém ganha perfil por engano")
     void listasVazias() {
         CaixaPerfilService vazio = new CaixaPerfilService(new CaixaProperties(), filialRepository);
