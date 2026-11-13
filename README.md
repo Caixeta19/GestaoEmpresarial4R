@@ -344,6 +344,11 @@ CANCELADA → (terminal, sem saída)
   números (só quando é o último caixa aberto do dia). **Conferir** (`AGUARDANDO` → `CONFERIDO`) e **reabrir** (com
   `justificativa` de no mínimo 10, volta a `ABERTO` e zera a conferência) ficam registrados em `tb_caixa_historico`.
   Cancelar venda já lançada exige o caixa dela `ABERTO` (409 `CAIXA_FECHADO` com o caixa fechado).
+- **Fechamento cego:** o dinheiro contado é obrigatório e nada assume o esperado. A diferença é o valor que o gerente
+  informa menos o valor das vendas lançadas no caixa (abertura + movimento + entradas − saídas). Com o caixa aberto, o
+  gerente não recebe o esperado do dinheiro (nem `entradas`, `saidas` e `movimento`, que somados o revelam); auditoria,
+  financeiro e admin recebem. `POST /{id}/previa-fechamento` devolve esperado e diferença para o valor já digitado, sem
+  gravar. Fechar com diferença sem observação dá 422 com `codigo` `CAIXA_DIFERENCA_SEM_OBSERVACAO` e a `diferenca`.
 - Filial com mais de um caixa aberto no dia: o `finalizar` recebe `caixaSessaoId` (sem ele, 422).
 
 ### Mailing (WhatsApp)
