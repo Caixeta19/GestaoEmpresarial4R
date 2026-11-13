@@ -276,6 +276,24 @@ class CaixaIntegracaoTest {
 
     // ------------------------------------------------------------------ situação
     @Test
+    @DisplayName("Permissões: só auditoria, financeiro e admin conferem e reabrem; o gerente fica na própria filial")
+    void permissoes() throws Exception {
+        for (Usuario u : List.of(auditor, financeiro, admin)) {
+            JsonNode p = enviar(get("/financeiro/caixa/permissoes"), null, u).corpo;
+            assertThat(p.get("conferirReabrir").asBoolean()).as(u.getLogin()).isTrue();
+            assertThat(p.get("todasAsFiliais").asBoolean()).as(u.getLogin()).isTrue();
+        }
+        for (Usuario u : List.of(gerente, vendedor)) {
+            JsonNode p = enviar(get("/financeiro/caixa/permissoes"), null, u).corpo;
+            assertThat(p.get("conferirReabrir").asBoolean()).as(u.getLogin()).isFalse();
+            assertThat(p.get("todasAsFiliais").asBoolean()).as(u.getLogin()).isFalse();
+        }
+        // A filial do cadastro vem junto (gerente da filial do teste); quem tem filial sem cadastro fica com null
+        assertThat(enviar(get("/financeiro/caixa/permissoes"), null, gerente).corpo.get("filialId").asLong()).isEqualTo(filialId);
+        assertThat(enviar(get("/financeiro/caixa/permissoes"), null, auditor).corpo.get("filialId").isNull()).isTrue();
+    }
+
+    @Test
     @DisplayName("Situação: sem caixa, aberto, e aviso de caixa anterior ainda aberto (sem bloquear)")
     void situacao() throws Exception {
         Resposta antes = situacao(vendedor);

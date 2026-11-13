@@ -455,6 +455,7 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 | --- | --- | --- |
 | POST | `/financeiro/caixa/abrir` | Abrir o caixa de hoje (`filialId`, `caixaPdv`, `formasIniciais`, `justificativaAbertura`) |
 | GET | `/financeiro/caixa/situacao?filialId=` | Caixa de hoje da filial: `aberto`, `caixaId`, `caixas`, `podeAbrir`, `avisos` (qualquer usuário autenticado; tela de Venda) |
+| GET | `/financeiro/caixa/permissoes` | O que o usuário logado pode: `conferirReabrir`, `todasAsFiliais` e `filialId` (filial do cadastro do usuário, se casa com uma só; o front mostra ou esconde botões; o backend confere de novo em cada ação) |
 | GET | `/financeiro/caixa/sugestao-abertura?filialId=&caixaPdv=` | Dinheiro sugerido para a abertura (fechamento do último caixa) |
 | GET | `/financeiro/caixa/abertos`, `/financeiro/caixa/fechados` | Paginado, com `filialId`, `dataInicio`, `dataFim`, `conferencia`, `busca`, `ordenar` (`data`/`numero`), `direcao`, `page`, `size` |
 | GET | `/financeiro/caixa/{id}` | Detalhe: tabela por forma, quem abriu/fechou/conferiu e histórico |

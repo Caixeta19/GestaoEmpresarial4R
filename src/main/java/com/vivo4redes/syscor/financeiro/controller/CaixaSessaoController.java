@@ -33,6 +33,12 @@ public class CaixaSessaoController {
         return ResponseEntity.ok(caixaSessaoService.situacao(filialId));
     }
 
+    /** O que o usuário logado pode fazer no caixa (conferir/reabrir e ver todas as filiais). */
+    @GetMapping("/permissoes")
+    public ResponseEntity<PermissoesCaixaResponseDTO> permissoes() {
+        return ResponseEntity.ok(caixaSessaoService.permissoes());
+    }
+
     /** Dinheiro sugerido para a abertura: o contabilizado do último caixa fechado desse caixa. */
     @GetMapping("/sugestao-abertura")
     public ResponseEntity<SugestaoAberturaResponseDTO> sugestaoAbertura(

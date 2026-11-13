@@ -183,6 +183,14 @@ public class CaixaSessaoService {
                 avisos);
     }
 
+    /** Permissões gerais do usuário logado no caixa (o que o front mostra ou esconde). */
+    @Transactional(readOnly = true)
+    public PermissoesCaixaResponseDTO permissoes() {
+        Usuario usuario = usuarioService.usuarioLogado();
+        return new PermissoesCaixaResponseDTO(perfil.podeConferirReabrir(usuario), perfil.veTodasAsFiliais(usuario),
+                perfil.filialDoUsuario(usuario));
+    }
+
     @Transactional(readOnly = true)
     public PaginaCaixaResponseDTO listarAbertos(Long filialId, LocalDate dataInicio, LocalDate dataFim,
                                                 ConferenciaCaixa conferencia, String busca,

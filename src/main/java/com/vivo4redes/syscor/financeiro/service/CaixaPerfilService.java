@@ -100,6 +100,13 @@ public class CaixaPerfilService {
         return Set.copyOf(filialRepository.listarIdsPorNome(u.getFilial()));
     }
 
+    /** Filial do cadastro do usuário, se o nome casa com exatamente uma filial; senão, null. */
+    public Long filialDoUsuario(Usuario u) {
+        if (u == null || u.getFilial() == null || u.getFilial().isBlank()) return null;
+        List<Long> ids = filialRepository.listarIdsPorNome(u.getFilial());
+        return ids.size() == 1 ? ids.get(0) : null;
+    }
+
     // ------------------------------------------------------------------ apoio
     private boolean daFilial(Usuario u, Filial filial) {
         return u.getFilial() != null && filial != null && normalizar(u.getFilial()).equals(normalizar(filial.getNome()));
