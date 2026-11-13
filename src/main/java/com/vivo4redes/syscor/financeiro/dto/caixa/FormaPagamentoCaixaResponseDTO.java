@@ -9,13 +9,16 @@ public record FormaPagamentoCaixaResponseDTO(
         FormaPagamento forma,
         BigDecimal abertura,
         BigDecimal movimento,
-        /** Calculado ao vivo somando os PagamentoVenda reais dessa filial/forma/dia. */
+        /** Soma dos pagamentos das vendas CONCLUIDAS lançadas neste caixa (cancelada não entra). */
         BigDecimal entradas,
+        /** Saídas lançadas; nas formas que liquidam na conciliação soma também as entradas (saídas = entradas). */
         BigDecimal saidas,
-        /** = abertura + movimento + entradas - saidas. */
+        /** abertura + movimento + entradas − saídas: o que deve ficar no caixa (dinheiro; nas outras formas, 0). */
         BigDecimal contabilizadoEsperado,
         /** Só preenchido depois do fechamento. */
         BigDecimal valorConferido,
-        BigDecimal diferenca
+        BigDecimal diferenca,
+        /** true = PIX, Vivo Pay, cartões e boleto: liquidam na conciliação e não ficam na gaveta. */
+        boolean liquidaNaConciliacao
 ) {
 }

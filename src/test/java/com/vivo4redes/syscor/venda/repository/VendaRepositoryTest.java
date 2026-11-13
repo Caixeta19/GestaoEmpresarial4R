@@ -102,18 +102,28 @@ class VendaRepositoryTest {
     }
 
     @Test
-    @DisplayName("Caixa: VIVO_PAY soma como forma própria e a linha FINANCIADO entra como crédito")
+    @DisplayName("Caixa: soma por sessão, VIVO_PAY é forma própria, FINANCIADO entra como crédito e venda cancelada ou de outro caixa fica fora")
     void entradasDoCaixa() {
         jdbc.execute("SET LOCAL session_replication_role = replica");
-        long venda = venda("ABERTA", Instant.parse("2026-11-02T12:00:00Z"));
+        long caixa = caixa("CAIXA 1"), outroCaixa = caixa("CAIXA 2");
+        long venda = venda("CONCLUIDA", Instant.parse("2026-11-02T12:00:00Z"));
+        jdbc.update("UPDATE vendas SET caixa_sessao_id = ? WHERE id = ?", caixa, venda);
         pagamento(venda, "VIVO_PAY", "PAGAMENTO", "100.00");
         pagamento(venda, "PIX", "ENTRADA", "30.00");
         pagamento(venda, "CARTAO_CREDITO", "FINANCIADO", "70.00");
         pagamento(venda, "CARTAO_CREDITO", "PAGAMENTO", "5.00");
 
-        assertThat(entradas(FormaPagamento.VIVO_PAY)).isEqualByComparingTo("100.00");
-        assertThat(entradas(FormaPagamento.PIX)).isEqualByComparingTo("30.00");
-        assertThat(entradas(FormaPagamento.CARTAO_CREDITO)).isEqualByComparingTo("75.00");
+        long cancelada = venda("CANCELADA", Instant.parse("2026-11-02T12:00:00Z"));
+        jdbc.update("UPDATE vendas SET caixa_sessao_id = ? WHERE id = ?", caixa, cancelada);
+        pagamento(cancelada, "PIX", "PAGAMENTO", "999.00");
+        long doOutroCaixa = venda("CONCLUIDA", Instant.parse("2026-11-02T12:00:00Z"));
+        jdbc.update("UPDATE vendas SET caixa_sessao_id = ? WHERE id = ?", outroCaixa, doOutroCaixa);
+        pagamento(doOutroCaixa, "PIX", "PAGAMENTO", "888.00");
+
+        assertThat(entradas(caixa, FormaPagamento.VIVO_PAY)).isEqualByComparingTo("100.00");
+        assertThat(entradas(caixa, FormaPagamento.PIX)).isEqualByComparingTo("30.00");
+        assertThat(entradas(caixa, FormaPagamento.CARTAO_CREDITO)).isEqualByComparingTo("75.00");
+        assertThat(entradas(caixa, FormaPagamento.DINHEIRO)).isEqualByComparingTo("0.00");
     }
 
     @Test
@@ -143,10 +153,18 @@ class VendaRepositoryTest {
                 venda, forma, tipo, new BigDecimal(valor));
     }
 
-    private BigDecimal entradas(FormaPagamento forma) {
-        Instant agora = Instant.now();
-        return pagamentoRepository.somarPorFilialFormaEData(1L, forma,
-                agora.minus(Duration.ofDays(1)), agora.plus(Duration.ofDays(1)));
+    private long caixa(String nome) {
+        return jdbc.queryForObject("""
+                INSERT INTO tb_caixa_sessao (filial_id, caixa_pdv, data_abertura, status, aberto_em)
+                VALUES (1, ?, DATE '2026-11-02', 'ABERTO', now()) RETURNING id
+                """, Long.class, nome);
+    }
+
+    private BigDecimal entradas(long caixaId, FormaPagamento forma) {
+        return pagamentoRepository.somarPorCaixaEForma(caixaId).stream()
+                .filter(linha -> linha[0] == forma)
+                .map(linha -> (BigDecimal) linha[1])
+                .findFirst().orElse(BigDecimal.ZERO);
     }
 
     /**

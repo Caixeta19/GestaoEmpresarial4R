@@ -1,5 +1,6 @@
 package com.vivo4redes.syscor.venda.service;
 
+import com.vivo4redes.syscor.financeiro.service.CaixaVendaService;
 import com.vivo4redes.syscor.estoque.enums.GrupoPlano;
 import com.vivo4redes.syscor.estoque.enums.TabelaPreco;
 import com.vivo4redes.syscor.estoque.model.EstoqueGeral;
@@ -67,6 +68,7 @@ class VendaServiceRenovaTest {
     @Mock private EstoqueGeralService estoqueService;
     @Mock private PagamentoVendaRepository pagamentoVendaRepository;
     @Mock private PrecoVigenteService precoVigenteService;
+    @Mock private CaixaVendaService caixaVenda;
     @Spy private ResolvedorTabela resolvedorTabela = new ResolvedorTabela();
 
     @InjectMocks

@@ -86,3 +86,15 @@ syscor:
     banco-brasil:
       secret: ${BB_WEBHOOK_SECRET:}
       ips-permitidos: ${BB_WEBHOOK_IPS:}
+  caixa:
+    # Quem pode o quê no caixa (docs/financeiro_caixa.md). Listas separadas por vírgula; o cargo é comparado sem acento.
+    # Gerente: abre e fecha só o caixa da própria filial.
+    cargos-gerente: ${SYSCOR_CAIXA_CARGOS_GERENTE:GERENTE DE VENDAS - JUNIOR,GERENTE DE VENDAS - PLENO,GERENTE DE VENDAS - SENIOR}
+    # Auditoria de caixa: abre e fecha em qualquer filial, confere e reabre.
+    cargos-auditoria: ${SYSCOR_CAIXA_CARGOS_AUDITORIA:}
+    # Financeiro: confere e reabre.
+    cargos-financeiro: ${SYSCOR_CAIXA_CARGOS_FINANCEIRO:}
+    # Logins com todos os poderes sobre o caixa (em produção, por variável de ambiente).
+    admins: ${SYSCOR_CAIXA_ADMINS:}
+    # true: caixa de dia anterior ainda aberto impede vender hoje; false: só avisa.
+    bloquear-com-caixa-anterior-aberto: ${SYSCOR_CAIXA_BLOQUEAR_ANTERIOR_ABERTO:false}

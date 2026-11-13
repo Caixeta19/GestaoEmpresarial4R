@@ -194,9 +194,12 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 
 | ID | Regra | Onde |
 | --- | --- | --- |
-| RN.35 | Caixa abre por filial + PDV com saldo inicial por forma de pagamento | `CaixaSessaoService.abrir` |
-| RN.36 | Fechar exige o valor conferido de cada forma; caixa já fechado não fecha de novo, aberto não reabre | `CaixaSessaoService` |
-| RN.37 | **(a fazer)** Impedir dois caixas abertos no mesmo PDV e filial | — |
+| RN.35 | Caixa abre por filial + nome do caixa (1 PDV = 1 filial), na data de hoje em America/Sao_Paulo, com as seis formas (dinheiro, PIX, Vivo Pay, crédito, débito, boleto). O valor em dinheiro da abertura é obrigatório (0 vale, se informado); as demais formas não informadas abrem com 0. Dinheiro difere do fechamento anterior → `justificativaAbertura` (mín. 10) | `CaixaSessaoService.abrir`, V38 |
+| RN.36 | Fechar: só o dinheiro exige contagem; diferença ≠ 0 exige `observacao` (mín. 10, 422); carrinho aberto da filial no dia impede fechar o último caixa (409 `CAIXA_COM_CARRINHO_ABERTO`). Caixa já fechado não fecha de novo; aberto não reabre | `CaixaSessaoService.fechar` |
+| RN.37 | Um caixa por dia por nome de caixa da filial (índice único, 409 `CAIXA_JA_ABERTO`) | `uk_caixa_sessao_filial_caixa_data` (V38) |
+| RN.69 | **Sem caixa aberto hoje a filial não vende** (409 `CAIXA_NAO_ABERTO`): criar carrinho, adicionar item e lançar a venda, para todos, admin inclusive. A venda lançada grava `vendas.caixa_sessao_id`; filial com dois caixas abertos informa `caixaSessaoId` no finalizar (sem ele, 422). Caixa de dia anterior aberto só avisa (`syscor.caixa.bloquear-com-caixa-anterior-aberto`). Cancelar venda lançada exige o caixa dela ABERTO (409 `CAIXA_FECHADO`) | `CaixaVendaService`, `VendaService` |
+| RN.70 | Perfis do caixa (`syscor.caixa.*`, cargo comparado sem acento): gerente de vendas abre/fecha só a própria filial (vínculo `usuarios.filial` = `filiais.nome`); auditoria de caixa abre/fecha em qualquer filial; conferir e reabrir = auditoria, financeiro e admin (logins em `syscor.caixa.admins`); quem fechou não confere o mesmo caixa (admin exceto). Sem perfil → 403 `CAIXA_SEM_PERMISSAO`; cada usuário só vê os caixas das filiais a que tem acesso | `CaixaPerfilService` |
+| RN.71 | Cálculo por sessão: entradas = pagamentos das vendas CONCLUIDA com `caixa_sessao_id` do caixa (cancelada sai). Dinheiro: esperado = abertura + movimento + entradas − saídas, contado pelo gerente. PIX, Vivo Pay, cartões e boleto liquidam na conciliação (saídas = entradas, contabilizado 0; diferença só se o gerente informar valor diferente). VOUCHER não abre linha. Conferir (AGUARDANDO → CONFERIDO) e reabrir (justificativa mín. 10, zera a conferência) ficam em `tb_caixa_historico` | `CaixaSessaoService` |
 | RN.38 | Webhook só é aceito autenticado: BB por mTLS com certificado A1 + IP permitido (a implementar; hoje compara um parâmetro), banco próprio por segredo; rejeitado vira log `REJEITADO` | `WebhookIngestService`, `BancoAdapter` |
 | RN.39 | Idempotência em duas camadas: hash SHA-256 do payload e `provider + idExterno` da transação | `WebhookIngestService`, `MatchingService` |
 | RN.40 | Matching por identificador de pagamento; código de barras como alternativa | `MatchingService` |
@@ -233,7 +236,7 @@ Cada regra abaixo está implementada no código, salvo as marcadas como **(a faz
 | RF.11 | Inventário por filial: IQ09 × sistema × bipagem, fechamento com justificativa, CSV e diagnóstico pela IA | Feito (backend) |
 | RF.12 | Importar tabela de preços da Telefônica por oferta | Feito |
 | RF.13 | Protocolo documental por venda | Feito |
-| RF.14 | Abrir, fechar, reabrir e listar caixas | Feito |
+| RF.14 | Abrir, fechar, conferir, reabrir e listar caixas; abertura diária obrigatória antes de vender | Feito (backend; front em outro PR) |
 | RF.15 | Receber webhooks bancários, conciliar, listar logs, reprocessar e acompanhar em tempo real (SSE) | Feito |
 | RF.16 | CRUD de títulos a pagar/receber via API (o service existe, falta controller) | A fazer |
 | RF.17 | Importar consolidado Vivo e classificar remuneração | Feito |
@@ -307,7 +310,9 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `tb_campanha_mailing` / `tb_destinatario_mailing` | mailing | Campanhas e destinatários | V7 |
 | `tb_titulo_financeiro` | financeiro | Títulos a pagar/receber, identificador de pagamento, código de barras | V10, V16 |
 | `tb_execucao_remuneracao` / `tb_item_remuneracao` | financeiro | Importações do consolidado Vivo e classificação por linha | V10 |
-| `tb_caixa_sessao` / `tb_forma_pagamento_caixa` | financeiro | Sessão de caixa e saldo por forma | V11 |
+| `tb_caixa_sessao` / `tb_forma_pagamento_caixa` | financeiro | Sessão de caixa (quem abriu, fechou, conferiu e reabriu; conferência; justificativas) e saldo por forma. Índice único filial + caixa + dia | V11, V38 |
+| `tb_caixa_historico` | financeiro | Auditoria do caixa (ABRIU, FECHOU, CONFEROU, REABRIU: quem, quando, texto) | V38 |
+| `vendas.caixa_sessao_id` | venda | Caixa em que a venda foi lançada (nulo nas vendas anteriores à V38) | V38 |
 | `webhook_log` / `transacao_bancaria` | financeiro | Webhooks recebidos e transações conciliadas | V16 |
 
 **Relacionamentos principais**
@@ -340,6 +345,8 @@ O schema tem 27 migrations Flyway (V1 a V27) em `src/main/resources/db/migration
 | `ResultadoConciliacao` | CONCILIADA, DIVERGENTE, NAO\_ENCONTRADA, DUPLICADA |
 | `StatusWebhook` | RECEBIDO, PROCESSADO, ERRO, REJEITADO |
 | `StatusCaixaSessao` | ABERTO, FECHADO |
+| `ConferenciaCaixa` | AGUARDANDO, CONFERIDO |
+| `AcaoCaixa` | ABRIU, FECHOU, CONFEROU, REABRIU |
 | `StatusRemuneracao` | LIBERADO, PENDENTE\_SISTEMA, PENDENTE\_VIVO |
 
 **Notas de projeto:** `TIMESTAMP` sem fuso + `hibernate.jdbc.time_zone: America/Sao_Paulo`; `globally_quoted_identifiers: true`; `numero_venda` vem da sequence `seq_numero_venda`.
@@ -446,10 +453,15 @@ Todas as rotas usam o prefixo `/api` (`server.servlet.context-path`) e exigem `A
 
 | Método | Rota | Descrição |
 | --- | --- | --- |
-| POST | `/financeiro/caixa/abrir` | Abrir caixa (filial, PDV, saldos iniciais) |
-| GET | `/financeiro/caixa/abertos`, `/financeiro/caixa/fechados` | Listar por filial |
-| GET | `/financeiro/caixa/{id}` | Detalhe |
-| POST | `/financeiro/caixa/{id}/fechar`, `/financeiro/caixa/{id}/reabrir` | Fechar com conferência / reabrir |
+| POST | `/financeiro/caixa/abrir` | Abrir o caixa de hoje (`filialId`, `caixaPdv`, `formasIniciais`, `justificativaAbertura`) |
+| GET | `/financeiro/caixa/situacao?filialId=` | Caixa de hoje da filial: `aberto`, `caixaId`, `caixas`, `podeAbrir`, `avisos` (qualquer usuário autenticado; tela de Venda) |
+| GET | `/financeiro/caixa/sugestao-abertura?filialId=&caixaPdv=` | Dinheiro sugerido para a abertura (fechamento do último caixa) |
+| GET | `/financeiro/caixa/abertos`, `/financeiro/caixa/fechados` | Paginado, com `filialId`, `dataInicio`, `dataFim`, `conferencia`, `busca`, `ordenar` (`data`/`numero`), `direcao`, `page`, `size` |
+| GET | `/financeiro/caixa/{id}` | Detalhe: tabela por forma, quem abriu/fechou/conferiu e histórico |
+| GET | `/financeiro/caixa/{id}/movimento-detalhado` | Uma linha por pagamento (venda, hora, vendedor, forma, valor, status) |
+| POST | `/financeiro/caixa/{id}/fechar` | Fechar (valor contado por forma, `observacao` se houver diferença) |
+| POST | `/financeiro/caixa/{id}/conferir` | Conferir um caixa fechado (auditoria, financeiro, admin) |
+| POST | `/financeiro/caixa/{id}/reabrir` | Reabrir (`justificativa` obrigatória) |
 | GET | `/financeiro/contas-pagar` | Títulos a pagar |
 | GET | `/financeiro/conciliacao/logs?tamanho=50` | Logs de webhook |
 | POST | `/financeiro/conciliacao/logs/{id}/reprocessar` | Reprocessar log |
@@ -491,7 +503,7 @@ Em ordem de risco. Os itens 1 a 4 podem quebrar em produção.
 | 5 | `DocumentoInvalidoException` e `RecursoNaoEncontradoException` estendem `RuntimeException` (têm handler próprio, ok); o README diz o contrário | `exception/` | Atualizar README |
 | 6 | Login com usuário inexistente após autenticar lança `RuntimeException` genérica (500) | `AuthController.login` | Lançar `AutenticacaoInvalidaException` |
 | 7 | `alterar-senha` não confere `senhaAtual` | `AuthController.alterarSenha` | Validar com `passwordEncoder.matches` antes de trocar |
-| 8 | Abrir caixa não impede dois caixas abertos no mesmo PDV | `CaixaSessaoService.abrir` | Checar sessão aberta + índice único parcial |
+| 8 | ~~Abrir caixa não impedia dois caixas abertos no mesmo PDV~~ | `CaixaSessaoService.abrir` | **Resolvido na V38** (índice único filial + caixa + dia, 409 `CAIXA_JA_ABERTO`) |
 | 9 | Meta do dashboard fixa em R$ 85.000,00 | `DashboardService` | Tabela de metas por nível da hierarquia de cargos e mês |
 | 10 | Dependências sem uso: Envers, S3, POI, openhtmltopdf, Spring Retry, Quartz, MapStruct | `pom.xml` | Usar nos épicos previstos ou remover |
 | 11 | Arquivos de lixo versionados: `boot.log`, `body.json`, `{`, `[Help`, `erros-branch.txt`, `contexto-estoque.txt` | raiz do repo | Remover e incluir no `.gitignore` |
@@ -523,7 +535,7 @@ A ordem segue o backlog do produto (Épico 0 → Clientes → Estoque → Vendas
    - Transferência entre filiais e histórico de movimentação do serial.
 5. **Financeiro (Épico 1)**
    - Controller de títulos (`/financeiro/titulos`: criar, listar, baixar, reabrir) sobre o `TituloFinanceiroService` existente.
-   - Impedir dois caixas abertos no mesmo PDV (bug 8); relatório de fechamento.
+   - Relatórios do caixa além do movimento detalhado (movimentação de valores, resumo do dia, formas do PDV); Sangria e Suprimentos.
    - Metas por nível da hierarquia de cargos e mês, com o dashboard mostrando a meta do nível de quem está logado (bug 9).
 6. **Documental (Épico 4)** — anexos do protocolo no S3 e fila de pendências GED.
 7. **Fiscal (Épico 6)** — NF-e/NFC-e e SPED (requer escolha de provedor).

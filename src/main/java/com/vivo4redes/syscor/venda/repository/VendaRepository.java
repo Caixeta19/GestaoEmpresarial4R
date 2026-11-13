@@ -144,4 +144,16 @@ public interface VendaRepository extends JpaRepository<Venda, Long>, JpaSpecific
         order by v.criadoEm desc
     """)
     List<Venda> buscarUltimasAtividades(@Param("filialId") Long filialId, Pageable pageable);
+
+    /** Números dos carrinhos (ABERTA) da filial criados no intervalo: impedem o fechamento do último caixa do dia. */
+    @Query("""
+        select v.numeroVenda from Venda v
+        where v.filial.id = :filialId
+          and v.status = com.vivo4redes.syscor.venda.enums.StatusVenda.ABERTA
+          and v.criadoEm >= :inicio and v.criadoEm < :fim
+        order by v.numeroVenda
+        """)
+    List<Long> numerosDeCarrinhosAbertos(@Param("filialId") Long filialId,
+                                         @Param("inicio") Instant inicio,
+                                         @Param("fim") Instant fim);
 }

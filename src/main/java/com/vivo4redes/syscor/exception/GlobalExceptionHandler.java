@@ -34,6 +34,14 @@ public class GlobalExceptionHandler {
                 .body(corpo(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage()));
     }
 
+    // Caixa: 409 (não aberto, já aberto, fechado) ou 403 (sem perfil), sempre com o código para o front
+    @ExceptionHandler(CaixaException.class)
+    public ResponseEntity<Map<String, Object>> handleCaixa(CaixaException ex) {
+        Map<String, Object> corpo = corpo(ex.getStatus(), ex.getMessage());
+        corpo.put("codigo", ex.getCodigo());
+        return ResponseEntity.status(ex.getStatus()).body(corpo);
+    }
+
     // 422: troca de condição com pagamentos incompatíveis; o corpo lista quais remover
     @ExceptionHandler(PagamentosIncompativeisException.class)
     public ResponseEntity<Map<String, Object>> handlePagamentosIncompativeis(PagamentosIncompativeisException ex) {
