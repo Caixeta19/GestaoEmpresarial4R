@@ -14,6 +14,8 @@ public record PermissoesCaixaResponseDTO(
         /** Recebe o esperado das formas do caixa aberto (o gerente da loja não: fechamento cego). */
         boolean veEsperadoDoAberto,
         /** Pode fechar o caixa com diferença, informando justificativa (o gerente da loja nunca). */
-        boolean fecharComDivergencia
+        boolean fecharComDivergencia,
+        /** Pode estornar um lançamento de sangria ou suprimento (financeiro e admin). */
+        boolean estornarLancamento
 ) {
 }

@@ -104,6 +104,31 @@ class CaixaPerfilServiceTest {
     }
 
     @Test
+    @DisplayName("Sangria e suprimento: quem fecha lança; estornar é só do financeiro e do admin")
+    void lancamentos() {
+        Usuario g = usuario("g1", "GERENTE DE VENDAS - PLENO", "mg - salinas");
+        Usuario fin = usuario("f1", "FINANCEIRO", "Matriz");
+        Usuario aud = usuario("a1", "AUDITORIA DE CAIXA", "Auditoria");
+        Usuario ga = usuario("ga1", "GERENTE DE AREA DE VENDAS", "ADM 4 REDES");
+        Usuario adm = usuario("guilherme.caixeta", "ASSISTENTE DE DESENVOLVIMENTO DE SISTEMA", "Matriz");
+        Usuario vend = usuario("v1", "CONSULTOR DE VENDAS 1", "MG - SALINAS");
+
+        assertThat(perfil.podeLancar(g, salinas)).isTrue();
+        assertThat(perfil.podeLancar(g, outra)).as("gerente só na própria filial").isFalse();
+        for (Usuario u : List.of(fin, aud, ga, adm)) {
+            assertThat(perfil.podeLancar(u, outra)).as(u.getLogin()).isTrue();
+        }
+        assertThat(perfil.podeLancar(vend, salinas)).isFalse();
+
+        assertThat(perfil.podeEstornar(fin)).isTrue();
+        assertThat(perfil.podeEstornar(adm)).isTrue();
+        for (Usuario u : List.of(g, aud, ga, vend)) {
+            assertThat(perfil.podeEstornar(u)).as(u.getLogin()).isFalse();
+        }
+        assertThatThrownBy(() -> perfil.exigirEstornar(g)).isInstanceOf(CaixaException.class);
+    }
+
+    @Test
     @DisplayName("Admin pelo login (sem diferenciar maiúsculas) pode tudo")
     void admin() {
         Usuario adm = usuario("GUILHERME.CAIXETA", "ASSISTENTE DE DESENVOLVIMENTO DE SISTEMA", "Matriz");

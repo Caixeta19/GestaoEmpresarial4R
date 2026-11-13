@@ -22,6 +22,8 @@ import java.util.stream.Collectors;
  *   <li>fechar: quem abre, mais financeiro e gerente de área (qualquer filial);</li>
  *   <li>fechar com diferença (com justificativa): financeiro, gerente de área, auditoria e admin; o gerente da loja nunca;</li>
  *   <li>ver o esperado do caixa aberto: financeiro, gerente de área, auditoria e admin (o gerente da loja não: fechamento cego);</li>
+ *   <li>sangria e suprimento: quem fecha (gerente da própria filial, auditoria, financeiro, gerente de área e admin);</li>
+ *   <li>estornar um lançamento: financeiro e admin;</li>
  *   <li>conferir e reabrir: auditoria de caixa, financeiro e admin;</li>
  *   <li>consultar: quem vê todas as filiais, e cada gerente da loja só na própria.</li>
  * </ul>
@@ -84,6 +86,16 @@ public class CaixaPerfilService {
         return ehAdmin(u) || ehAuditoria(u) || ehFinanceiro(u) || ehGerenteArea(u);
     }
 
+    /** Lança sangria e suprimento: quem fecha o caixa daquela filial. */
+    public boolean podeLancar(Usuario u, Filial filial) {
+        return podeFechar(u, filial);
+    }
+
+    /** Estorna um lançamento: financeiro e admin. */
+    public boolean podeEstornar(Usuario u) {
+        return ehAdmin(u) || ehFinanceiro(u);
+    }
+
     public boolean podeConferirReabrir(Usuario u) {
         return ehAdmin(u) || ehAuditoria(u) || ehFinanceiro(u);
     }
@@ -105,6 +117,20 @@ public class CaixaPerfilService {
             throw CaixaException.semPermissao(ehGerente(u)
                     ? "O gerente só fecha o caixa da própria filial."
                     : "Seu perfil não pode fechar o caixa.");
+        }
+    }
+
+    public void exigirLancar(Usuario u, Filial filial) {
+        if (!podeLancar(u, filial)) {
+            throw CaixaException.semPermissao(ehGerente(u)
+                    ? "O gerente só lança sangria e suprimento no caixa da própria filial."
+                    : "Seu perfil não pode lançar sangria nem suprimento.");
+        }
+    }
+
+    public void exigirEstornar(Usuario u) {
+        if (!podeEstornar(u)) {
+            throw CaixaException.semPermissao("Só o financeiro e o admin estornam lançamentos do caixa.");
         }
     }
 
