@@ -42,12 +42,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.getStatus()).body(corpo);
     }
 
-    // 422: o caixa fecha com diferença e falta a observação; a diferença vai no corpo
-    @ExceptionHandler(DiferencaCaixaException.class)
-    public ResponseEntity<Map<String, Object>> handleDiferencaCaixa(DiferencaCaixaException ex) {
+    // 422: o caixa só fecha com diferença zero; o corpo lista as formas que divergem (com a diferença só para quem pode ver)
+    @ExceptionHandler(CaixaComDiferencaException.class)
+    public ResponseEntity<Map<String, Object>> handleCaixaComDiferenca(CaixaComDiferencaException ex) {
         Map<String, Object> corpo = corpo(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
-        corpo.put("codigo", "CAIXA_DIFERENCA_SEM_OBSERVACAO");
-        corpo.put("diferenca", ex.getDiferenca());
+        corpo.put("codigo", "CAIXA_COM_DIFERENCA");
+        corpo.put("formas", ex.getFormas().stream().map(f -> {
+            Map<String, Object> forma = new LinkedHashMap<>();
+            forma.put("forma", f.forma());
+            if (f.diferenca() != null) forma.put("diferenca", f.diferenca());
+            return forma;
+        }).toList());
+        if (ex.getTentativasRestantes() != null) corpo.put("tentativasRestantes", ex.getTentativasRestantes());
         return ResponseEntity.unprocessableEntity().body(corpo);
     }
 

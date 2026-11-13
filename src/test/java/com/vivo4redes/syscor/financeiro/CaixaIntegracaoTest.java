@@ -60,6 +60,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @SpringBootTest(properties = {
         "syscor.caixa.cargos-auditoria=AUDITORIA DE CAIXA",
         "syscor.caixa.cargos-financeiro=FINANCEIRO",
+        "syscor.caixa.cargos-area=GERENTE DE AREA DE VENDAS",
         "syscor.caixa.admins=ADMIN.CAIXA.TESTE"
 })
 @AutoConfigureMockMvc
@@ -105,6 +106,7 @@ class CaixaIntegracaoTest {
     private Usuario auditor;
     private Usuario outroAuditor;
     private Usuario financeiro;
+    private Usuario gerenteArea;
     private Usuario admin;
 
     @BeforeEach
@@ -120,6 +122,7 @@ class CaixaIntegracaoTest {
         auditor = usuario("auditor", "AUDITORIA DE CAIXA", "Auditoria");
         outroAuditor = usuario("auditor2", "AUDITORIA DE CAIXA", "Auditoria");
         financeiro = usuario("financeiro", "FINANCEIRO", "Matriz");
+        gerenteArea = usuario("gerentearea", "GERENTE DE ÁREA DE VENDAS", "Matriz");
         admin = usuarios.findFirstByLoginIgnoreCase(ADMIN).orElseGet(() -> usuarios.save(Usuario.builder()
                 .nome("Admin Caixa").login(ADMIN).email("admin.caixa@teste.local").senhaHash(encoder.encode(SENHA))
                 .primeiroAcesso(false).filial("Matriz").cargo("ASSISTENTE DE DESENVOLVIMENTO DE SISTEMA").build()));
@@ -276,17 +279,27 @@ class CaixaIntegracaoTest {
 
     // ------------------------------------------------------------------ situação
     @Test
-    @DisplayName("Permissões: só auditoria, financeiro e admin conferem e reabrem; o gerente fica na própria filial")
+    @DisplayName("Permissões: conferir/reabrir só auditoria, financeiro e admin; ver o esperado e fechar com divergência também o gerente de área; o gerente da loja fica na própria filial")
     void permissoes() throws Exception {
         for (Usuario u : List.of(auditor, financeiro, admin)) {
             JsonNode p = enviar(get("/financeiro/caixa/permissoes"), null, u).corpo;
             assertThat(p.get("conferirReabrir").asBoolean()).as(u.getLogin()).isTrue();
             assertThat(p.get("todasAsFiliais").asBoolean()).as(u.getLogin()).isTrue();
         }
+        for (Usuario u : List.of(auditor, financeiro, admin, gerenteArea)) {
+            JsonNode p = enviar(get("/financeiro/caixa/permissoes"), null, u).corpo;
+            assertThat(p.get("veEsperadoDoAberto").asBoolean()).as(u.getLogin()).isTrue();
+            assertThat(p.get("fecharComDivergencia").asBoolean()).as(u.getLogin()).isTrue();
+            assertThat(p.get("todasAsFiliais").asBoolean()).as(u.getLogin()).isTrue();
+        }
+        assertThat(enviar(get("/financeiro/caixa/permissoes"), null, gerenteArea).corpo.get("conferirReabrir").asBoolean())
+                .as("gerente de área não confere nem reabre").isFalse();
         for (Usuario u : List.of(gerente, vendedor)) {
             JsonNode p = enviar(get("/financeiro/caixa/permissoes"), null, u).corpo;
             assertThat(p.get("conferirReabrir").asBoolean()).as(u.getLogin()).isFalse();
             assertThat(p.get("todasAsFiliais").asBoolean()).as(u.getLogin()).isFalse();
+            assertThat(p.get("veEsperadoDoAberto").asBoolean()).as(u.getLogin()).isFalse();
+            assertThat(p.get("fecharComDivergencia").asBoolean()).as(u.getLogin()).isFalse();
         }
         // A filial do cadastro vem junto (gerente da filial do teste); quem tem filial sem cadastro fica com null
         assertThat(enviar(get("/financeiro/caixa/permissoes"), null, gerente).corpo.get("filialId").asLong()).isEqualTo(filialId);
@@ -300,6 +313,11 @@ class CaixaIntegracaoTest {
         assertThat(antes.corpo.get("aberto").asBoolean()).isFalse();
         assertThat(antes.corpo.get("podeAbrir").asBoolean()).isFalse();
         assertThat(situacao(gerente).corpo.get("podeAbrir").asBoolean()).isTrue();
+        assertThat(situacao(gerente).corpo.get("podeFechar").asBoolean()).isTrue();
+        assertThat(situacao(financeiro).corpo.get("podeAbrir").asBoolean()).as("financeiro não abre").isFalse();
+        assertThat(situacao(financeiro).corpo.get("podeFechar").asBoolean()).as("mas fecha").isTrue();
+        assertThat(situacao(gerenteArea).corpo.get("podeFechar").asBoolean()).isTrue();
+        assertThat(situacao(vendedor).corpo.get("podeFechar").asBoolean()).isFalse();
 
         CaixaTestSupport.abrirCaixa(jdbc, filialId, "CAIXA VELHO", LocalDate.now(ZONA).minusDays(2));
         long hoje = abrirEObterId(gerente, "CAIXA 1");
@@ -331,8 +349,10 @@ class CaixaIntegracaoTest {
         assertThat(forma(detalhe, "DINHEIRO", "contabilizadoEsperado")).isEqualByComparingTo("1050.00");
         assertThat(forma(detalhe, "PIX", "entradas")).isEqualByComparingTo("1000.00");
         assertThat(forma(detalhe, "PIX", "contabilizadoEsperado")).isEqualByComparingTo("0.00");
+        assertThat(forma(detalhe, "PIX", "esperadoConferencia")).as("o PIX é conferido contra o recebido").isEqualByComparingTo("1000.00");
+        assertThat(forma(detalhe, "DINHEIRO", "esperadoConferencia")).isEqualByComparingTo("1050.00");
 
-        JsonNode movimento = enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, gerente).corpo;
+        JsonNode movimento = enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, financeiro).corpo;
         assertThat(movimento).hasSize(3);
         assertThat(movimento.findValuesAsText("statusVenda")).containsExactlyInAnyOrder("CONCLUIDA", "CONCLUIDA", "CANCELADA");
         assertThat(movimento.get(0).get("vendedor").asText()).isEqualTo(vendedor.getNome());
@@ -356,20 +376,110 @@ class CaixaIntegracaoTest {
     }
 
     @Test
-    @DisplayName("Fechar com diferença sem observação: 422; com observação: 200 e a diferença fica registrada")
-    void fecharComDiferenca() throws Exception {
+    @DisplayName("Conferência por forma: o PIX das vendas também precisa ser informado; com todas as formas certas fecha, só o dinheiro conta no total")
+    void fecharComTodasAsFormas() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+        assertThat(finalizar(vendaProntaParaFinalizar(vendedor, "DINHEIRO"), vendedor, null).status).isEqualTo(200);
+        assertThat(finalizar(vendaProntaParaFinalizar(vendedor, "PIX"), vendedor, null).status).isEqualTo(200);
+
+        Resposta semPix = fechar(gerente, caixa, "1050.00", null);
+        assertThat(semPix.status).as("falta a forma exigida").isEqualTo(422);
+        assertThat(semPix.corpo.get("mensagem").asText()).contains("PIX");
+        assertThat(tentativas(caixa)).as("faltar forma não gasta tentativa").isZero();
+
+        Resposta r = fecharFormas(gerente, caixa, Map.of("DINHEIRO", "1050.00", "PIX", "1000.00"), null, null);
+        assertThat(r.status).isEqualTo(200);
+        assertThat(forma(r.corpo, "PIX", "valorConferido")).isEqualByComparingTo("1000.00");
+        assertThat(forma(r.corpo, "PIX", "diferenca")).isEqualByComparingTo("0.00");
+        assertThat(r.corpo.get("totalContabilizado").decimalValue()).as("só o dinheiro fica no caixa").isEqualByComparingTo("1050.00");
+        assertThat(r.corpo.get("totalDiferenca").decimalValue()).isEqualByComparingTo("0.00");
+        assertThat(r.corpo.get("fechadoComDivergencia").asBoolean()).isFalse();
+        assertThat(r.corpo.get("conferencia").asText()).isEqualTo("AGUARDANDO");
+    }
+
+    @Test
+    @DisplayName("Gerente da loja com diferença: 422 CAIXA_COM_DIFERENCA só com as formas (sem valores), tentativa gravada e restam 4")
+    void gerenteComDiferenca() throws Exception {
         long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
 
-        Resposta semObservacao = fechar(gerente, caixa, "40.00", null);
-        assertThat(semObservacao.status).isEqualTo(422);
-        assertThat(semObservacao.corpo.get("codigo").asText()).isEqualTo("CAIXA_DIFERENCA_SEM_OBSERVACAO");
-        assertThat(semObservacao.corpo.get("diferenca").decimalValue()).isEqualByComparingTo("-10.00");
-        assertThat(fechar(gerente, caixa, "40.00", "curto").status).isEqualTo(422);
-        Resposta r = fechar(gerente, caixa, "40.00", "Faltou troco na gaveta, conferido com a equipe");
+        Resposta r = fechar(gerente, caixa, "40.00", null);
 
-        assertThat(r.status).isEqualTo(200);
-        assertThat(forma(r.corpo, "DINHEIRO", "diferenca")).isEqualByComparingTo("-10.00");
-        assertThat(r.corpo.get("observacao").asText()).contains("Faltou troco");
+        assertThat(r.status).isEqualTo(422);
+        assertThat(r.corpo.get("codigo").asText()).isEqualTo("CAIXA_COM_DIFERENCA");
+        assertThat(r.corpo.get("formas")).hasSize(1);
+        assertThat(r.corpo.get("formas").get(0).get("forma").asText()).isEqualTo("DINHEIRO");
+        assertThat(r.corpo.get("formas").get(0).has("diferenca")).as("o valor revelaria o esperado").isFalse();
+        assertThat(r.corpo.get("tentativasRestantes").asInt()).isEqualTo(4);
+        assertThat(r.corpo.get("mensagem").asText()).doesNotContain("10").doesNotContain("50");
+        assertThat(tentativas(caixa)).as("gravada mesmo com o rollback do 422").isEqualTo(1);
+        assertThat(jdbc.queryForObject("select status from tb_caixa_sessao where id = ?", String.class, caixa)).isEqualTo("ABERTO");
+
+        JsonNode doGerente = enviar(get("/financeiro/caixa/{id}", caixa), null, gerente).corpo;
+        assertThat(doGerente.get("tentativasRestantes").asInt()).isEqualTo(4);
+        assertThat(doGerente.get("tentativasFechamento").isNull()).as("os valores só para quem confere").isTrue();
+        assertThat(doGerente.get("historico").findValuesAsText("acao")).contains("TENTATIVA_FECHAMENTO");
+
+        JsonNode doFinanceiro = enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo;
+        JsonNode tentativa = doFinanceiro.get("tentativasFechamento").get(0);
+        assertThat(tentativa.get("usuario").asText()).isEqualTo(gerente.getNome());
+        assertThat(tentativa.get("formas").get(0).get("digitado").decimalValue()).isEqualByComparingTo("40.00");
+        assertThat(tentativa.get("formas").get(0).get("esperado").decimalValue()).isEqualByComparingTo("50.00");
+        assertThat(tentativa.get("formas").get(0).get("diferenca").decimalValue()).isEqualByComparingTo("-10.00");
+    }
+
+    @Test
+    @DisplayName("Cinco recusas bloqueiam o gerente (423); o financeiro fecha com justificativa; reabrir não zera as tentativas")
+    void bloqueioAposCincoTentativas() throws Exception {
+        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
+        for (int i = 1; i <= 5; i++) {
+            Resposta r = fechar(gerente, caixa, "40.00", null);
+            assertThat(r.status).as("recusa " + i).isEqualTo(422);
+            assertThat(r.corpo.get("tentativasRestantes").asInt()).isEqualTo(5 - i);
+        }
+
+        Resposta bloqueada = fechar(gerente, caixa, "50.00", null);
+        assertThat(bloqueada.status).as("a 6ª, mesmo com o valor certo").isEqualTo(423);
+        assertThat(bloqueada.corpo.get("codigo").asText()).isEqualTo("CAIXA_FECHAMENTO_BLOQUEADO");
+        assertThat(bloqueada.corpo.get("mensagem").asText()).contains("chame o financeiro");
+        assertThat(tentativas(caixa)).isEqualTo(5);
+
+        Resposta semJustificativa = fecharFormas(financeiro, caixa, Map.of("DINHEIRO", "40.00"), null, null);
+        assertThat(semJustificativa.status).isEqualTo(422);
+        assertThat(semJustificativa.corpo.get("formas").get(0).get("diferenca").decimalValue()).isEqualByComparingTo("-10.00");
+
+        Resposta fechado = fecharFormas(financeiro, caixa, Map.of("DINHEIRO", "40.00"), null,
+                "Gaveta recontada pelo financeiro: faltam 10 reais");
+        assertThat(fechado.status).isEqualTo(200);
+        assertThat(fechado.corpo.get("fechadoComDivergencia").asBoolean()).isTrue();
+        assertThat(fechado.corpo.get("justificativaDivergencia").asText()).contains("recontada");
+        assertThat(fechado.corpo.get("conferencia").asText()).isEqualTo("AGUARDANDO");
+        assertThat(fechado.corpo.get("fechadoPor").asText()).isEqualTo(financeiro.getNome());
+        assertThat(forma(fechado.corpo, "DINHEIRO", "diferenca")).isEqualByComparingTo("-10.00");
+        assertThat(tentativas(caixa)).as("quem pode divergir não gasta tentativa").isEqualTo(5);
+
+        assertThat(reabrir(financeiro, caixa, "Reaberto para o gerente recontar a gaveta").status).isEqualTo(200);
+        assertThat(enviar(get("/financeiro/caixa/{id}", caixa), null, financeiro).corpo.get("fechadoComDivergencia").asBoolean())
+                .as("reabrir limpa a divergência").isFalse();
+        assertThat(fechar(gerente, caixa, "50.00", null).status).as("o limite do dia continua").isEqualTo(423);
+    }
+
+    @Test
+    @DisplayName("Gerente de área, auditoria e admin fecham com diferença informando a justificativa (mín. 10)")
+    void divergenciaPorPerfil() throws Exception {
+        int i = 0;
+        for (Usuario quem : List.of(gerenteArea, auditor, admin)) {
+            long caixa = abrirEObterId(gerente, "CAIXA " + (++i), "50.00", null);
+
+            Resposta curta = fecharFormas(quem, caixa, Map.of("DINHEIRO", "55.00"), null, "curta");
+            assertThat(curta.status).as(quem.getLogin()).isEqualTo(422);
+            assertThat(curta.corpo.get("formas").get(0).get("diferenca").decimalValue()).isEqualByComparingTo("5.00");
+
+            Resposta r = fecharFormas(quem, caixa, Map.of("DINHEIRO", "55.00"), "obs livre", "Sobra conferida pelo supervisor");
+            assertThat(r.status).as(quem.getLogin()).isEqualTo(200);
+            assertThat(r.corpo.get("fechadoComDivergencia").asBoolean()).isTrue();
+            assertThat(forma(r.corpo, "DINHEIRO", "diferenca")).isEqualByComparingTo("5.00");
+            assertThat(r.corpo.get("observacao").asText()).isEqualTo("obs livre");
+        }
     }
 
     @Test
@@ -387,13 +497,26 @@ class CaixaIntegracaoTest {
     }
 
     @Test
-    @DisplayName("Gerente de outra filial e vendedor não fecham o caixa")
+    @DisplayName("Quem fecha: gerente da própria filial, auditoria, financeiro e gerente de área; gerente de outra filial e vendedor não")
     void fecharSemPerfil() throws Exception {
         long caixa = abrirEObterId(gerente, "CAIXA 1");
 
         assertThat(fechar(gerenteOutraFilial, caixa, "0.00", null).status).isEqualTo(403);
         assertThat(fechar(vendedor, caixa, "0.00", null).status).isEqualTo(403);
-        assertThat(fechar(auditor, caixa, "0.00", null).status).as("auditoria fecha em qualquer filial").isEqualTo(200);
+        assertThat(fechar(financeiro, caixa, "0.00", null).status).as("financeiro fecha, em qualquer filial").isEqualTo(200);
+
+        long segundo = abrirEObterId(auditor, "CAIXA 2");
+        assertThat(fechar(auditor, segundo, "0.00", null).status).as("auditoria fecha em qualquer filial").isEqualTo(200);
+
+        long terceiro = abrirEObterId(gerente, "CAIXA 3");
+        assertThat(fechar(gerenteArea, terceiro, "0.00", null).status).as("gerente de área fecha").isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("Quem não é da loja nem abre: gerente de área e financeiro não abrem caixa")
+    void quemFechaNaoAbre() throws Exception {
+        assertThat(abrirCaixa(gerenteArea, "CAIXA 1", "0.00", null).status).isEqualTo(403);
+        assertThat(abrirCaixa(financeiro, "CAIXA 1", "0.00", null).status).isEqualTo(403);
     }
 
     // ------------------------------------------------------------------ fechamento cego
@@ -424,64 +547,57 @@ class CaixaIntegracaoTest {
     }
 
     @Test
-    @DisplayName("Fechar com valor maior que o esperado: sobra positiva gravada; precisa de observação")
+    @DisplayName("Fechar com valor maior que o esperado: o gerente da loja é recusado; a sobra positiva só fecha com justificativa de quem pode")
     void fecharComSobra() throws Exception {
         long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
 
-        Resposta semObservacao = fechar(gerente, caixa, "60.00", null);
-        assertThat(semObservacao.status).isEqualTo(422);
-        assertThat(semObservacao.corpo.get("diferenca").decimalValue()).isEqualByComparingTo("10.00");
+        assertThat(fechar(gerente, caixa, "60.00", "Sobrou dinheiro na gaveta, conferido duas vezes").status).isEqualTo(422);
 
-        Resposta r = fechar(gerente, caixa, "60.00", "Sobrou dinheiro na gaveta, conferido duas vezes");
+        Resposta r = fecharFormas(financeiro, caixa, Map.of("DINHEIRO", "60.00"), null, "Sobrou dinheiro na gaveta, conferido");
         assertThat(r.status).isEqualTo(200);
         assertThat(forma(r.corpo, "DINHEIRO", "diferenca")).isEqualByComparingTo("10.00");
         assertThat(r.corpo.get("totalDiferenca").decimalValue()).isEqualByComparingTo("10.00");
     }
 
     @Test
-    @DisplayName("Fechamento cego: o gerente não recebe o esperado do dinheiro do caixa aberto; auditoria e financeiro recebem; depois de fechado todos veem")
+    @DisplayName("Fechamento cego: o gerente da loja não recebe o esperado de NENHUMA forma do caixa aberto; financeiro, gerente de área, auditoria e admin recebem; depois de fechado todos veem")
     void gerenteNaoRecebeOEsperado() throws Exception {
         long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
-        long venda = vendaProntaParaFinalizar(vendedor, "DINHEIRO");
-        assertThat(finalizar(venda, vendedor, null).status).isEqualTo(200);
+        assertThat(finalizar(vendaProntaParaFinalizar(vendedor, "DINHEIRO"), vendedor, null).status).isEqualTo(200);
+        assertThat(finalizar(vendaProntaParaFinalizar(vendedor, "PIX"), vendedor, null).status).isEqualTo(200);
 
         JsonNode doGerente = enviar(get("/financeiro/caixa/{id}", caixa), null, gerente).corpo;
-        for (String campo : List.of("movimento", "entradas", "saidas", "contabilizadoEsperado")) {
-            assertThat(formaNo(doGerente, "DINHEIRO").get(campo).isNull()).as("gerente: " + campo).isTrue();
+        for (String forma : List.of("DINHEIRO", "PIX", "VIVO_PAY", "CARTAO_CREDITO", "CARTAO_DEBITO", "BOLETO")) {
+            for (String campo : List.of("movimento", "entradas", "saidas", "contabilizadoEsperado", "esperadoConferencia")) {
+                assertThat(formaNo(doGerente, forma).get(campo).isNull()).as("gerente: " + forma + "." + campo).isTrue();
+            }
         }
         assertThat(forma(doGerente, "DINHEIRO", "abertura")).as("a abertura ele mesmo informou").isEqualByComparingTo("50.00");
-        assertThat(forma(doGerente, "PIX", "contabilizadoEsperado")).as("só o dinheiro é cego").isEqualByComparingTo("0.00");
+        assertThat(formaNo(doGerente, "DINHEIRO").get("exigidaNoFechamento").asBoolean()).isTrue();
+        assertThat(formaNo(doGerente, "PIX").get("exigidaNoFechamento").asBoolean()).as("tem vendas").isTrue();
+        assertThat(formaNo(doGerente, "VIVO_PAY").get("exigidaNoFechamento").asBoolean()).as("sem movimento").isFalse();
 
         JsonNode naLista = enviar(get("/financeiro/caixa/abertos").param("filialId", filialId.toString()), null, gerente)
                 .corpo.get("content").get(0);
-        assertThat(formaNo(naLista, "DINHEIRO").get("contabilizadoEsperado").isNull()).as("lista de abertos").isTrue();
+        assertThat(formaNo(naLista, "PIX").get("esperadoConferencia").isNull()).as("lista de abertos").isTrue();
 
-        for (Usuario quemConfere : List.of(financeiro, auditor, admin)) {
-            JsonNode doFinanceiro = enviar(get("/financeiro/caixa/{id}", caixa), null, quemConfere).corpo;
-            assertThat(forma(doFinanceiro, "DINHEIRO", "contabilizadoEsperado")).as(quemConfere.getLogin()).isEqualByComparingTo("1050.00");
-            assertThat(forma(doFinanceiro, "DINHEIRO", "entradas")).isEqualByComparingTo("1000.00");
+        for (Usuario quemVe : List.of(financeiro, gerenteArea, auditor, admin)) {
+            JsonNode visto = enviar(get("/financeiro/caixa/{id}", caixa), null, quemVe).corpo;
+            assertThat(forma(visto, "DINHEIRO", "esperadoConferencia")).as(quemVe.getLogin()).isEqualByComparingTo("1050.00");
+            assertThat(forma(visto, "DINHEIRO", "contabilizadoEsperado")).isEqualByComparingTo("1050.00");
+            assertThat(forma(visto, "PIX", "esperadoConferencia")).isEqualByComparingTo("1000.00");
+            assertThat(forma(visto, "PIX", "contabilizadoEsperado")).isEqualByComparingTo("0.00");
+            assertThat(forma(visto, "DINHEIRO", "entradas")).isEqualByComparingTo("1000.00");
         }
 
-        assertThat(fechar(gerente, caixa, "1050.00", null).status).isEqualTo(200);
+        // Cada pagamento mostra o valor: somados, entregariam o esperado.
+        assertThat(enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, gerente).status).isEqualTo(403);
+        assertThat(enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, financeiro).status).isEqualTo(200);
+
+        assertThat(fecharFormas(gerente, caixa, Map.of("DINHEIRO", "1050.00", "PIX", "1000.00"), null, null).status).isEqualTo(200);
         JsonNode fechado = enviar(get("/financeiro/caixa/{id}", caixa), null, gerente).corpo;
-        assertThat(forma(fechado, "DINHEIRO", "contabilizadoEsperado")).as("depois de fechado").isEqualByComparingTo("1050.00");
-    }
-
-    @Test
-    @DisplayName("Prévia do fechamento: devolve esperado e diferença para o valor contado, sem gravar; só para quem fecha")
-    void previaDoFechamento() throws Exception {
-        long caixa = abrirEObterId(gerente, "CAIXA 1", "50.00", null);
-
-        Resposta r = enviar(post("/financeiro/caixa/{id}/previa-fechamento", caixa), Map.of("valorContado", 45), gerente);
-        assertThat(r.status).isEqualTo(200);
-        assertThat(r.corpo.get("contabilizadoEsperado").decimalValue()).isEqualByComparingTo("50.00");
-        assertThat(r.corpo.get("diferenca").decimalValue()).isEqualByComparingTo("-5.00");
-        assertThat(jdbc.queryForObject("select status from tb_caixa_sessao where id = ?", String.class, caixa)).isEqualTo("ABERTO");
-
-        assertThat(enviar(post("/financeiro/caixa/{id}/previa-fechamento", caixa), Map.of("valorContado", -1), gerente).status).isEqualTo(422);
-        assertThat(enviar(post("/financeiro/caixa/{id}/previa-fechamento", caixa), Map.of(), gerente).status).isEqualTo(400);
-        assertThat(enviar(post("/financeiro/caixa/{id}/previa-fechamento", caixa), Map.of("valorContado", 50), financeiro).status).as("financeiro não fecha").isEqualTo(403);
-        assertThat(enviar(post("/financeiro/caixa/{id}/previa-fechamento", caixa), Map.of("valorContado", 50), gerenteOutraFilial).status).isEqualTo(403);
+        assertThat(forma(fechado, "DINHEIRO", "esperadoConferencia")).as("depois de fechado").isEqualByComparingTo("1050.00");
+        assertThat(enviar(get("/financeiro/caixa/{id}/movimento-detalhado", caixa), null, gerente).status).isEqualTo(200);
     }
 
     // ------------------------------------------------------------------ conferir e reabrir
@@ -636,6 +752,22 @@ class CaixaIntegracaoTest {
             if (forma.equals(f.get("forma").asText())) return f.get(campo).decimalValue();
         }
         throw new AssertionError("Forma " + forma + " não encontrada no caixa");
+    }
+
+    /** Fecha informando o valor de cada forma, mais observação e justificativa opcionais. */
+    private Resposta fecharFormas(Usuario quem, long caixa, Map<String, String> valores, String observacao, String justificativa)
+            throws Exception {
+        List<Map<String, Object>> formas = valores.entrySet().stream()
+                .map(e -> Map.<String, Object>of("forma", e.getKey(), "valorConferido", new BigDecimal(e.getValue()))).toList();
+        Map<String, Object> corpo = new HashMap<>();
+        corpo.put("formas", formas);
+        if (observacao != null) corpo.put("observacao", observacao);
+        if (justificativa != null) corpo.put("justificativa", justificativa);
+        return enviar(post("/financeiro/caixa/{id}/fechar", caixa), corpo, quem);
+    }
+
+    private long tentativas(long caixa) {
+        return jdbc.queryForObject("select count(*) from tb_caixa_tentativa_fechamento where caixa_sessao_id = ?", Long.class, caixa);
     }
 
     private static JsonNode formaNo(JsonNode caixa, String forma) {

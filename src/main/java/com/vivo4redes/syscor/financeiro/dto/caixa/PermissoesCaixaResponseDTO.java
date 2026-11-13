@@ -7,9 +7,13 @@ package com.vivo4redes.syscor.financeiro.dto.caixa;
 public record PermissoesCaixaResponseDTO(
         /** Pode conferir e reabrir caixas (auditoria, financeiro e admin). */
         boolean conferirReabrir,
-        /** Vê e age em todas as filiais (admin, auditoria e financeiro); o gerente fica só na própria. */
+        /** Vê e age em todas as filiais (admin, auditoria, financeiro e gerente de área); o gerente da loja fica só na própria. */
         boolean todasAsFiliais,
         /** Filial do cadastro do usuário, quando casa com exatamente uma filial (para o aviso "caixa de hoje não aberto"). */
-        Long filialId
+        Long filialId,
+        /** Recebe o esperado das formas do caixa aberto (o gerente da loja não: fechamento cego). */
+        boolean veEsperadoDoAberto,
+        /** Pode fechar o caixa com diferença, informando justificativa (o gerente da loja nunca). */
+        boolean fecharComDivergencia
 ) {
 }

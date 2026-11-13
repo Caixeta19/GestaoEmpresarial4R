@@ -94,6 +94,8 @@ syscor:
     cargos-auditoria: ${SYSCOR_CAIXA_CARGOS_AUDITORIA:}
     # Financeiro: confere e reabre.
     cargos-financeiro: ${SYSCOR_CAIXA_CARGOS_FINANCEIRO:}
+    # Gerentes de área: veem todas as filiais, recebem o esperado do caixa aberto e fecham com divergência (não abrem nem conferem).
+    cargos-area: ${SYSCOR_CAIXA_CARGOS_AREA:}
     # Logins com todos os poderes sobre o caixa (em produção, por variável de ambiente).
     admins: ${SYSCOR_CAIXA_ADMINS:}
     # true: caixa de dia anterior ainda aberto impede vender hoje; false: só avisa.

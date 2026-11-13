@@ -34,6 +34,7 @@ class CaixaPerfilServiceTest {
         props.setCargosGerente(List.of("GERENTE DE VENDAS - JUNIOR", "GERENTE DE VENDAS - PLENO", "GERENTE DE VENDAS - SENIOR"));
         props.setCargosAuditoria(List.of("AUDITORIA DE CAIXA"));
         props.setCargosFinanceiro(List.of("FINANCEIRO"));
+        props.setCargosArea(List.of("GERENTE DE ÁREA DE VENDAS"));
         props.setAdmins(List.of("guilherme.caixeta"));
         perfil = new CaixaPerfilService(props, filialRepository);
         lenient().when(filialRepository.listarIdsPorNome("mg - salinas")).thenReturn(List.of(1L));
@@ -70,6 +71,36 @@ class CaixaPerfilServiceTest {
         assertThat(perfil.podeAbrirFechar(f, salinas)).isFalse();
         assertThat(perfil.podeConferirReabrir(f)).isTrue();
         assertThat(perfil.podeConsultar(f, outra)).isTrue();
+    }
+
+    @Test
+    @DisplayName("Gerente de área vê todas as filiais, recebe o esperado do caixa aberto, fecha e fecha com divergência; não abre, não confere nem reabre")
+    void gerenteDeArea() {
+        Usuario ga = usuario("ga1", "GERENTE DE AREA DE VENDAS", "ADM 4 REDES");
+
+        assertThat(perfil.veTodasAsFiliais(ga)).isTrue();
+        assertThat(perfil.podeConsultar(ga, outra)).isTrue();
+        assertThat(perfil.podeFechar(ga, salinas)).isTrue();
+        assertThat(perfil.podeFecharComDivergencia(ga)).isTrue();
+        assertThat(perfil.veEsperadoDoAberto(ga)).isTrue();
+        assertThat(perfil.podeAbrirFechar(ga, salinas)).as("abrir não").isFalse();
+        assertThat(perfil.podeConferirReabrir(ga)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Fechar: o gerente da loja só na própria filial e nunca com divergência nem vendo o esperado; financeiro fecha mas não abre")
+    void quemFecha() {
+        Usuario g = usuario("g1", "GERENTE DE VENDAS - PLENO", "mg - salinas");
+        Usuario fin = usuario("f1", "FINANCEIRO", "Matriz");
+
+        assertThat(perfil.podeFechar(g, salinas)).isTrue();
+        assertThat(perfil.podeFechar(g, outra)).isFalse();
+        assertThat(perfil.podeFecharComDivergencia(g)).isFalse();
+        assertThat(perfil.veEsperadoDoAberto(g)).isFalse();
+        assertThat(perfil.podeFechar(fin, outra)).isTrue();
+        assertThat(perfil.podeAbrirFechar(fin, outra)).isFalse();
+        assertThat(perfil.podeFecharComDivergencia(fin)).isTrue();
+        assertThat(perfil.veEsperadoDoAberto(fin)).isTrue();
     }
 
     @Test

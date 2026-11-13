@@ -18,9 +18,12 @@ import java.util.stream.Collectors;
  * Matriz de perfis do caixa, num lugar só (quando o cadastro ganhar a coluna padronizada de cargo/setor, só este
  * serviço muda):
  * <ul>
- *   <li>abrir e fechar: gerente de vendas da própria filial, auditoria de caixa (qualquer filial) e admin;</li>
+ *   <li>abrir: gerente de vendas da própria filial, auditoria de caixa (qualquer filial) e admin;</li>
+ *   <li>fechar: quem abre, mais financeiro e gerente de área (qualquer filial);</li>
+ *   <li>fechar com diferença (com justificativa): financeiro, gerente de área, auditoria e admin; o gerente da loja nunca;</li>
+ *   <li>ver o esperado do caixa aberto: financeiro, gerente de área, auditoria e admin (o gerente da loja não: fechamento cego);</li>
  *   <li>conferir e reabrir: auditoria de caixa, financeiro e admin;</li>
- *   <li>consultar: quem abre/fecha ou confere, cada gerente só na própria filial.</li>
+ *   <li>consultar: quem vê todas as filiais, e cada gerente da loja só na própria.</li>
  * </ul>
  */
 @Service
@@ -52,14 +55,33 @@ public class CaixaPerfilService {
         return cargoEm(u, props.getCargosGerente());
     }
 
-    /** Vê e age em todas as filiais: admin, auditoria e financeiro (o financeiro só consulta, confere e reabre). */
+    public boolean ehGerenteArea(Usuario u) {
+        return cargoEm(u, props.getCargosArea());
+    }
+
+    /** Vê e age em todas as filiais: admin, auditoria, financeiro e gerente de área. */
     public boolean veTodasAsFiliais(Usuario u) {
-        return ehAdmin(u) || ehAuditoria(u) || ehFinanceiro(u);
+        return ehAdmin(u) || ehAuditoria(u) || ehFinanceiro(u) || ehGerenteArea(u);
     }
 
     // ------------------------------------------------------------------ regras
     public boolean podeAbrirFechar(Usuario u, Filial filial) {
         return ehAdmin(u) || ehAuditoria(u) || (ehGerente(u) && daFilial(u, filial));
+    }
+
+    /** Fecha o caixa: quem abre, mais financeiro e gerente de área (em qualquer filial). */
+    public boolean podeFechar(Usuario u, Filial filial) {
+        return podeAbrirFechar(u, filial) || ehFinanceiro(u) || ehGerenteArea(u);
+    }
+
+    /** Fecha com diferença informando justificativa. O gerente da loja nunca. */
+    public boolean podeFecharComDivergencia(Usuario u) {
+        return ehAdmin(u) || ehAuditoria(u) || ehFinanceiro(u) || ehGerenteArea(u);
+    }
+
+    /** Recebe o esperado das formas do caixa aberto (o gerente da loja não: fechamento cego). */
+    public boolean veEsperadoDoAberto(Usuario u) {
+        return ehAdmin(u) || ehAuditoria(u) || ehFinanceiro(u) || ehGerenteArea(u);
     }
 
     public boolean podeConferirReabrir(Usuario u) {
@@ -75,6 +97,14 @@ public class CaixaPerfilService {
             throw CaixaException.semPermissao(ehGerente(u)
                     ? "O gerente só abre e fecha o caixa da própria filial."
                     : "Seu perfil não pode abrir nem fechar o caixa.");
+        }
+    }
+
+    public void exigirFechar(Usuario u, Filial filial) {
+        if (!podeFechar(u, filial)) {
+            throw CaixaException.semPermissao(ehGerente(u)
+                    ? "O gerente só fecha o caixa da própria filial."
+                    : "Seu perfil não pode fechar o caixa.");
         }
     }
 

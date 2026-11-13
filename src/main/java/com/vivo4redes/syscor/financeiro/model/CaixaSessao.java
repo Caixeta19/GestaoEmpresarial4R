@@ -82,6 +82,14 @@ public class CaixaSessao {
     @Column(name = "justificativa_abertura", length = 300)
     private String justificativaAbertura;
 
+    /** Fechado com diferença por quem pode (financeiro, gerente de área, auditoria, admin); o gerente da loja nunca. */
+    @Column(name = "fechado_com_divergencia", nullable = false)
+    @Builder.Default
+    private boolean fechadoComDivergencia = false;
+
+    @Column(name = "justificativa_divergencia", length = 300)
+    private String justificativaDivergencia;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reaberto_por_id")
     private Usuario reabertoPor;

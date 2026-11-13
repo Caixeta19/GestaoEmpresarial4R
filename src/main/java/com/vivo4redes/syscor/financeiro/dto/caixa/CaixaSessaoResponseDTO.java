@@ -27,14 +27,21 @@ public record CaixaSessaoResponseDTO(
         String observacao,
         String justificativaAbertura,
         String justificativaReabertura,
+        /** Fechado com diferença, por quem pode (a lista mostra a diferença em vermelho). */
+        boolean fechadoComDivergencia,
+        String justificativaDivergencia,
+        /** Fechamentos que ainda podem ser recusados hoje para o gerente da loja (5 por caixa por dia); só no caixa aberto. */
+        Integer tentativasRestantes,
         /** Soma da abertura de todas as formas. */
         BigDecimal totalAbertura,
-        /** Soma do valor conferido (contabilizado) de todas as formas; null com o caixa aberto. */
+        /** O que fica no caixa depois de fechado: o dinheiro contado (as formas que liquidam contam 0); null com o caixa aberto. */
         BigDecimal totalContabilizado,
-        /** Soma das diferenças; null com o caixa aberto. */
+        /** Soma das diferenças de todas as formas; null com o caixa aberto. */
         BigDecimal totalDiferenca,
         List<FormaPagamentoCaixaResponseDTO> formas,
         /** Só no detalhe (GET /{id}); nas listas vem null. */
-        List<HistoricoCaixaDTO> historico
+        List<HistoricoCaixaDTO> historico,
+        /** Só no detalhe e só para quem confere ou pode fechar com divergência; senão null. */
+        List<TentativaFechamentoDTO> tentativasFechamento
 ) {
 }

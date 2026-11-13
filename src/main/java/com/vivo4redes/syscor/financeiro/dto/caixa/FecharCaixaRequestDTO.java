@@ -5,11 +5,16 @@ import jakarta.validation.Valid;
 import java.util.List;
 
 /**
- * Só o dinheiro é contado e é obrigatório: sem ele (ou com a lista vazia) o fechamento é recusado com 422, e nenhuma
- * regra assume o esperado como valor contado. {@code observacao} é obrigatória (mín. 10 caracteres) quando alguma forma fecha com diferença. */
+ * Valor digitado de cada forma exigida (o dinheiro sempre; as demais, se tiverem abertura ou movimento). Sem ele (ou com
+ * a lista vazia, ou sem a lista) o fechamento é recusado com 422, e nenhuma regra assume o esperado como valor contado.
+ * O caixa só fecha com diferença zero; {@code justificativa} (mín. 10 caracteres) só vale para quem pode fechar com
+ * divergência. {@code observacao} é livre e opcional.
+ */
 public record FecharCaixaRequestDTO(
         List<@Valid ConferenciaFormaDTO> formas,
 
-        String observacao
+        String observacao,
+
+        String justificativa
 ) {
 }
