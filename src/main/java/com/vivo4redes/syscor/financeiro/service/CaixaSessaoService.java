@@ -1,6 +1,7 @@
 package com.vivo4redes.syscor.financeiro.service;
 
 import com.vivo4redes.syscor.exception.CaixaException;
+import com.vivo4redes.syscor.exception.DiferencaCaixaException;
 import com.vivo4redes.syscor.exception.NegocioException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
 import com.vivo4redes.syscor.financeiro.dto.caixa.*;
@@ -138,7 +139,7 @@ public class CaixaSessaoService {
                         .build())
                 .toList());
         registrar(salva, AcaoCaixa.ABRIU, usuario, justificativa != null ? justificativa : "Abertura do caixa");
-        return montarResponse(salva, false);
+        return montarResponse(salva, false, usuario);
     }
 
     /** Abertura sugerida: o contabilizado em dinheiro do último caixa fechado desse caixa da filial. */
@@ -208,8 +209,9 @@ public class CaixaSessaoService {
     @Transactional(readOnly = true)
     public CaixaSessaoResponseDTO buscarPorId(Long id) {
         CaixaSessao sessao = buscarEntidade(id);
-        perfil.exigirConsultar(usuarioService.usuarioLogado(), sessao.getFilial());
-        return montarResponse(sessao, true);
+        Usuario usuario = usuarioService.usuarioLogado();
+        perfil.exigirConsultar(usuario, sessao.getFilial());
+        return montarResponse(sessao, true, usuario);
     }
 
     /** Uma linha por pagamento lançado neste caixa, em qualquer status de venda. */
@@ -232,7 +234,7 @@ public class CaixaSessaoService {
         exigirSemCarrinhoAberto(sessao);
 
         Map<FormaPagamento, BigDecimal> conferidoPorForma = new EnumMap<>(FormaPagamento.class);
-        for (ConferenciaFormaDTO c : dto.formas()) {
+        for (ConferenciaFormaDTO c : dto.formas() == null ? List.<ConferenciaFormaDTO>of() : dto.formas()) {
             if (c.valorConferido().signum() < 0) {
                 throw new NegocioException("O valor conferido de " + c.forma() + " não pode ser negativo.");
             }
@@ -267,8 +269,10 @@ public class CaixaSessaoService {
         }
 
         String observacao = textoOuNull(dto.observacao());
-        if (haDiferenca) {
-            exigirJustificativa(observacao, "O caixa fecha com diferença: informe a observação (mín. "
+        if (haDiferenca && (observacao == null || observacao.length() < MINIMO_JUSTIFICATIVA)) {
+            BigDecimal diferencaDinheiro = formas.stream().filter(f -> f.getForma() == FormaPagamento.DINHEIRO)
+                    .map(FormaPagamentoCaixa::getDiferenca).filter(Objects::nonNull).findFirst().orElse(BigDecimal.ZERO);
+            throw new DiferencaCaixaException(diferencaDinheiro, "O caixa fecha com diferença: informe a observação (mín. "
                     + MINIMO_JUSTIFICATIVA + " caracteres).");
         }
         formaPagamentoCaixaRepository.saveAll(formas);
@@ -282,7 +286,30 @@ public class CaixaSessaoService {
         sessao.setObservacao(observacao);
         caixaSessaoRepository.save(sessao);
         registrar(sessao, AcaoCaixa.FECHOU, usuario, observacao != null ? observacao : "Fechamento sem diferença");
-        return montarResponse(sessao, false);
+        return montarResponse(sessao, false, usuario);
+    }
+
+    /**
+     * Prévia da diferença do dinheiro para um valor contado informado. O caixa aberto não mostra o esperado ao gerente
+     * (fechamento cego): ele só o conhece depois de contar e informar o valor, sem gravar nada.
+     */
+    @Transactional(readOnly = true)
+    public PreviaFechamentoResponseDTO previaFechamento(Long id, PreviaFechamentoRequestDTO dto) {
+        Usuario usuario = usuarioService.usuarioLogado();
+        CaixaSessao sessao = buscarEntidade(id);
+        perfil.exigirAbrirFechar(usuario, sessao.getFilial());
+        if (sessao.getStatus() == StatusCaixaSessao.FECHADO) {
+            throw new NegocioException("Esse caixa já está fechado.");
+        }
+        if (dto.valorContado().signum() < 0) {
+            throw new NegocioException("O valor contado não pode ser negativo.");
+        }
+        FormaPagamentoCaixa dinheiro = formaPagamentoCaixaRepository.findByCaixaSessaoId(id).stream()
+                .filter(f -> f.getForma() == FormaPagamento.DINHEIRO).findFirst()
+                .orElseThrow(() -> new NegocioException("Esse caixa não tem linha de dinheiro."));
+        BigDecimal esperado = esperado(dinheiro, entradasPorForma(id).getOrDefault(FormaPagamento.DINHEIRO, BigDecimal.ZERO));
+        BigDecimal contado = dto.valorContado().setScale(2, RoundingMode.HALF_UP);
+        return new PreviaFechamentoResponseDTO(contado, esperado, contado.subtract(esperado).setScale(2, RoundingMode.HALF_UP));
     }
 
     // ------------------------------------------------------------------ conferir e reabrir
@@ -308,7 +335,7 @@ public class CaixaSessaoService {
         sessao.setConferidoEm(Instant.now());
         caixaSessaoRepository.save(sessao);
         registrar(sessao, AcaoCaixa.CONFEROU, usuario, "Caixa conferido");
-        return montarResponse(sessao, false);
+        return montarResponse(sessao, false, usuario);
     }
 
     @Transactional
@@ -341,7 +368,7 @@ public class CaixaSessaoService {
         sessao.setJustificativaReabertura(justificativa);
         caixaSessaoRepository.save(sessao);
         registrar(sessao, AcaoCaixa.REABRIU, usuario, justificativa);
-        return montarResponse(sessao, false);
+        return montarResponse(sessao, false, usuario);
     }
 
     // ------------------------------------------------------------------ apoio
@@ -384,7 +411,7 @@ public class CaixaSessaoService {
 
         Page<CaixaSessao> resultado = caixaSessaoRepository.findAll(spec, PageRequest.of(pagina, tamanho, ordem));
         return new PaginaCaixaResponseDTO(
-                resultado.getContent().stream().map(s -> montarResponse(s, false)).toList(),
+                resultado.getContent().stream().map(s -> montarResponse(s, false, usuario)).toList(),
                 resultado.getNumber(), resultado.getSize(), resultado.getTotalElements(), resultado.getTotalPages());
     }
 
@@ -458,7 +485,17 @@ public class CaixaSessaoService {
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
-    private CaixaSessaoResponseDTO montarResponse(CaixaSessao sessao, boolean comHistorico) {
+    /**
+     * Fechamento cego: com o caixa aberto, só quem confere (auditoria, financeiro e admin) recebe o esperado do dinheiro.
+     * O gerente não recebe esperado, entradas, saídas nem movimento do dinheiro (somados dariam o esperado); a abertura
+     * ele mesmo informou. Depois do fechamento todos veem.
+     */
+    private boolean veEsperadoDoDinheiro(CaixaSessao sessao, Usuario leitor) {
+        return sessao.getStatus() == StatusCaixaSessao.FECHADO || perfil.podeConferirReabrir(leitor);
+    }
+
+    private CaixaSessaoResponseDTO montarResponse(CaixaSessao sessao, boolean comHistorico, Usuario leitor) {
+        boolean veEsperado = veEsperadoDoDinheiro(sessao, leitor);
         List<FormaPagamentoCaixa> formas = formaPagamentoCaixaRepository.findByCaixaSessaoId(sessao.getId());
         Map<FormaPagamento, BigDecimal> entradasPorForma = entradasPorForma(sessao.getId());
 
@@ -466,6 +503,11 @@ public class CaixaSessaoService {
                 .sorted(Comparator.comparingInt(f -> FORMAS_DO_CAIXA.indexOf(f.getForma())))
                 .map(f -> {
                     BigDecimal entradas = entradasPorForma.getOrDefault(f.getForma(), BigDecimal.ZERO);
+                    if (f.getForma() == FormaPagamento.DINHEIRO && !veEsperado) {
+                        return new FormaPagamentoCaixaResponseDTO(
+                                f.getId(), f.getForma(), safe(f.getAbertura()), null, null, null, null,
+                                f.getValorConferido(), f.getDiferenca(), false);
+                    }
                     return new FormaPagamentoCaixaResponseDTO(
                             f.getId(), f.getForma(), safe(f.getAbertura()), safe(f.getMovimento()), entradas,
                             saidasEfetivas(f, entradas), esperado(f, entradas), f.getValorConferido(), f.getDiferenca(),

@@ -42,6 +42,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.getStatus()).body(corpo);
     }
 
+    // 422: o caixa fecha com diferença e falta a observação; a diferença vai no corpo
+    @ExceptionHandler(DiferencaCaixaException.class)
+    public ResponseEntity<Map<String, Object>> handleDiferencaCaixa(DiferencaCaixaException ex) {
+        Map<String, Object> corpo = corpo(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        corpo.put("codigo", "CAIXA_DIFERENCA_SEM_OBSERVACAO");
+        corpo.put("diferenca", ex.getDiferenca());
+        return ResponseEntity.unprocessableEntity().body(corpo);
+    }
+
     // 422: troca de condição com pagamentos incompatíveis; o corpo lista quais remover
     @ExceptionHandler(PagamentosIncompativeisException.class)
     public ResponseEntity<Map<String, Object>> handlePagamentosIncompativeis(PagamentosIncompativeisException ex) {

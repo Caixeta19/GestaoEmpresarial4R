@@ -8,6 +8,7 @@ public record FormaPagamentoCaixaResponseDTO(
         Long id,
         FormaPagamento forma,
         BigDecimal abertura,
+        /** Dinheiro de caixa aberto lido por quem não confere: null (fechamento cego). */
         BigDecimal movimento,
         /** Soma dos pagamentos das vendas CONCLUIDAS lançadas neste caixa (cancelada não entra). */
         BigDecimal entradas,
