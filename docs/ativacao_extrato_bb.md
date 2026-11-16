@@ -46,6 +46,8 @@ O `.env` está no `.gitignore`. Guarde o `.p12` fora da pasta do projeto, com pe
    - [ ] **5 a 10 débitos reais** mostrando como aparecem **boleto, Pix e TED**: `codigoHistorico`, `textoDescricaoSubHistorico`,
          `textoInformacaoComplementar`, se a contrapartida (CPF/CNPJ) vem preenchida e se `textoIdentificadorUnicoTransacao` vem preenchido;
    - [ ] se o **lançamento do dia** aparece como `1` (contabilizado) ou `3` (em processamento) e **com que atraso**.
+   Para mascarar a resposta bruta do extrato antes de compartilhar: `node scripts/mascarar-extrato-bb.mjs resposta.json > mascarado.json`
+   (lista de permissão: só códigos, tipo, sinal e datas ficam em claro; confira a saída antes de colar).
 4. Com isso, preencha `SYSCOR_CONCILIACAO_CODIGOS_HISTORICO` (os `codigoHistorico` que significam pagamento) e ajuste os reforços.
    Enquanto essa lista estiver vazia, o reforço fraco nunca dispara: a baixa automática só acontece com CPF/CNPJ ou nome do
    fornecedor batendo; o resto vira `AMBIGUO` para confirmar com 1 clique (comportamento seguro).
