@@ -353,7 +353,11 @@ class BancoDoBrasilExtratoClientTest {
             // só interessa o que foi para o log
         }
 
-        List<String> mensagens = logs.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+        // Só o que o código do SYSCOR registra: o servidor HTTP falso do JDK também loga a URL que recebe (quando outro
+        // teste instala a ponte JUL-SLF4J), mas isso é o lado do "banco", não do nosso cliente.
+        List<String> mensagens = logs.list.stream()
+                .filter(e -> e.getLoggerName().startsWith("com.vivo4redes.syscor"))
+                .map(ILoggingEvent::getFormattedMessage).toList();
         assertThat(mensagens).isNotEmpty();
         assertThat(String.join("\n", mensagens)).doesNotContain(CHAVE).doesNotContain("token-1")
                 .doesNotContain(CLIENT_SECRET).doesNotContain("gw-dev-app-key").doesNotContain("001213")
