@@ -3,12 +3,15 @@ package com.vivo4redes.syscor.financeiro.service;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import com.vivo4redes.syscor.exception.FinanceiroException;
 import com.vivo4redes.syscor.exception.RecursoNaoEncontradoException;
+import com.vivo4redes.syscor.financeiro.config.BbExtratoProperties;
 import com.vivo4redes.syscor.financeiro.enums.AcaoTitulo;
 import com.vivo4redes.syscor.financeiro.enums.OrigemBaixa;
 import com.vivo4redes.syscor.financeiro.enums.StatusTitulo;
 import com.vivo4redes.syscor.financeiro.enums.TipoTitulo;
+import com.vivo4redes.syscor.financeiro.model.ExtratoLancamento;
 import com.vivo4redes.syscor.financeiro.model.TituloFinanceiro;
 import com.vivo4redes.syscor.financeiro.model.TituloHistorico;
+import com.vivo4redes.syscor.financeiro.repository.ExtratoLancamentoRepository;
 import com.vivo4redes.syscor.financeiro.repository.TituloFinanceiroRepository;
 import com.vivo4redes.syscor.financeiro.repository.TituloHistoricoRepository;
 import com.vivo4redes.syscor.venda.model.Usuario;
@@ -35,6 +38,8 @@ public class ComprovanteContaPagarService {
 
     private final TituloFinanceiroRepository titulos;
     private final TituloHistoricoRepository historicos;
+    private final ExtratoLancamentoRepository lancamentos;
+    private final BbExtratoProperties bbProps;
     private final FinanceiroPerfilService perfil;
     private final UsuarioService usuarioService;
 
@@ -76,14 +81,24 @@ public class ComprovanteContaPagarService {
                 ? conta.getPagoEm().atZoneSameInstant(ContaPagarService.FUSO).toLocalDate()
                 : conta.getDataBaixa();
 
+        ExtratoLancamento lancamento = conta.getExtratoLancamentoId() == null ? null
+                : lancamentos.findById(conta.getExtratoLancamentoId()).orElse(null);
+        if (lancamento != null) dataPagamento = lancamento.getDataLancamento();
+
+        String justificativa = conta.getJustificativaBaixa() == null ? "" : conta.getJustificativaBaixa();
         String origem;
         if (manual) {
             String quem = baixadoPor == null ? "usuário não identificado" : baixadoPor;
             String quando = dataPagamento == null ? "" : " em " + dataPagamento.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
-            origem = "Baixa manual por " + quem + quando + ": " + (conta.getJustificativaBaixa() == null ? "" : conta.getJustificativaBaixa());
+            origem = "Baixa manual por " + quem + quando + ": " + justificativa;
+        } else if (conta.getBaixadoPor() != null) {   // vínculo confirmado por uma pessoa
+            origem = "Conciliação com extrato do Banco do Brasil confirmada por " + conta.getBaixadoPor().getNome()
+                    + (justificativa.isEmpty() ? "" : ": " + justificativa);
         } else {
             origem = "Conciliação automática com extrato do Banco do Brasil";
         }
+        String historicoLancamento = lancamento == null || lancamento.historicoTexto().isEmpty() ? null
+                : lancamento.historicoTexto();
 
         return new ComprovanteContaPagarHtml.Dados(
                 conta.getId(),
@@ -96,9 +111,9 @@ public class ComprovanteContaPagarService {
                 conta.getValorPago() != null ? conta.getValorPago() : conta.getValor(),
                 dataPagamento != null ? dataPagamento : LocalDate.now(ContaPagarService.FUSO),
                 conta.getBancoPagador(),
-                null,   // conta mascarada, histórico e identificador do lançamento: vêm do extrato (Fase D)
-                null,
-                conta.getIdentificadorPagamento(),
+                lancamento == null ? null : ComprovanteContaPagarHtml.mascarar(bbProps.getConta()),
+                historicoLancamento,
+                lancamento != null ? lancamento.getIdExterno() : conta.getIdentificadorPagamento(),
                 origem,
                 baixadoPor,
                 baixadoEm);

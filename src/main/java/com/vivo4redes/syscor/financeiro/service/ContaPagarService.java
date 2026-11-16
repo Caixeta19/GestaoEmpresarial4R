@@ -52,6 +52,8 @@ public class ContaPagarService {
     private final FilialRepository filialRepository;
     private final FinanceiroPerfilService perfil;
     private final UsuarioService usuarioService;
+    private final ConciliacaoExtratoService conciliacaoExtrato;
+    private final CanalBancarioService canalBancario;
 
     // ------------------------------------------------------------------ cadastro e edição
     @Transactional
@@ -136,9 +138,14 @@ public class ContaPagarService {
         if (conta.getStatus() != StatusTitulo.BAIXADO) {
             throw FinanceiroException.statusInvalido("Só conta baixada pode ser reaberta.");
         }
+        String justificativa = dto.justificativa().trim();
+        Long lancamentoId = conta.getExtratoLancamentoId();
         conta.reabrir();
         titulos.save(conta);
-        registrar(conta, AcaoTitulo.REABRIU, usuario, dto.justificativa().trim());
+        if (lancamentoId != null) {
+            conciliacaoExtrato.desfazerVinculo(lancamentoId, conta.getId(), justificativa);
+        }
+        registrar(conta, AcaoTitulo.REABRIU, usuario, justificativa);
         return TituloPagarDTO.de(conta);
     }
 
@@ -199,9 +206,9 @@ public class ContaPagarService {
                 case CANCELADO -> { /* sai de todos os totais */ }
             }
         }
-        // Canal bancário: a leitura do extrato chega na Fase D; até lá o canal está desligado.
+        CanalBancarioService.Canal canal = canalBancario.situacao();
         return new ResumoContasPagarDTO(totalEmAberto, quantidadeEmAberto, conciliadas, divergencias, vencidas,
-                "DESLIGADO", null);
+                canal.situacao(), canal.ultimaSincronizacao());
     }
 
     @Transactional(readOnly = true)
