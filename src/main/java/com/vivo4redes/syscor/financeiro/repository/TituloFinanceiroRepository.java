@@ -53,6 +53,33 @@ public interface TituloFinanceiroRepository extends JpaRepository<TituloFinancei
     @Query("select t from TituloFinanceiro t where t.id = :id and t.tipo = :tipo")
     Optional<TituloFinanceiro> buscarComTrava(@Param("id") Long id, @Param("tipo") TipoTitulo tipo);
 
+    /**
+     * Candidatas à conciliação com o extrato: PAGAR em ABERTO, de valor igual e vencimento na janela, travadas
+     * (SELECT ... FOR UPDATE) para duas rodadas não baixarem a mesma conta.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TituloFinanceiro t where t.tipo = :tipo and t.status = :status and t.valor = :valor "
+            + "and t.vencimento between :de and :ate order by t.vencimento, t.id")
+    List<TituloFinanceiro> candidatasPorValor(@Param("tipo") TipoTitulo tipo, @Param("status") StatusTitulo status,
+                                              @Param("valor") BigDecimal valor, @Param("de") LocalDate de,
+                                              @Param("ate") LocalDate ate);
+
+    /** Mesma busca de {@link #candidatasPorValor}, sem trava: só para mostrar as sugestões na tela. */
+    @Query("select t from TituloFinanceiro t where t.tipo = :tipo and t.status = :status and t.valor = :valor "
+            + "and t.vencimento between :de and :ate order by t.vencimento, t.id")
+    List<TituloFinanceiro> sugestoesPorValor(@Param("tipo") TipoTitulo tipo, @Param("status") StatusTitulo status,
+                                             @Param("valor") BigDecimal valor, @Param("de") LocalDate de,
+                                             @Param("ate") LocalDate ate);
+
+    /** Contas em ABERTO do fornecedor (CPF/CNPJ) na janela, de qualquer valor: detecta pagamento com valor diferente. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TituloFinanceiro t where t.tipo = :tipo and t.status = :status "
+            + "and t.documentoFornecedor = :documento and t.vencimento between :de and :ate "
+            + "order by t.vencimento, t.id")
+    List<TituloFinanceiro> candidatasPorDocumento(@Param("tipo") TipoTitulo tipo, @Param("status") StatusTitulo status,
+                                                  @Param("documento") String documento, @Param("de") LocalDate de,
+                                                  @Param("ate") LocalDate ate);
+
     @Query("select t from TituloFinanceiro t where t.id = :id and t.tipo = :tipo")
     Optional<TituloFinanceiro> buscarPorIdETipo(@Param("id") Long id, @Param("tipo") TipoTitulo tipo);
 }

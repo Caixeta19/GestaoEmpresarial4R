@@ -173,6 +173,23 @@ public class TituloFinanceiro {
         this.justificativaBaixa = justificativa;
     }
 
+    /**
+     * Baixa pelo lançamento do extrato do banco. {@code quem} é nulo na baixa automática e a pessoa que confirmou na
+     * baixa por vínculo manual (com a justificativa, quando o valor do banco difere do valor da conta).
+     */
+    public void baixarPorExtrato(BigDecimal valorPago, OffsetDateTime quando, String banco, Long lancamentoId,
+                                 Usuario quem, String justificativa) {
+        this.status = StatusTitulo.BAIXADO;
+        this.valorPago = valorPago;
+        this.pagoEm = quando;
+        this.dataBaixa = quando.toLocalDate();
+        this.bancoPagador = banco;
+        this.origemBaixa = OrigemBaixa.CONCILIACAO_BB;
+        this.extratoLancamentoId = lancamentoId;
+        this.baixadoPor = quem;
+        this.justificativaBaixa = justificativa;
+    }
+
     public void cancelar(Usuario quem, String motivo) {
         this.status = StatusTitulo.CANCELADO;
         this.canceladoEm = OffsetDateTime.now();
