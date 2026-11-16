@@ -100,3 +100,33 @@ syscor:
     admins: ${SYSCOR_CAIXA_ADMINS:}
     # true: caixa de dia anterior ainda aberto impede vender hoje; false: só avisa.
     bloquear-com-caixa-anterior-aberto: ${SYSCOR_CAIXA_BLOQUEAR_ANTERIOR_ABERTO:false}
+  financeiro:
+    # Extrato do Banco do Brasil (API Extratos v2, somente leitura) para baixar contas a pagar (docs/contas_pagar.md).
+    # DESLIGADO por padrão. Segredos só por variável de ambiente (BB_EXTRATO_*); nunca no repositório.
+    bb-extrato:
+      enabled: ${BB_EXTRATO_ENABLED:false}
+      # REAL = banco (mTLS + OAuth2); FAKE = JSON sintético no classpath (dev e testes).
+      modo: ${BB_EXTRATO_MODO:REAL}
+      # Homologação por padrão. Produção: https://extratos.mtls.api.bb.com.br/v2 e https://oauth.bb.com.br/oauth/token
+      base-url: ${BB_EXTRATO_BASE_URL:https://extratos.mtls.api.hm.bb.com.br/v2}
+      token-url: ${BB_EXTRATO_TOKEN_URL:https://oauth.hm.bb.com.br/oauth/token}
+      # Só dígitos, sem dígito verificador e sem zeros à esquerda (agência 0297 = 297; conta 001213 = 1213).
+      agencia: ${BB_EXTRATO_AGENCIA:}
+      conta: ${BB_EXTRATO_CONTA:}
+      sincronizacao-ms: ${BB_EXTRATO_SINCRONIZACAO_MS:900000}
+      janela-dias: ${BB_EXTRATO_JANELA_DIAS:7}
+      janela-matching-dias: ${BB_EXTRATO_JANELA_MATCHING_DIAS:45}
+      client-id: ${BB_EXTRATO_CLIENT_ID:}
+      client-secret: ${BB_EXTRATO_CLIENT_SECRET:}
+      # developer_application_key do Portal Developers BB (vai na query como gw-dev-app-key).
+      app-key: ${BB_EXTRATO_APP_KEY:}
+      # Keystore PKCS12 do certificado A1 (ICP-Brasil).
+      keystore-path: ${BB_EXTRATO_KEYSTORE_PATH:}
+      keystore-password: ${BB_EXTRATO_KEYSTORE_PASSWORD:}
+    conciliacao:
+      # true: conta única sem nenhum reforço vira AMBIGUO (a pessoa confirma com 1 clique).
+      exigir-reforco: ${SYSCOR_CONCILIACAO_EXIGIR_REFORCO:true}
+      # codigoHistorico do BB que indicam pagamento (boleto, convênio, Pix, TED), separados por vírgula.
+      # Preencher só depois de ver o extrato real de homologação.
+      codigos-historico-pagamento: ${SYSCOR_CONCILIACAO_CODIGOS_HISTORICO:}
+      proximidade-vencimento-dias: ${SYSCOR_CONCILIACAO_PROXIMIDADE_DIAS:7}

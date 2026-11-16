@@ -1,10 +1,7 @@
 package com.vivo4redes.syscor.financeiro.controller;
 
-import com.vivo4redes.syscor.financeiro.dto.response.TituloPagarDTO;
 import com.vivo4redes.syscor.financeiro.dto.response.WebhookLogDTO;
 import com.vivo4redes.syscor.financeiro.enums.StatusWebhook;
-import com.vivo4redes.syscor.financeiro.enums.TipoTitulo;
-import com.vivo4redes.syscor.financeiro.repository.TituloFinanceiroRepository;
 import com.vivo4redes.syscor.financeiro.repository.WebhookLogRepository;
 import com.vivo4redes.syscor.financeiro.service.ConciliacaoProcessor;
 import com.vivo4redes.syscor.financeiro.service.ConciliacaoStream;
@@ -22,15 +19,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequiredArgsConstructor
 public class ConciliacaoController {
 
-    private final TituloFinanceiroRepository titulos;
     private final WebhookLogRepository logs;
     private final ConciliacaoProcessor processor;
     private final ConciliacaoStream stream;
-
-    @GetMapping("/contas-pagar")
-    public List<TituloPagarDTO> contasPagar() {
-        return titulos.findByTipo(TipoTitulo.PAGAR).stream().map(TituloPagarDTO::de).toList();
-    }
 
     @GetMapping("/conciliacao/logs")
     public List<WebhookLogDTO> logs(@RequestParam(defaultValue = "50") int tamanho) {

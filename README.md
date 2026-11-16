@@ -361,6 +361,32 @@ CANCELADA → (terminal, sem saída)
   fechamento cego impede ler o esperado pelo caixa, não somar as vendas à mão.
 - Filial com mais de um caixa aberto no dia: o `finalizar` recebe `caixaSessaoId` (sem ele, 422).
 
+### Contas a pagar, extrato do Banco do Brasil e comprovante (V41, V42)
+
+O pagamento acontece **fora do SYSCOR**, no Internet Banking/app do BB. O SYSCOR cadastra a conta (fica `ABERTO`, "Pendente"),
+lê o **extrato pela API Extratos v2 do BB** (somente leitura), **concilia sozinho** e gera o **comprovante em PDF**. Detalhes e
+regras: RN.73 a RN.80 em `docs/ESPECIFICACAO.md`; passo a passo para ligar: `docs/ativacao_extrato_bb.md`.
+
+- **Perfis** (cargos do caixa, `syscor.caixa.*`): cadastrar, editar, cancelar, baixa manual, reabrir, vincular e sincronizar =
+  financeiro e admin; consultar (lista, detalhe, resumo, comprovante) = financeiro, admin, auditoria e gerente de área. Gerente de
+  loja e demais: 403 `FINANCEIRO_SEM_PERMISSAO`.
+- **Ciclo de vida:** `ABERTO` → `BAIXADO` | `DIVERGENTE` | `CANCELADO` (máquina de estados no enum `StatusTitulo`). "Vencida" é
+  derivada, nunca status. Duplicidade: 409 `CONTA_DUPLICADA` (mesmo código de barras) e 409 `CONTA_PROVAVEL_DUPLICADA` (mesmo
+  fornecedor + valor + vencimento, liberável com `confirmarDuplicada`). Cancelar e reabrir exigem motivo de no mínimo 10 caracteres;
+  nada se apaga (`tb_titulo_historico`).
+- **Extrato do BB:** `syscor.financeiro.bb-extrato.*`, **desligado por padrão** (`enabled=false`: o cliente nunca é chamado).
+  mTLS com certificado A1, OAuth2 `client_credentials` (escopo `extrato-info`), `gw-dev-app-key` na query (por isso a URL nunca vai
+  para log nem para mensagem de erro), períodos fatiados em blocos de até 31 dias. Só **débitos contabilizados** entram
+  (`indicadorTipoLancamento = 1` e sinal `D`); saldos, créditos e futuros são ignorados.
+- **Conciliação:** candidatas = contas `ABERTO` de valor igual e vencimento a até 45 dias do lançamento. Uma candidata com reforço
+  (CPF/CNPJ, nome do fornecedor no histórico ou `codigoHistorico` de pagamento perto do vencimento) **baixa sozinha**; sem reforço
+  ou com várias candidatas vira `AMBIGUO` (a pessoa confirma com 1 clique, `vincular`); valor diferente com o CNPJ batendo deixa a
+  conta `DIVERGENTE`; sem candidata fica `SEM_CORRESPONDENCIA` (tarifa, IOF... use `ignorar`). Mais seguro pedir confirmação do que
+  baixar a conta errada. Reabrir uma conta baixada pelo extrato devolve o lançamento à fila e ele não casa de novo sozinho.
+- **Comprovante** (`GET /financeiro/contas-pagar/{id}/comprovante`): PDF gerado na hora (não é gravado), só de conta `BAIXADO`, com
+  código de verificação e o aviso de que **não substitui** o comprovante de autenticação do banco. O extrato não traz hora: o
+  comprovante mostra só a data do pagamento.
+
 ### Mailing (WhatsApp)
 
 - Campanha nasce `RASCUNHO`, muda pra `ENVIANDO` ao disparar, e fecha em `CONCLUIDA` ou
@@ -868,6 +894,18 @@ docker compose -f Docker-compose.yml up --build
 | `SYSCOR_CAIXA_CARGOS_AREA` | Não (padrão vazio) | Cargos de gerente de área: veem todas as filiais, recebem o esperado e fecham com divergência (não abrem, não conferem) |
 | `SYSCOR_CAIXA_ADMINS` | Não (padrão vazio; no perfil `dev`, `GUILHERME.CAIXETA`) | Logins com todos os poderes sobre o caixa |
 | `SYSCOR_CAIXA_BLOQUEAR_ANTERIOR_ABERTO` | Não (padrão `false`) | `true`: caixa de dia anterior ainda aberto impede vender hoje |
+| `BB_EXTRATO_ENABLED` | Não (padrão `false`) | Liga a leitura do extrato do BB (agendada e "Sincronizar agora"). Desligado, nada é chamado |
+| `BB_EXTRATO_MODO` | Não (padrão `REAL`) | `FAKE` lê o JSON sintético do classpath (dev e testes) em vez de falar com o banco |
+| `BB_EXTRATO_BASE_URL` / `BB_EXTRATO_TOKEN_URL` | Não (padrão homologação) | Produção: `https://extratos.mtls.api.bb.com.br/v2` e `https://oauth.bb.com.br/oauth/token` |
+| `BB_EXTRATO_AGENCIA` / `BB_EXTRATO_CONTA` | Sim, para ligar | Só dígitos, sem dígito verificador e sem zeros à esquerda (0297 = 297) |
+| `BB_EXTRATO_CLIENT_ID` / `BB_EXTRATO_CLIENT_SECRET` | Sim, para ligar | Credenciais OAuth2 da aplicação no Portal Developers BB (**segredo**) |
+| `BB_EXTRATO_APP_KEY` | Sim, para ligar | `developer_application_key` (vai em `gw-dev-app-key`; **segredo**) |
+| `BB_EXTRATO_KEYSTORE_PATH` / `BB_EXTRATO_KEYSTORE_PASSWORD` | Sim, para ligar | Keystore PKCS12 do certificado A1 (ICP-Brasil) para o mTLS (**segredo**; nunca no repositório) |
+| `BB_EXTRATO_SINCRONIZACAO_MS` | Não (padrão `900000`) | Intervalo entre rodadas agendadas (15 min) |
+| `BB_EXTRATO_JANELA_DIAS` / `BB_EXTRATO_JANELA_MATCHING_DIAS` | Não (padrão `7` / `45`) | Dias consultados a cada rodada / janela de vencimento das contas candidatas |
+| `SYSCOR_CONCILIACAO_EXIGIR_REFORCO` | Não (padrão `true`) | `false`: conta única sem reforço baixa sozinha por valor + vencimento |
+| `SYSCOR_CONCILIACAO_CODIGOS_HISTORICO` | Não (padrão vazio) | `codigoHistorico` do BB que indicam pagamento, separados por vírgula (preencher após ver o extrato de homologação) |
+| `SYSCOR_CONCILIACAO_PROXIMIDADE_DIAS` | Não (padrão `7`) | Reforço fraco: lançamento a até N dias do vencimento |
 
 Sem as três variáveis do WhatsApp, a aplicação sobe normalmente — o disparo de
 campanha que falha com `NegocioException` no momento do envio, não no boot.

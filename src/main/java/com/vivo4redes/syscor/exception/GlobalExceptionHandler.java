@@ -42,6 +42,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.getStatus()).body(corpo);
     }
 
+    // Contas a pagar: 403 (sem perfil) ou 409 (duplicada, status inválido), sempre com o código para o front
+    @ExceptionHandler(FinanceiroException.class)
+    public ResponseEntity<Map<String, Object>> handleFinanceiro(FinanceiroException ex) {
+        Map<String, Object> corpo = corpo(ex.getStatus(), ex.getMessage());
+        corpo.put("codigo", ex.getCodigo());
+        return ResponseEntity.status(ex.getStatus()).body(corpo);
+    }
+
     // 422: o caixa só fecha com diferença zero; o corpo lista as formas que divergem (com a diferença só para quem pode ver)
     @ExceptionHandler(CaixaComDiferencaException.class)
     public ResponseEntity<Map<String, Object>> handleCaixaComDiferenca(CaixaComDiferencaException ex) {
