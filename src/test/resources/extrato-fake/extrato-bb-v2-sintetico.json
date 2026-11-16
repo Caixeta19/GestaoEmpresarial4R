@@ -1,0 +1,75 @@
+{
+  "numeroPaginaAtual": 1,
+  "quantidadeRegistroPaginaAtual": 6,
+  "numeroPaginaAnterior": 0,
+  "numeroPaginaProximo": 0,
+  "quantidadeTotalPagina": 1,
+  "quantidadeTotalRegistro": 6,
+  "listaLancamento": [
+    {
+      "indicadorTipoLancamento": "SA",
+      "dataLancamento": 0,
+      "valorLancamento": 100000.00,
+      "indicadorSinalLancamento": "C",
+      "textoDescricaoSubHistorico": "SALDO ANTERIOR"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "dataLancamento": 5112026,
+      "dataMovimento": 5112026,
+      "codigoAgenciaOrigem": 1,
+      "numeroLote": 10101,
+      "numeroDocumento": 900001,
+      "codigoHistorico": 144,
+      "textoDescricaoSubHistorico": "PAGAMENTO DE BOLETO",
+      "codigoSubHistorico": 0,
+      "valorLancamento": 1234.5,
+      "indicadorSinalLancamento": "D",
+      "textoInformacaoComplementar": "FORNECEDOR SINTETICO LTDA",
+      "numeroCadastroPessoaFisicaCadastroNacPessoasJuridicasContrapartida": "012345678000195",
+      "indicadorTipoPessoaContrapartida": "J",
+      "codigoBancoContrapartida": 1,
+      "textoIdentificadorUnicoTransacao": "SINTETICO-ID-0001"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "dataLancamento": 6112026,
+      "numeroLote": 10102,
+      "numeroDocumento": 900002,
+      "codigoHistorico": 501,
+      "textoDescricaoSubHistorico": "PIX ENVIADO",
+      "valorLancamento": 80.1,
+      "indicadorSinalLancamento": "D",
+      "textoInformacaoComplementar": "PESSOA SINTETICA",
+      "numeroCadastroPessoaFisicaCadastroNacPessoasJuridicasContrapartida": "000001234567890",
+      "indicadorTipoPessoaContrapartida": "F",
+      "textoIdentificadorUnicoTransacao": ""
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "dataLancamento": 6112026,
+      "numeroLote": 10103,
+      "numeroDocumento": 900003,
+      "codigoHistorico": 100,
+      "textoDescricaoSubHistorico": "DEPOSITO",
+      "valorLancamento": 500.00,
+      "indicadorSinalLancamento": "C"
+    },
+    {
+      "indicadorTipoLancamento": "2",
+      "dataLancamento": 20112026,
+      "numeroDocumento": 900004,
+      "codigoHistorico": 144,
+      "textoDescricaoSubHistorico": "AGENDADO",
+      "valorLancamento": 300.00,
+      "indicadorSinalLancamento": "D"
+    },
+    {
+      "indicadorTipoLancamento": "SD",
+      "dataLancamento": 0,
+      "valorLancamento": 98000.00,
+      "indicadorSinalLancamento": "C",
+      "textoDescricaoSubHistorico": "SALDO DISPONIVEL"
+    }
+  ]
+}

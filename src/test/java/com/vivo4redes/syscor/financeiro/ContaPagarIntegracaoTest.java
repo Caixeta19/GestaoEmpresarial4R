@@ -326,7 +326,12 @@ class ContaPagarIntegracaoTest {
 
         assertThat(enviar(post("/financeiro/contas-pagar/{id}/baixa-manual", id),
                 baixa(LocalDate.now(ZONA), "90.00", "Pago por transferência"), financeiro).status).isEqualTo(200);
-        jdbc.update("update tb_titulo_financeiro set extrato_lancamento_id = 123 where id = ?", id);
+        Long lancamento = jdbc.queryForObject("""
+                insert into tb_extrato_lancamento (provider, id_externo, data_lancamento, valor, situacao, titulo_id,
+                                                   origem, conciliado_em)
+                values ('BANCO_BRASIL', ?, current_date, 90.00, 'CONCILIADO', ?, 'AUTO', now()) returning id
+                """, Long.class, "T-REABRIR-" + n, id);
+        jdbc.update("update tb_titulo_financeiro set extrato_lancamento_id = ? where id = ?", lancamento, id);
 
         assertThat(enviar(post("/financeiro/contas-pagar/{id}/reabrir", id), Map.of("justificativa", "curta"), financeiro)
                 .status).isEqualTo(400);
@@ -343,6 +348,11 @@ class ContaPagarIntegracaoTest {
         assertThat(r.corpo.get("temComprovante").asBoolean()).isFalse();
         assertThat(jdbc.queryForObject("select extrato_lancamento_id from tb_titulo_financeiro where id = ?",
                 Long.class, id)).as("vínculo com o extrato desfeito").isNull();
+        Map<String, Object> lancamentoAposReabrir = jdbc.queryForMap(
+                "select situacao, titulo_id, desvinculado from tb_extrato_lancamento where id = ?", lancamento);
+        assertThat(lancamentoAposReabrir.get("situacao")).as("lançamento volta à fila").isEqualTo("SEM_CORRESPONDENCIA");
+        assertThat(lancamentoAposReabrir.get("titulo_id")).isNull();
+        assertThat(lancamentoAposReabrir.get("desvinculado")).as("não casa de novo sozinho").isEqualTo(true);
 
         JsonNode historico = enviar(get("/financeiro/contas-pagar/{id}", id), null, financeiro).corpo.get("historico");
         assertThat(acoes(historico)).containsExactly("CRIOU", "BAIXA_MANUAL", "REABRIU");
