@@ -28,3 +28,8 @@ logging:
 syscor:
   caixa:
     admins: GUILHERME.CAIXETA
+  financeiro:
+    bb-extrato:
+      # FAKE (BB_EXTRATO_MODO=FAKE) lê este JSON sintético, só existente no profile dev
+      fake-recurso: dev/extrato-fake-dev.json
+      fake-datas-relativas: true

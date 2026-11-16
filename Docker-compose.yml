@@ -9,6 +9,9 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: dev
+      # Extrato do BB: para testar sem o banco, BB_EXTRATO_ENABLED=true e BB_EXTRATO_MODO=FAKE (só profile dev/test)
+      BB_EXTRATO_ENABLED: ${BB_EXTRATO_ENABLED:-false}
+      BB_EXTRATO_MODO: ${BB_EXTRATO_MODO:-REAL}
       SPRING_DATASOURCE_URL: jdbc:postgresql://syscor-db:5432/syscor
       SPRING_DATASOURCE_USERNAME: syscor
       SPRING_DATASOURCE_PASSWORD: syscor

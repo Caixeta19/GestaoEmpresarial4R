@@ -106,6 +106,8 @@ public class ExtratoSincronizacaoService {
         OffsetDateTime inicio = OffsetDateTime.now();
         int novos = 0;
         int conciliados = 0;
+        int ambiguos = 0;
+        int semCorrespondencia = 0;
         StatusSincronizacao status = StatusSincronizacao.OK;
         String erro = null;
         try {
@@ -122,7 +124,10 @@ public class ExtratoSincronizacaoService {
                     hoje.minusDays(props.getJanelaMatchingDias()));
             for (Long id : ids) {
                 try {
-                    if (conciliacao.conciliar(id).baixou()) conciliados++;
+                    var resultado = conciliacao.conciliar(id);
+                    if (resultado.baixou()) conciliados++;
+                    else if (resultado.situacao() == SituacaoExtrato.AMBIGUO) ambiguos++;
+                    else if (resultado.situacao() == SituacaoExtrato.SEM_CORRESPONDENCIA) semCorrespondencia++;
                 } catch (RuntimeException e) {
                     // um lançamento problemático não trava os demais; segue na próxima rodada
                     log.warn("Falha ao conciliar o lançamento {} do extrato: {}", id, e.getClass().getSimpleName());
@@ -140,7 +145,8 @@ public class ExtratoSincronizacaoService {
         ExtratoSincronizacao rodada = sincronizacoes.save(ExtratoSincronizacao.builder()
                 .inicio(inicio).fim(OffsetDateTime.now()).status(status).origem(origem).disparadoPorId(usuarioId)
                 .lancamentosNovos(novos).conciliados(conciliados).erro(limitar(erro)).build());
-        return new SincronizacaoExtratoDTO(rodada.getStatus(), novos, conciliados, rodada.getErro(),
+        return new SincronizacaoExtratoDTO(rodada.getStatus(), novos, conciliados, ambiguos, semCorrespondencia,
+                rodada.getErro(),
                 rodada.getInicio(), rodada.getFim());
     }
 
