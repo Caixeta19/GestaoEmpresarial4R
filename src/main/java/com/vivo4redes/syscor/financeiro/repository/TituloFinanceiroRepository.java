@@ -26,6 +26,8 @@ public interface TituloFinanceiroRepository extends JpaRepository<TituloFinancei
 
     List<TituloFinanceiro> findByVendaId(Long vendaId);
 
+    boolean existsByTipoAndDescricao(TipoTitulo tipo, String descricao);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TituloFinanceiro> findByTipoAndIdentificadorPagamento(TipoTitulo tipo, String identificadorPagamento);
 

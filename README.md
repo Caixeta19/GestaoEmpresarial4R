@@ -895,7 +895,7 @@ docker compose -f Docker-compose.yml up --build
 | `SYSCOR_CAIXA_ADMINS` | Não (padrão vazio; no perfil `dev`, `GUILHERME.CAIXETA`) | Logins com todos os poderes sobre o caixa |
 | `SYSCOR_CAIXA_BLOQUEAR_ANTERIOR_ABERTO` | Não (padrão `false`) | `true`: caixa de dia anterior ainda aberto impede vender hoje |
 | `BB_EXTRATO_ENABLED` | Não (padrão `false`) | Liga a leitura do extrato do BB (agendada e "Sincronizar agora"). Desligado, nada é chamado |
-| `BB_EXTRATO_MODO` | Não (padrão `REAL`) | `FAKE` lê o JSON sintético do classpath (dev e testes) em vez de falar com o banco |
+| `BB_EXTRATO_MODO` | Não (padrão `REAL`) | `FAKE` lê o JSON sintético do classpath em vez de falar com o banco. **Só nos profiles `dev`/`test`**: em outro profile a aplicação não sobe. Passo a passo em `docs/extrato_fake_dev.md` |
 | `BB_EXTRATO_BASE_URL` / `BB_EXTRATO_TOKEN_URL` | Não (padrão homologação) | Produção: `https://extratos.mtls.api.bb.com.br/v2` e `https://oauth.bb.com.br/oauth/token` |
 | `BB_EXTRATO_AGENCIA` / `BB_EXTRATO_CONTA` | Sim, para ligar | Só dígitos, sem dígito verificador e sem zeros à esquerda (0297 = 297) |
 | `BB_EXTRATO_CLIENT_ID` / `BB_EXTRATO_CLIENT_SECRET` | Sim, para ligar | Credenciais OAuth2 da aplicação no Portal Developers BB (**segredo**) |

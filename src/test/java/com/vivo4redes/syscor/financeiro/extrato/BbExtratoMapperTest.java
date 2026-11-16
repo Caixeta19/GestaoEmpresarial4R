@@ -160,4 +160,23 @@ class BbExtratoMapperTest {
         props.setFakeRecurso("extrato-fake/nao-existe.json");
         assertThat(fake.listarDebitos(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 30))).isEmpty();
     }
+
+    @Test
+    @DisplayName("Extrato falso de dev: datas relativas a hoje, sempre dentro da janela, só os 4 débitos")
+    void extratoFalsoDatasRelativas() {
+        BbExtratoProperties props = new BbExtratoProperties();
+        props.setAgencia("297");
+        props.setConta("1213");
+        props.setFakeRecurso("dev/extrato-fake-dev.json");
+        props.setFakeDatasRelativas(true);
+        ExtratoBancarioFake fake = new ExtratoBancarioFake(props, mapper);
+        LocalDate hoje = LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"));
+
+        List<LancamentoExtrato> debitos = fake.listarDebitos(hoje.minusDays(props.getJanelaDias()), hoje);
+
+        assertThat(debitos).extracting(LancamentoExtrato::idExterno)
+                .containsExactly("DEV-FAKE-0001", "DEV-FAKE-0002", "DEV-FAKE-0003", "DEV-FAKE-0004");
+        assertThat(debitos).allSatisfy(d -> assertThat(d.dataLancamento()).isBetween(hoje.minusDays(5), hoje));
+        assertThat(debitos.get(0).dataLancamento()).isEqualTo(hoje.minusDays(1));
+    }
 }

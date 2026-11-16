@@ -1,0 +1,97 @@
+{
+  "numeroPaginaAtual": 1,
+  "quantidadeRegistroPaginaAtual": 7,
+  "numeroPaginaAnterior": 0,
+  "numeroPaginaProximo": 0,
+  "quantidadeTotalPagina": 1,
+  "quantidadeTotalRegistro": 7,
+  "listaLancamento": [
+    {
+      "indicadorTipoLancamento": "SA",
+      "dataLancamento": 0,
+      "valorLancamento": 100000.0,
+      "indicadorSinalLancamento": "C",
+      "textoDescricaoSubHistorico": "SALDO ANTERIOR"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "diasAtras": 1,
+      "codigoAgenciaOrigem": 1,
+      "numeroLote": 20001,
+      "numeroDocumento": 800001,
+      "codigoHistorico": 144,
+      "textoDescricaoSubHistorico": "PAGAMENTO DE BOLETO",
+      "codigoSubHistorico": 0,
+      "valorLancamento": 1234.5,
+      "indicadorSinalLancamento": "D",
+      "textoInformacaoComplementar": "DEMO CONCILIADO LTDA",
+      "numeroCadastroPessoaFisicaCadastroNacPessoasJuridicasContrapartida": "11111111000111",
+      "indicadorTipoPessoaContrapartida": "J",
+      "codigoBancoContrapartida": 1,
+      "textoIdentificadorUnicoTransacao": "DEV-FAKE-0001"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "diasAtras": 2,
+      "codigoAgenciaOrigem": 1,
+      "numeroLote": 20002,
+      "numeroDocumento": 800002,
+      "codigoHistorico": 501,
+      "textoDescricaoSubHistorico": "PIX ENVIADO",
+      "codigoSubHistorico": 0,
+      "valorLancamento": 777.77,
+      "indicadorSinalLancamento": "D",
+      "textoInformacaoComplementar": "PAGAMENTO DIVERSOS",
+      "textoIdentificadorUnicoTransacao": "DEV-FAKE-0002"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "diasAtras": 3,
+      "codigoAgenciaOrigem": 1,
+      "numeroLote": 20003,
+      "numeroDocumento": 800003,
+      "codigoHistorico": 501,
+      "textoDescricaoSubHistorico": "PIX ENVIADO",
+      "codigoSubHistorico": 0,
+      "valorLancamento": 55.55,
+      "indicadorSinalLancamento": "D",
+      "textoInformacaoComplementar": "SEM CONTA CADASTRADA",
+      "textoIdentificadorUnicoTransacao": "DEV-FAKE-0003"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "diasAtras": 4,
+      "codigoAgenciaOrigem": 1,
+      "numeroLote": 20004,
+      "numeroDocumento": 800004,
+      "codigoHistorico": 144,
+      "textoDescricaoSubHistorico": "PAGAMENTO DE BOLETO",
+      "codigoSubHistorico": 0,
+      "valorLancamento": 380.0,
+      "indicadorSinalLancamento": "D",
+      "textoInformacaoComplementar": "DEMO DIVERGENTE LTDA",
+      "numeroCadastroPessoaFisicaCadastroNacPessoasJuridicasContrapartida": "22222222000122",
+      "indicadorTipoPessoaContrapartida": "J",
+      "codigoBancoContrapartida": 1,
+      "textoIdentificadorUnicoTransacao": "DEV-FAKE-0004"
+    },
+    {
+      "indicadorTipoLancamento": "1",
+      "diasAtras": 2,
+      "numeroLote": 20099,
+      "numeroDocumento": 800099,
+      "codigoHistorico": 100,
+      "textoDescricaoSubHistorico": "DEPOSITO",
+      "valorLancamento": 500.0,
+      "indicadorSinalLancamento": "C",
+      "textoIdentificadorUnicoTransacao": "DEV-FAKE-0099"
+    },
+    {
+      "indicadorTipoLancamento": "SD",
+      "dataLancamento": 0,
+      "valorLancamento": 100000.0,
+      "indicadorSinalLancamento": "C",
+      "textoDescricaoSubHistorico": "SALDO DISPONIVEL"
+    }
+  ]
+}

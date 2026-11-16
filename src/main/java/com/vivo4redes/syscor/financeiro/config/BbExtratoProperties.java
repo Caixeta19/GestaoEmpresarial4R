@@ -62,6 +62,12 @@ public class BbExtratoProperties {
     /** JSON sintético usado no modo FAKE (classpath). */
     private String fakeRecurso = "extrato-fake/extrato-bb-v2-sintetico.json";
 
+    /**
+     * Só no FAKE: reescreve as datas de cada lançamento para "hoje - diasAtras" (campo auxiliar do JSON sintético),
+     * para os lançamentos nunca caírem fora de {@code janela-dias}. Ligado só no profile dev.
+     */
+    private boolean fakeDatasRelativas = false;
+
     // ---- segredos (somente por variável de ambiente)
     private String clientId;
     private String clientSecret;

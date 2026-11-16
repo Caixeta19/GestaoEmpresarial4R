@@ -5,6 +5,7 @@ import com.vivo4redes.syscor.financeiro.enums.StatusSincronizacao;
 import java.time.OffsetDateTime;
 
 /** Resultado de uma rodada de sincronização com o extrato ("Sincronizar agora"). */
-public record SincronizacaoExtratoDTO(StatusSincronizacao status, int lancamentosNovos, int conciliados, String erro,
+public record SincronizacaoExtratoDTO(StatusSincronizacao status, int lancamentosNovos, int conciliados, int ambiguos,
+                                      int semCorrespondencia, String erro,
                                       OffsetDateTime inicio, OffsetDateTime fim) {
 }
