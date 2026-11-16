@@ -348,6 +348,48 @@ class ContaPagarIntegracaoTest {
         assertThat(acoes(historico)).containsExactly("CRIOU", "BAIXA_MANUAL", "REABRIU");
     }
 
+    // ------------------------------------------------------------------ comprovante
+    @Test
+    @DisplayName("Comprovante: PDF inline só de conta BAIXADO (409 CONTA_NAO_BAIXADA senão); consulta liberada a auditoria; 403 para gerente de loja; COMPROVANTE no histórico uma vez só")
+    void comprovante() throws Exception {
+        Map<String, Object> corpo = conta("250.00", LocalDate.now(ZONA));
+        corpo.put("fornecedor", "Fornecedor <b>Sintético</b> " + n);
+        long id = idDe(enviar(post("/financeiro/contas-pagar"), corpo, financeiro));
+
+        Resposta aberta = enviar(get("/financeiro/contas-pagar/{id}/comprovante", id), null, financeiro);
+        assertThat(aberta.status).isEqualTo(409);
+        assertThat(aberta.corpo.get("codigo").asText()).isEqualTo("CONTA_NAO_BAIXADA");
+
+        assertThat(enviar(post("/financeiro/contas-pagar/{id}/baixa-manual", id),
+                baixa(LocalDate.now(ZONA), "250.00", "Pago pelo caixa da loja"), financeiro).status).isEqualTo(200);
+
+        MvcResult pdf = mvc.perform(get("/financeiro/contas-pagar/{id}/comprovante", id)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + entrar(financeiro))).andReturn();
+        assertThat(pdf.getResponse().getStatus()).isEqualTo(200);
+        assertThat(pdf.getResponse().getContentType()).isEqualTo("application/pdf");
+        assertThat(pdf.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION)).startsWith("inline");
+        byte[] bytes = pdf.getResponse().getContentAsByteArray();
+        assertThat(new String(bytes, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = org.apache.pdfbox.pdmodel.PDDocument.load(bytes)) {
+            String texto = new org.apache.pdfbox.text.PDFTextStripper().getText(doc).replaceAll("\\s+", " ");
+            assertThat(texto).contains("Conta a pagar nº " + id).contains("Fornecedor <b>Sintético</b> " + n)
+                    .contains("Baixa manual por " + financeiro.getNome()).contains("Código de verificação: " + id + "-");
+        }
+
+        MvcResult auditoria = mvc.perform(get("/financeiro/contas-pagar/{id}/comprovante", id)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + entrar(auditor))).andReturn();
+        assertThat(auditoria.getResponse().getStatus()).as("auditoria consulta").isEqualTo(200);
+        assertThat(enviar(get("/financeiro/contas-pagar/{id}/comprovante", id), null, gerenteLoja).status)
+                .as("gerente de loja").isEqualTo(403);
+        assertThat(mvc.perform(get("/financeiro/contas-pagar/{id}/comprovante", id)).andReturn().getResponse().getStatus())
+                .as("sem token").isIn(401, 403);
+        assertThat(enviar(get("/financeiro/contas-pagar/{id}/comprovante", 987654321L), null, financeiro).status)
+                .isEqualTo(404);
+
+        JsonNode historico = enviar(get("/financeiro/contas-pagar/{id}", id), null, financeiro).corpo.get("historico");
+        assertThat(acoes(historico)).containsExactly("CRIOU", "BAIXA_MANUAL", "COMPROVANTE");
+    }
+
     // ------------------------------------------------------------------ lista e resumo
     @Test
     @DisplayName("Lista mantém o contrato (campos antigos) e filtra por status, vencimento, busca e filial; resumo conta vencidas e divergências")
