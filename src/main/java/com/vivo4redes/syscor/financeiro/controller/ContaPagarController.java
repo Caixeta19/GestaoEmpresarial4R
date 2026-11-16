@@ -9,11 +9,14 @@ import com.vivo4redes.syscor.financeiro.dto.response.PermissoesContasPagarDTO;
 import com.vivo4redes.syscor.financeiro.dto.response.ResumoContasPagarDTO;
 import com.vivo4redes.syscor.financeiro.dto.response.TituloPagarDTO;
 import com.vivo4redes.syscor.financeiro.enums.StatusTitulo;
+import com.vivo4redes.syscor.financeiro.service.ComprovanteContaPagarService;
 import com.vivo4redes.syscor.financeiro.service.ContaPagarService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,6 +30,7 @@ import java.util.List;
 public class ContaPagarController {
 
     private final ContaPagarService contaPagarService;
+    private final ComprovanteContaPagarService comprovanteService;
 
     @PostMapping
     public ResponseEntity<TituloPagarDTO> cadastrar(@Valid @RequestBody ContaPagarRequestDTO dto) {
@@ -57,6 +61,21 @@ public class ContaPagarController {
     @GetMapping("/{id}")
     public ContaPagarDetalheDTO detalhe(@PathVariable Long id) {
         return contaPagarService.detalhe(id);
+    }
+
+    /**
+     * PDF do comprovante, gerado na hora. O Content-Type é fixado na resposta (e não em {@code produces}) para o erro
+     * 409 {@code CONTA_NAO_BAIXADA} continuar saindo em JSON. O front baixa com {@code fetch} + Bearer: o PDF nunca
+     * é exposto sem autenticação.
+     */
+    @GetMapping("/{id}/comprovante")
+    public ResponseEntity<byte[]> comprovante(@PathVariable Long id) {
+        byte[] pdf = comprovanteService.gerar(id);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"comprovante-conta-" + id + ".pdf\"")
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(pdf);
     }
 
     @PutMapping("/{id}")
