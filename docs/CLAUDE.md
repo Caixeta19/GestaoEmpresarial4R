@@ -36,6 +36,12 @@ Dentro de cada módulo: controller / service / repository / model / dto (request
 - Webhook do Banco do Brasil autentica por mTLS com certificado A1 (não por segredo/hmac).
 - Perfis de acesso = cargos da tabela usuarios (UsuarioDetailsService já gera ROLE_<CARGO>).
 - Metas: uma por nível da hierarquia de cargos e por mês.
+- Contas a pagar: o pagamento é feito fora do SYSCOR (Internet Banking/app do BB). O SYSCOR lê o extrato pela API Extratos v2
+  (somente leitura, desligada por padrão), concilia sozinho e gera o comprovante em PDF. Na dúvida pede confirmação: nunca baixa a
+  conta errada. Perfis = cargos do caixa; só financeiro e admin gerenciam.
+- Extrato do BB: porta `ExtratoBancarioClient` + adaptador; todo mapeamento de campo no `BbExtratoMapper` (spec em docs/bb/);
+  só débitos contabilizados; URL, chave de aplicação, token, agência e conta nunca em log nem em erro; segredos só por `BB_EXTRATO_*`.
+- Comprovante: gerado sob demanda, nunca gravado; não substitui o comprovante de autenticação do banco.
 
 ## Como trabalhar
 1. Antes de codar, mostre o plano: arquivos que vai mudar e por quê. Espere aprovação.
