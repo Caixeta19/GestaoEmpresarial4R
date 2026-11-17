@@ -109,9 +109,12 @@ Ela passa a usar os mesmos dados da gestão documental.
    - **Colunas de texto** que o Excel transformaria em número vão **entre apóstrofos**, inclusive quando vazias (`''`): Sim Card, Nº Solicitação NEXT / RPON, Nº Protocolo GED, Nº Protocolo GED Portabilidade e Motivo Reprovação.
    - **Sem plano antigo:** `Plano Antigo` = `-` e `Valor plano antigo` = `0.00`.
    - **Pré-pago:** Plano = `PRE PAGO`, Valor plano `0.00` e Vencimento Fatura `0`.
-   - **Receita:**
-      - Troca de Simcard, Troca de Aparelho, Troca de número e Troca de titularidade → `0.00`;
-      - nos demais serviços → `max(0, Valor plano − Valor plano antigo)`.
+   - **Receita** (regra da V44, `docs/receita_servicos.md`; a mesma coluna alimenta o relatório de Venda de Serviços):
+      - Troca de Aparelho (aparelho e acessório) → valor de venda do item (`valor_unitario × quantidade`);
+      - Alta e Reativação → `Valor plano`;
+      - Migração e Troca de Plano → `max(0, Valor plano − Valor plano antigo)`, com plano antigo vazio ou Pré ("Sem plano / Pré-pago") contando `0`;
+      - Troca de Simcard, Troca de número e Troca de titularidade → `0.00`;
+      - demais (SVA, Seguro...) → `max(0, Valor plano − Valor plano antigo)`.
    - **Serviço:** é o nome composto **`<tipo> <tipo de linha> <segmento>`**, por exemplo "Troca de Plano Smartphone Controle", "SVA Outros serviços Pós", "Troca de Aparelho Voz Pré", "Alta Internet Fibra Pós".
       - Tipos: Alta, Migração, Reativação, SVA, Seguro, Troca de Plano, Troca de Aparelho, Troca de Simcard, Troca de número, Troca de titularidade.
       - Tipos de linha: Smartphone, Voz, Modem, Internet Fibra, TV GVT, Fixa GVT, Outros serviços.
@@ -144,6 +147,7 @@ Ela passa a usar os mesmos dados da gestão documental.
    - preâmbulo, cabeçalho (55 colunas, mesmo texto) e rodapé iguais ao layout;
    - arquivo em ISO-8859-1: "Não" e "Situação" com acento correto;
    - venda com troca de plano 49.00 → 35.00 → Receita `14.00`; migração 50.00 → 75.00 → Receita `0.00`; troca de simcard → `0.00`;
+   - Receita (V44): aparelho de 2499.90 → `2499.90`; Alta Controle 59.90 → `59.90`; Reativação 39.90 → `39.90`; Alta Pré → `0.00`; migração de Pré para 49.90 → `49.90`; migração Pós 129.90 com antigo 99.90 → `30.00`; downgrade → `0.00`;
    - venda com aparelho + 2 serviços → 3 linhas com o mesmo ID Venda, e só a de Troca de Aparelho tem Modelo e IMEI;
    - protocolo GED `''` quando vazio e `'123'` quando preenchido;
    - o filtro `statusBko=Nao_avaliado` traz a venda recém-lançada; com `Procedente`, não traz.
