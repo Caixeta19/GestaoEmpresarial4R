@@ -16,7 +16,7 @@ import java.util.Locale;
  * justificativa...) passa por {@link #escapar}: sem isso um fornecedor chamado {@code <script>} quebraria o XML do
  * renderizador ou injetaria marcação no PDF. O código de verificação é calculado sobre os mesmos dados impressos.
  */
-final class ComprovanteContaPagarHtml {
+public final class ComprovanteContaPagarHtml {
 
     static final String RODAPE = "Documento gerado pelo SYSCOR a partir da conciliação com o extrato bancário. "
             + "Não substitui o comprovante de autenticação emitido pelo banco.";
@@ -120,7 +120,7 @@ final class ComprovanteContaPagarHtml {
 
     // ------------------------------------------------------------------ apoio
     /** Escapa para XML e tira o que o XML ou a fonte padrão do PDF não aceitam. */
-    static String escapar(String texto) {
+    public static String escapar(String texto) {
         String limpo = sanitizar(texto);
         StringBuilder sb = new StringBuilder(limpo.length() + 16);
         for (int i = 0; i < limpo.length(); i++) {

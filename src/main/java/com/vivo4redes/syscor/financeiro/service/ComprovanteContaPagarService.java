@@ -119,7 +119,7 @@ public class ComprovanteContaPagarService {
                 baixadoEm);
     }
 
-    static byte[] renderizar(String html) {
+    public static byte[] renderizar(String html) {
         try (ByteArrayOutputStream saida = new ByteArrayOutputStream()) {
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.useFastMode();

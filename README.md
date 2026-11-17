@@ -781,6 +781,10 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/documental/protocolos/importacao` | Importar protocolos em lote (CSV) → `{ total, sucessos, erros }` |
 | GET | `/documental/protocolos/exportacao` | Relatório de Gestão Documental (`gestao_documental.csv`, Windows-1252, 55 colunas; período obrigatório, até 93 dias) |
 | GET | `/relatorios/{produtos\|servicos\|vendas}/busca` | Tabela paginada do relatório, com filtros, modo analítico/sintético e campos escolhidos |
+| GET | `/financeiro/movimento/formas-pagamento` | Relatório de Formas de Pagamento (vendas `CONCLUIDA`, por `FILIAL`, `CAIXA` ou `FORMA`); `dataInicio`/`dataFim` (máx. 366 dias), `filialIds`, `formas`. Financeiro, admin, auditoria e gerente de área (403 `RELATORIO_SEM_PERMISSAO` para os demais) |
+| GET | `/financeiro/movimento/formas-pagamento/opcoes` | Filiais (no escopo do usuário) e formas para os filtros |
+| GET | `/financeiro/movimento/formas-pagamento/permissoes` | `{consultar}` |
+| GET | `/financeiro/movimento/formas-pagamento/exportar` | `formato=xlsx\|pdf\|csv` com os mesmos filtros |
 | GET | `/relatorios/{tipo}/contagem` | Total de registros com os mesmos filtros |
 | GET | `/relatorios/{tipo}/exportacao` | Excel `.xlsx` com as colunas escolhidas (período obrigatório, até 93 dias) |
 | GET | `/relatorios/{tipo}/opcoes` | Campos, segmentos e tipos de produto disponíveis |
