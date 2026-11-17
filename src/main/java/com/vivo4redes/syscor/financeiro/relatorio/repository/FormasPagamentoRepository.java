@@ -19,6 +19,17 @@ import java.util.List;
  */
 public interface FormasPagamentoRepository extends Repository<PagamentoVenda, Long> {
 
+    /** Formas que existem em pagamentos de vendas CONCLUIDA no escopo de filiais: alimenta o filtro de formas. */
+    @Query("""
+        select distinct p.forma
+        from PagamentoVenda p
+        join p.venda v
+        where v.status = com.vivo4redes.syscor.venda.enums.StatusVenda.CONCLUIDA
+          and (:todasFiliais = true or v.filial.id in :filialIds)
+        """)
+    List<FormaPagamento> formasUsadas(@Param("todasFiliais") boolean todasFiliais,
+                                      @Param("filialIds") Collection<Long> filialIds);
+
     /** filial id, filial nome, caixa (null = venda sem caixa), forma, soma, pagamentos. */
     @Query("""
         select f.id, f.nome, cs.caixaPdv, p.forma, coalesce(sum(p.valor), 0), count(p)

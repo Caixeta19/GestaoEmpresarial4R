@@ -82,7 +82,12 @@ public class FormasPagamentoService {
                 .filter(f -> visiveis == null || visiveis.contains(f.getId()))
                 .map(f -> new OpcoesFormasPagamentoDTO.FilialOpcao(f.getId(), f.getCodigo(), f.getNome()))
                 .toList();
-        List<OpcoesFormasPagamentoDTO.FormaOpcao> formas = java.util.Arrays.stream(FormaPagamento.values())
+        // Só as formas que as vendas realmente usaram (nunca uma lista escrita no código): VOUCHER aparece apenas se
+        // houver pagamento histórico com ele. Escopo sem filial nenhuma não tem forma.
+        boolean semFilial = visiveis != null && visiveis.isEmpty();
+        List<FormaPagamento> usadas = semFilial ? List.of()
+                : repository.formasUsadas(visiveis == null, visiveis == null ? List.of(-1L) : List.copyOf(visiveis));
+        List<OpcoesFormasPagamentoDTO.FormaOpcao> formas = usadas.stream().sorted()
                 .map(f -> new OpcoesFormasPagamentoDTO.FormaOpcao(f.name(), rotulo(f)))
                 .toList();
         return new OpcoesFormasPagamentoDTO(filiais, formas);
