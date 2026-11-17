@@ -224,8 +224,11 @@ class FormasPagamentoIntegracaoTest {
         }
         JsonNode opcoes = enviar(get(BASE + "/opcoes"), Map.of(), null, null, gerenteArea).corpo;
         assertThat(opcoes.get("filiais").findValuesAsText("nome")).contains("Formas A " + n, "Formas B " + n);
-        assertThat(opcoes.get("formas")).hasSize(7);
-        assertThat(opcoes.get("formas").findValuesAsText("rotulo")).contains("Cartão de crédito", "Voucher (histórico)");
+        // só as formas que as vendas concluídas usaram (esta classe só cria PIX, crédito e dinheiro)
+        assertThat(opcoes.get("formas").findValuesAsText("valor")).containsExactly("CARTAO_CREDITO", "PIX", "DINHEIRO");
+        assertThat(opcoes.get("formas").findValuesAsText("rotulo"))
+                .containsExactly("Cartão de crédito", "PIX", "Dinheiro")
+                .doesNotContain("Voucher (histórico)", "Vivo Pay", "Boleto");
     }
 
     // ------------------------------------------------------------------ exportação
@@ -281,7 +284,8 @@ class FormasPagamentoIntegracaoTest {
         venda(a, "CONCLUIDA", meioDia, x, p("PIX", "ENTRADA", "50.00"), p("CARTAO_CREDITO", "FINANCIADO", "150.00"));
         venda(a, "CONCLUIDA", meioDia, y, p("DINHEIRO", "PAGAMENTO", "30.00"));
         venda(b, "CONCLUIDA", meioDia, null, p("PIX", "PAGAMENTO", "70.00"));
-        venda(a, "CANCELADA", meioDia, x, p("PIX", "PAGAMENTO", "999.00"));
+        // a forma BOLETO só existe numa venda cancelada: não pode aparecer nas opções nem nas somas
+        venda(a, "CANCELADA", meioDia, x, p("PIX", "PAGAMENTO", "999.00"), p("BOLETO", "PAGAMENTO", "5.00"));
         venda(a, "ABERTA", null, x, p("PIX", "PAGAMENTO", "888.00"));
         return new Cenario(a, b, x, y);
     }
