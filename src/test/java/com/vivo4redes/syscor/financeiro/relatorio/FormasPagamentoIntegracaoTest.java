@@ -12,8 +12,10 @@ import com.vivo4redes.syscor.venda.repository.FilialRepository;
 import com.vivo4redes.syscor.venda.repository.PagamentoVendaRepository;
 import com.vivo4redes.syscor.venda.repository.UsuarioRepository;
 import jakarta.persistence.EntityManager;
+import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
-import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,7 +65,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
         "syscor.caixa.cargos-financeiro=FINANCEIRO",
         "syscor.caixa.cargos-area=GERENTE DE AREA DE VENDAS",
         "syscor.caixa.cargos-gerente=GERENTE DE VENDAS - JUNIOR",
-        "syscor.caixa.admins=ADMIN.FORMAS.TESTE"
+        "syscor.caixa.admins=ADMIN.FORMAS.TESTE",
+        "syscor.relatorio.formas-pagamento.maximo-linhas-pdf=6"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -234,23 +237,31 @@ class FormasPagamentoIntegracaoTest {
     // ------------------------------------------------------------------ exportação
 
     @Test
-    @DisplayName("Exporta XLSX (valores numéricos), CSV (UTF-8 com BOM, ';' e vírgula decimal) e PDF, com o nome do arquivo no cabeçalho")
+    @DisplayName("Exporta XLSX (uma aba, valores numéricos), CSV (UTF-8 com BOM, ';' e vírgula decimal) e PDF, com o nome do arquivo no cabeçalho")
     void exportacao() throws Exception {
         Cenario c = cenario();
-        Map<String, String> filtros = Map.of("filialIds", c.filialA + "," + c.filialB);
+        Map<String, String> filtros = Map.of("filialIds", c.filialA + "," + c.filialB, "agruparPor", "CAIXA");
 
         MvcResult xlsx = baixar(filtros, "xlsx");
         assertThat(xlsx.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION))
                 .contains("formas-pagamento_" + HOJE + "_" + HOJE + ".xlsx");
-        try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx.getResponse().getContentAsByteArray()))) {
-            assertThat(wb.getSheetName(0)).isEqualTo("Resumo");
-            assertThat(wb.getSheetName(1)).isEqualTo("Detalhe");
-            Sheet detalhe = wb.getSheet("Detalhe");
-            assertThat(detalhe.getLastRowNum()).as("5 pagamentos + cabeçalho").isEqualTo(5);
-            assertThat(detalhe.getRow(1).getCell(6).getCellType()).isEqualTo(CellType.NUMERIC);
+        try (XSSFWorkbook wb = workbook(xlsx)) {
+            assertThat(wb.getNumberOfSheets()).isEqualTo(1);
+            assertThat(wb.getSheetName(0)).isEqualTo("Formas de Pagamento");
+            XSSFSheet aba = wb.getSheetAt(0);
+            int cab = linhaDoTexto(aba, "Nº da venda");
+            assertThat(textos(aba)).noneMatch(t -> t.startsWith("Agrupado") || t.contains("Agrupado por"));
+            assertThat(aba.getPaneInformation().getHorizontalSplitPosition()).isEqualTo((short) (cab + 1));
+            assertThat(aba.getCTWorksheet().getAutoFilter().getRef()).isEqualTo("A" + (cab + 1) + ":H" + (cab + 6));
+            assertThat(aba.getRow(cab + 1).getCell(7).getCellType()).isEqualTo(CellType.NUMERIC);
             double soma = 0;
-            for (int i = 1; i <= detalhe.getLastRowNum(); i++) soma += detalhe.getRow(i).getCell(6).getNumericCellValue();
+            for (int i = cab + 1; i <= cab + 5; i++) soma += aba.getRow(i).getCell(7).getNumericCellValue();
             assertThat(soma).isEqualTo(400.0);
+            Row geral = aba.getRow(linhaDoTexto(aba, "Total geral"));
+            assertThat(geral.getCell(1).getNumericCellValue()).isEqualTo(5.0);
+            assertThat(geral.getCell(2).getNumericCellValue()).isEqualTo(400.0);
+            assertThat(aba.getRow(linhaDoTexto(aba, "Total de vendas distintas")).getCell(1).getNumericCellValue())
+                    .isEqualTo(4.0);
         }
 
         MvcResult csv = baixar(filtros, "csv");
@@ -259,13 +270,113 @@ class FormasPagamentoIntegracaoTest {
         assertThat(bytes[1] & 0xFF).isEqualTo(0xBB);
         assertThat(bytes[2] & 0xFF).isEqualTo(0xBF);
         String texto = new String(bytes, StandardCharsets.UTF_8);
-        assertThat(texto).contains("Grupo;Linha;Valor").contains("Cartão de crédito").contains("400,00")
-                .contains("Total geral");
+        assertThat(texto).contains("Nº da venda;Data/hora;Filial/PDV;Caixa;Forma de pagamento;Tipo;Parcelas;Valor")
+                .contains("Cartão de crédito").contains("Total geral;5;400,00;100,00")
+                .contains("Total de vendas distintas;4").doesNotContain("Agrupado").doesNotContain("Total:");
 
         MvcResult pdf = baixar(filtros, "pdf");
         byte[] pdfBytes = pdf.getResponse().getContentAsByteArray();
         assertThat(new String(pdfBytes, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
         assertThat(pdf.getResponse().getContentType()).startsWith("application/pdf");
+    }
+
+    @Test
+    @DisplayName("Lista plana: uma linha por pagamento por nº da venda (não pela hora nem pela loja), sem 'Total:' por filial, e os totais por forma no fim batem com a lista")
+    void listaPlanaOrdenadaPorVenda() throws Exception {
+        long a = filial("Plana A " + n);
+        long b = filial("Plana B " + n);
+        LocalDate dia = HOJE.minusDays(3);
+        // o nº da venda cresce com a inserção; a hora e a loja vão fora de ordem de propósito
+        venda(b, "CONCLUIDA", dia.atTime(18, 0).atZone(ZONA).toInstant(), null, p("PIX", "PAGAMENTO", "40.00"));
+        venda(a, "CONCLUIDA", dia.atTime(9, 0).atZone(ZONA).toInstant(), null,
+                p("DINHEIRO", "ENTRADA", "20.00"), p("CARTAO_CREDITO", "FINANCIADO", "80.00"));
+        venda(b, "CONCLUIDA", dia.atTime(8, 0).atZone(ZONA).toInstant(), null, p("PIX", "PAGAMENTO", "15.50"));
+        venda(a, "CONCLUIDA", dia.atTime(12, 0).atZone(ZONA).toInstant(), null, p("PIX", "PAGAMENTO", "4.50"));
+        Map<String, String> f = new HashMap<>(Map.of("filialIds", a + "," + b, "agruparPor", "FILIAL"));
+
+        try (XSSFWorkbook wb = workbook(baixar(f, "xlsx", dia, dia))) {
+            XSSFSheet aba = wb.getSheetAt(0);
+            int cab = linhaDoTexto(aba, "Nº da venda");
+            List<Long> numeros = new java.util.ArrayList<>();
+            List<String> formas = new java.util.ArrayList<>();
+            double soma = 0;
+            for (int i = cab + 1; i <= cab + 5; i++) {
+                Row r = aba.getRow(i);
+                numeros.add((long) r.getCell(0).getNumericCellValue());
+                formas.add(r.getCell(4).getStringCellValue());
+                soma += r.getCell(7).getNumericCellValue();
+            }
+            assertThat(numeros).isSorted();
+            assertThat(numeros.get(1)).as("a venda com 2 formas fica junta").isEqualTo(numeros.get(2));
+            assertThat(formas.subList(1, 3)).containsExactly("Dinheiro", "Cartão de crédito");
+            assertThat(aba.getRow(cab + 6) == null || aba.getRow(cab + 6).getCell(0) == null).as("linha em branco").isTrue();
+            assertThat(textos(aba)).noneMatch(t -> t.startsWith("Total:"));
+            int blocoTotais = linhaDoTexto(aba, "Total geral por forma de pagamento");
+            assertThat(blocoTotais).isGreaterThan(cab + 5);
+
+            // totais por forma: PIX 60 (3), crédito 80 (1), dinheiro 20 (1), por maior valor
+            List<String> ordem = new java.util.ArrayList<>();
+            double somaFormas = 0;
+            long pagamentosFormas = 0;
+            for (int i = blocoTotais + 2; i < linhaDoTexto(aba, "Total geral"); i++) {
+                Row r = aba.getRow(i);
+                ordem.add(r.getCell(0).getStringCellValue());
+                pagamentosFormas += (long) r.getCell(1).getNumericCellValue();
+                somaFormas += r.getCell(2).getNumericCellValue();
+            }
+            assertThat(ordem).containsExactly("Cartão de crédito", "PIX", "Dinheiro");
+            Row geral = aba.getRow(linhaDoTexto(aba, "Total geral"));
+            assertThat(geral.getCell(2).getNumericCellValue()).isEqualTo(soma).isEqualTo(somaFormas).isEqualTo(160.0);
+            assertThat(geral.getCell(1).getNumericCellValue()).isEqualTo(5.0).isEqualTo(pagamentosFormas);
+            assertThat(aba.getRow(linhaDoTexto(aba, "Total de vendas distintas")).getCell(1).getNumericCellValue())
+                    .as("a venda com 2 formas conta uma vez").isEqualTo(4.0);
+        }
+
+        String csv = new String(baixar(f, "csv", dia, dia).getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
+        List<String> linhas = csv.lines().toList();
+        int cab = linhas.indexOf("Nº da venda;Data/hora;Filial/PDV;Caixa;Forma de pagamento;Tipo;Parcelas;Valor");
+        List<Long> numeros = linhas.subList(cab + 1, cab + 6).stream().map(l -> Long.parseLong(l.split(";")[0])).toList();
+        assertThat(numeros).isSorted();
+        assertThat(linhas.get(cab + 6)).isEmpty();
+        assertThat(linhas.get(cab + 7)).isEqualTo("Total geral por forma de pagamento");
+        assertThat(linhas.get(cab + 9)).isEqualTo("Cartão de crédito;1;80,00;50,00");
+        assertThat(csv).contains("PIX;3;60,00;37,50").contains("Total geral;5;160,00;100,00")
+                .contains("Total de vendas distintas;4").doesNotContain("Total:");
+    }
+
+    @Test
+    @DisplayName("Período sem vendas: os três formatos saem com 'Nenhuma venda no período' e totais zerados")
+    void semVendasNoPeriodo() throws Exception {
+        long vazia = filial("Formas Vazia " + n);
+        Map<String, String> f = Map.of("filialIds", String.valueOf(vazia));
+        try (XSSFWorkbook wb = workbook(baixar(f, "xlsx"))) {
+            XSSFSheet aba = wb.getSheetAt(0);
+            assertThat(textos(aba)).contains("Nenhuma venda no período.");
+            Row geral = aba.getRow(linhaDoTexto(aba, "Total geral"));
+            assertThat(geral.getCell(1).getNumericCellValue()).isZero();
+            assertThat(geral.getCell(2).getNumericCellValue()).isZero();
+        }
+        String csv = new String(baixar(f, "csv").getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
+        assertThat(csv).contains("Nenhuma venda no período.").contains("Total geral;0;0,00;0,00")
+                .contains("Total de vendas distintas;0");
+        assertThat(new String(baixar(f, "pdf").getResponse().getContentAsByteArray(), 0, 5, StandardCharsets.US_ASCII))
+                .isEqualTo("%PDF-");
+    }
+
+    @Test
+    @DisplayName("PDF acima do limite de linhas (6 no teste) dá 422 pedindo Excel ou CSV; XLSX e CSV continuam saindo")
+    void pdfAcimaDoLimite() throws Exception {
+        long filial = filial("Formas Muitas " + n);
+        Instant meioDia = HOJE.atTime(12, 0).atZone(ZONA).toInstant();
+        for (int i = 0; i < 7; i++) venda(filial, "CONCLUIDA", meioDia, null, p("PIX", "PAGAMENTO", "1.00"));
+        Map<String, String> f = new HashMap<>(Map.of("filialIds", String.valueOf(filial), "formato", "pdf"));
+
+        Resposta pdf = enviar(get(BASE + "/exportar"), f, HOJE, HOJE, financeiro);
+        assertThat(pdf.status).isEqualTo(422);
+        assertThat(pdf.corpo.toString()).contains("Muitas linhas para PDF").contains("use Excel ou CSV");
+        f.remove("formato");
+        baixar(f, "xlsx");
+        baixar(f, "csv");
     }
 
     // ------------------------------------------------------------------ apoio
@@ -389,11 +500,41 @@ class FormasPagamentoIntegracaoTest {
     }
 
     private MvcResult baixar(Map<String, String> filtros, String formato) throws Exception {
+        return baixar(filtros, formato, HOJE, HOJE);
+    }
+
+    private MvcResult baixar(Map<String, String> filtros, String formato, LocalDate inicio, LocalDate fim)
+            throws Exception {
         Map<String, String> p = new HashMap<>(filtros);
         p.put("formato", formato);
-        MvcResult r = mvc.perform(comParametros(get(BASE + "/exportar"), p, HOJE, HOJE, financeiro)).andReturn();
+        MvcResult r = mvc.perform(comParametros(get(BASE + "/exportar"), p, inicio, fim, financeiro)).andReturn();
         assertThat(r.getResponse().getStatus()).as(formato).isEqualTo(200);
         return r;
+    }
+
+    private static XSSFWorkbook workbook(MvcResult r) throws Exception {
+        return new XSSFWorkbook(new ByteArrayInputStream(r.getResponse().getContentAsByteArray()));
+    }
+
+    /** Textos da primeira coluna da aba (linhas vazias ficam de fora). */
+    private static List<String> textos(XSSFSheet aba) {
+        List<String> textos = new java.util.ArrayList<>();
+        for (Row r : aba) {
+            Cell c = r.getCell(0);
+            if (c != null && c.getCellType() == CellType.STRING) textos.add(c.getStringCellValue());
+        }
+        return textos;
+    }
+
+    /** Índice da primeira linha cuja primeira célula é exatamente {@code texto}. */
+    private static int linhaDoTexto(XSSFSheet aba, String texto) {
+        for (Row r : aba) {
+            Cell c = r.getCell(0);
+            if (c != null && c.getCellType() == CellType.STRING && texto.equals(c.getStringCellValue())) {
+                return r.getRowNum();
+            }
+        }
+        throw new AssertionError("linha não encontrada: " + texto);
     }
 
     private record Resposta(int status, JsonNode corpo) {

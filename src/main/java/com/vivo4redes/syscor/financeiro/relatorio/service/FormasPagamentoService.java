@@ -19,6 +19,7 @@ import com.vivo4redes.syscor.venda.service.UsuarioService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +65,10 @@ public class FormasPagamentoService {
     private final FinanceiroPerfilService perfil;
     private final CaixaPerfilService caixaPerfil;
     private final FormasPagamentoExportacao exportacao;
+
+    /** Limite de pagamentos do PDF (uma linha por pagamento); XLSX e CSV usam {@link #MAXIMO_LINHAS_DETALHE}. */
+    @Value("${syscor.relatorio.formas-pagamento.maximo-linhas-pdf:5000}")
+    private int maximoLinhasPdf;
 
     /** Arquivo pronto para download. */
     public record Arquivo(String nome, String contentType, byte[] conteudo) {
@@ -99,21 +105,54 @@ public class FormasPagamentoService {
         return calcular(usuario, filtro);
     }
 
+    /**
+     * Exportação em lista plana (uma linha por pagamento, por nº da venda) com o total geral por forma no fim, nos três
+     * formatos. {@code agruparPor} é da tela e é ignorado aqui.
+     */
     @Transactional(readOnly = true)
     public Arquivo exportar(FiltroFormasPagamentoDTO filtro, String formato) {
         Usuario usuario = exigirConsulta();
         Formato tipo = Formato.de(formato);
-        RelatorioFormasPagamentoDTO relatorio = calcular(usuario, filtro);
+        ExportacaoFormasPagamento dados = montarExportacao(usuario, filtro, tipo);
         String nome = "formas-pagamento_" + filtro.dataInicio() + "_" + filtro.dataFim() + "." + tipo.extensao;
-        log.info("Relatório de formas de pagamento exportado: usuario={}, formato={}, periodo={}..{}, agruparPor={}, "
-                        + "filiais={}, formas={}", usuario.getLogin(), tipo.extensao, filtro.dataInicio(),
-                filtro.dataFim(), relatorio.agruparPor(), tamanho(filtro.filialIds()), tamanho(filtro.formas()));
+        log.info("Relatório de formas de pagamento exportado: usuario={}, formato={}, periodo={}..{}, filiais={}, "
+                        + "formas={}", usuario.getLogin(), tipo.extensao, filtro.dataInicio(), filtro.dataFim(),
+                tamanho(filtro.filialIds()), tamanho(filtro.formas()));
         byte[] conteudo = switch (tipo) {
-            case XLSX -> exportacao.xlsx(relatorio, detalhe(usuario, filtro));
-            case PDF -> exportacao.pdf(relatorio, usuario.getNome(), descreverFiltros(filtro));
-            case CSV -> exportacao.csv(relatorio);
+            case XLSX -> exportacao.xlsx(dados);
+            case PDF -> exportacao.pdf(dados, usuario.getNome(), descreverFiltros(filtro));
+            case CSV -> exportacao.csv(dados);
         };
         return new Arquivo(nome, tipo.contentType, conteudo);
+    }
+
+    /** Lista + totais calculados da própria lista (soma da coluna = soma por forma = total geral). */
+    private ExportacaoFormasPagamento montarExportacao(Usuario usuario, FiltroFormasPagamentoDTO filtro, Formato tipo) {
+        Consulta c = consulta(usuario, filtro);
+        List<DetalhePagamentoDTO> linhas = List.of();
+        long semData = 0;
+        if (!c.escopoVazio) {
+            linhas = detalhe(c, tipo);
+            semData = repository.contarSemDataFinalizacao(c.todasFiliais, c.filialIds);
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        Map<String, BigDecimal> valorPorForma = new LinkedHashMap<>();
+        Map<String, Long> quantidadePorForma = new LinkedHashMap<>();
+        Set<Long> vendas = new HashSet<>();
+        for (DetalhePagamentoDTO d : linhas) {
+            total = total.add(d.valor());
+            valorPorForma.merge(d.formaRotulo(), d.valor(), BigDecimal::add);
+            quantidadePorForma.merge(d.formaRotulo(), 1L, Long::sum);
+            vendas.add(d.numeroVenda());
+        }
+        BigDecimal totalGeral = total;
+        List<ExportacaoFormasPagamento.TotalForma> totais = valorPorForma.entrySet().stream()
+                .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
+                .map(e -> new ExportacaoFormasPagamento.TotalForma(e.getKey(), quantidadePorForma.get(e.getKey()),
+                        dinheiro(e.getValue()), percentual(e.getValue(), totalGeral)))
+                .toList();
+        return new ExportacaoFormasPagamento(filtro.dataInicio(), filtro.dataFim(), OffsetDateTime.now(ZONA), semData,
+                linhas, totais, dinheiro(totalGeral), linhas.size(), vendas.size());
     }
 
     // ------------------------------------------------------------------ cálculo
@@ -254,14 +293,15 @@ public class FormasPagamentoService {
 
     // ------------------------------------------------------------------ detalhe (exportação)
 
-    private List<DetalhePagamentoDTO> detalhe(Usuario usuario, FiltroFormasPagamentoDTO filtro) {
-        Consulta c = consulta(usuario, filtro);
-        if (c.escopoVazio) return List.of();
+    /** Pagamentos por nº da venda e ordem do pagamento; o PDF tem limite menor que XLSX/CSV. */
+    private List<DetalhePagamentoDTO> detalhe(Consulta c, Formato tipo) {
+        int limite = tipo == Formato.PDF ? maximoLinhasPdf : MAXIMO_LINHAS_DETALHE;
         List<Object[]> linhas = repository.detalhe(c.inicio, c.fim, c.todasFiliais, c.filialIds, c.formas,
-                PageRequest.of(0, MAXIMO_LINHAS_DETALHE + 1));
-        if (linhas.size() > MAXIMO_LINHAS_DETALHE) {
-            throw new NegocioException("O detalhe tem mais de " + MAXIMO_LINHAS_DETALHE
-                    + " pagamentos. Reduza o período ou filtre por filial.");
+                PageRequest.of(0, limite + 1));
+        if (linhas.size() > limite) {
+            throw new NegocioException(tipo == Formato.PDF
+                    ? "Muitas linhas para PDF (mais de " + limite + " pagamentos); use Excel ou CSV."
+                    : "O relatório tem mais de " + limite + " pagamentos. Reduza o período ou filtre por filial.");
         }
         List<DetalhePagamentoDTO> detalhe = new ArrayList<>(linhas.size());
         for (Object[] l : linhas) {
