@@ -304,6 +304,9 @@ CANCELADA → (terminal, sem saída)
   (`syscor.revenda.nome`), cabeçalho de **55 colunas**, **uma linha por serviço** (aparelho e acessório como
   "Troca de Aparelho") e rodapé. Datas sem hora (menos "Data de alteração"), valores com ponto, Sim/Não e as
   colunas de número-texto entre apóstrofos. Faturas, Valor Receita e TFP ainda saem vazias.
+- V44: nova regra da coluna "Receita" (a mesma do relatório de Venda de Serviços): Troca de Aparelho = valor de venda
+  do item; Alta e Reativação = valor do plano; Migração e Troca de Plano = diferença para o plano antigo (antigo vazio
+  ou Pré conta 0); Troca de Simcard, número e titularidade = 0; diferença negativa vira 0. Calculada ao vivo pela view.
 - V34: o item de venda ganhou tipo de linha, valor do plano e do plano antigo, nº portado, fidelização e COD; o
   protocolo ganhou status GED, motivo de reprovação, instalação (feita, agendada, armário), comissão de aparelho
   e data da última ativação.
@@ -845,7 +848,7 @@ backend fora de uma rede confiável, ativar de fato o `JwtFilter` no
 |---|---|---|---|---|
 | `venda` | ✅ completo (carrinho, itens, pagamentos, status, avaliação) | ✅ máquina de estados, validação de carrinho | ✅ V1, V2, V8 | Núcleo do sistema — mais maduro |
 | `estoque` | ✅ produto, entrada de serial, alertas, inventário SAP, tabela de preços | ✅ status de serial, conciliação, resolução de SKU | ✅ V4, V5, V6 | — |
-| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31, V32, V33/V34 (view do relatório) | — |
+| `gestao` (documental) | ✅ salvar/buscar protocolo, busca com filtros, importação e exportação CSV | ✅ vínculo 1:1 com venda, fila do BKO | ✅ V9, V31, V32, V33/V34/V44 (view do relatório) | — |
 | `mailing` | ✅ criar, importar, disparar, listar campanha | ✅ fila + listener assíncrono | ✅ V7 | Depende de credenciais WhatsApp via env vars |
 | `dashboard` | ✅ 1 endpoint (`/dashboard/executivo`) | ✅ implementado, meta fixa no código | — (lê de `venda`/`estoque`) | Ver limitação de filtros abaixo |
 

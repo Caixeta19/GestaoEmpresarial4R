@@ -449,6 +449,62 @@ class ProtocoloDocumentalIntegracaoTest {
     }
 
     @Test
+    @DisplayName("Receita (V44): aparelho e acessório pelo valor do item, Alta/Reativação pelo plano, Migração/Troca de Plano pela diferença (Pré antigo = 0)")
+    void receitaPorTipoDeServico() throws Exception {
+        long id = vendaLancada(null, HOJE);
+        jdbc.update("""
+                INSERT INTO itens_venda (venda_id, categoria, produto_id, descricao_produto, quantidade, valor_unitario,
+                                         serial_imei, grupo_plano, numero_acesso, tipo_servico)
+                VALUES (?, 'PRODUTO_VIVO', 1, 'Aparelho Receita', 1, 2499.90, ?, 'CONTROLE_BTL', '61 922220000', 'Troca de Aparelho')
+                """, id, "35100000000000" + n);
+        jdbc.update("""
+                INSERT INTO itens_venda (venda_id, categoria, produto_id, descricao_produto, quantidade, valor_unitario, grupo_plano)
+                VALUES (?, 'ACESSORIO', 1, 'Capa Receita', 2, 45.00, 'SEM_PLANO')""", id);
+        valores(servico(id, "61 922220001", "Alta", "CONTROLE_BTL", "Controle", "CONTROLE 10GB"), "Smartphone", "59.90", null, null);
+        valores(servico(id, "61 922220002", "Reativação", "CONTROLE_BTL", "Controle", "CONTROLE 5GB"),
+                null, "39.90", "CONTROLE 2GB", "29.90");
+        valores(servico(id, "61 922220003", "Alta", "PRE", "Pré", "PRE MENSAL"), "Voz", "20.00", null, null);
+        valores(servico(id, "61 922220004", "Migração", "CONTROLE_BTL", "Controle", "CONTROLE 10GB"),
+                "Smartphone", "49.90", null, null);
+        valores(servico(id, "61 922220005", "Migração", "CONTROLE_BTL", "Controle", "CONTROLE 10GB"),
+                "Smartphone", "49.90", "Sem plano / Pré-pago", "30.00");
+        valores(servico(id, "61 922220006", "Migração", "POS_INDIVIDUAL", "Pós", "POS 100GB"),
+                "Smartphone", "129.90", "POS 50GB", "99.90");
+        valores(servico(id, "61 922220007", "Troca de Plano", "POS_INDIVIDUAL", "Pós", "POS 100GB"),
+                "Smartphone", "99.90", "POS 50GB", "69.90");
+        valores(servico(id, "61 922220008", "Troca de Plano", "POS_INDIVIDUAL", "Pós", "POS 50GB"),
+                "Smartphone", "69.90", "POS 100GB", "99.90");
+        valores(servico(id, "61 922220009", "Troca de Simcard", "POS_INDIVIDUAL", "Pós", "POS 50GB"), "Voz", "99.00", null, null);
+        valores(servico(id, "61 922220010", "Troca de número", "POS_INDIVIDUAL", "Pós", "POS 50GB"), "Voz", "99.00", null, null);
+        valores(servico(id, "61 922220011", "Troca de titularidade", "POS_INDIVIDUAL", "Pós", "POS 50GB"), "Voz", "99.00", null, null);
+        valores(servico(id, "61 922220012", "SVA", "POS_INDIVIDUAL", "Pós", "POS 50GB"), "Voz", "15.00", "POS 40GB", "10.00");
+
+        List<Map<String, String>> linhas = linhasCsv(doMes());
+        assertThat(linhas).hasSize(14);
+        Map<String, String> receita = new HashMap<>();
+        linhas.forEach(l -> receita.put(l.get("Nº Acesso(*)").isEmpty() ? l.get("Modelo") : l.get("Nº Acesso(*)"),
+                l.get("Receita")));
+
+        assertThat(receita.get("61 922220000")).as("troca de aparelho: valor do aparelho").isEqualTo("2499.90");
+        assertThat(receita.get("Capa Receita")).as("acessório: 2 × 45,00").isEqualTo("90.00");
+        assertThat(receita.get("61 922220001")).as("alta controle").isEqualTo("59.90");
+        assertThat(receita.get("61 922220002")).as("reativação: valor do plano, mesmo com antigo").isEqualTo("39.90");
+        assertThat(receita.get("61 922220003")).as("alta pré").isEqualTo("0.00");
+        assertThat(receita.get("61 922220004")).as("migração sem plano antigo").isEqualTo("49.90");
+        assertThat(receita.get("61 922220005")).as("migração de Pré: antigo conta 0").isEqualTo("49.90");
+        assertThat(receita.get("61 922220006")).as("migração pós→pós: diferença").isEqualTo("30.00");
+        assertThat(receita.get("61 922220007")).as("troca de plano upgrade").isEqualTo("30.00");
+        assertThat(receita.get("61 922220008")).as("downgrade não gera receita").isEqualTo("0.00");
+        assertThat(receita.get("61 922220009")).as("troca de simcard").isEqualTo("0.00");
+        assertThat(receita.get("61 922220010")).as("troca de número").isEqualTo("0.00");
+        assertThat(receita.get("61 922220011")).as("troca de titularidade").isEqualTo("0.00");
+        assertThat(receita.get("61 922220012")).as("SVA como antes: diferença").isEqualTo("5.00");
+        assertThat(linhas).filteredOn(l -> "61 922220005".equals(l.get("Nº Acesso(*)")))
+                .extracting(l -> l.get("Valor plano antigo(**)")).as("a coluna do plano antigo não muda")
+                .containsExactly("30.00");
+    }
+
+    @Test
     @DisplayName("Exportação: aparelho + 2 serviços = 3 linhas com o mesmo ID Venda; só a Troca de Aparelho tem Modelo e IMEI")
     void exportacaoUmaLinhaPorServico() throws Exception {
         long id = vendaLancada(null, HOJE);
@@ -468,7 +524,7 @@ class ProtocoloDocumentalIntegracaoTest {
         assertThat(aparelho.get("Serviço(*)")).isEqualTo("Troca de Aparelho Controle");
         assertThat(aparelho.get("Modelo")).isEqualTo("Galaxy Teste");
         assertThat(aparelho.get("IMEI")).isEqualTo("35000000000000" + n);
-        assertThat(aparelho.get("Receita")).isEqualTo("0.00");
+        assertThat(aparelho.get("Receita")).as("valor do aparelho").isEqualTo("1500.00");
         assertThat(linhas).filteredOn(l -> l != aparelho).allSatisfy(l -> {
             assertThat(l.get("Modelo")).isEmpty();
             assertThat(l.get("IMEI")).isEmpty();

@@ -41,6 +41,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -293,6 +294,32 @@ class RelatorioAnaliticoIntegracaoTest {
         assertThat(vendas.get("content").get(0).get("registros").asInt()).isEqualTo(2);
         assertThat(contagem("vendas", Map.of("modo", "SINTETICO"))).isEqualTo(1);
         assertThat(contagem("vendas", Map.of())).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Serviços: aparelho + 2 serviços = 3 linhas com a Receita da V44, e o sintético soma as três")
+    void receitaDeServicos() throws Exception {
+        long venda = vendaLancada(HOJE);
+        long aparelho = produto(venda, "PRODUTO_VIVO", "Aparelho Receita", "2499.90", "SERIAL-R1-" + n, 1, "1500.00");
+        jdbc.update("UPDATE itens_venda SET numero_acesso = '61 933330000', tipo_servico = 'Troca de Aparelho', "
+                + "grupo_plano = 'CONTROLE_BTL' WHERE id = ?", aparelho);
+        long alta = servico(venda, "61 933330001", "Alta", "CONTROLE_BTL", "Controle");
+        jdbc.update("UPDATE itens_venda SET valor_plano = 59.90 WHERE id = ?", alta);
+        long trocaPlano = servico(venda, "61 933330002", "Troca de Plano", "POS_INDIVIDUAL", "Pós");
+        jdbc.update("UPDATE itens_venda SET valor_plano = 99.90, plano_antigo = 'POS 50GB', valor_plano_antigo = 69.90 "
+                + "WHERE id = ?", trocaPlano);
+
+        JsonNode pagina = buscar("servicos", Map.of("campos", "numeroAcesso,valorReceita"));
+        assertThat(total(pagina)).isEqualTo(3);
+        Map<String, BigDecimal> porAcesso = new HashMap<>();
+        pagina.get("content").forEach(l -> porAcesso.put(l.get("numeroAcesso").asText(), l.get("valorReceita").decimalValue()));
+        assertThat(porAcesso.get("61 933330000")).isEqualByComparingTo("2499.90");
+        assertThat(porAcesso.get("61 933330001")).isEqualByComparingTo("59.90");
+        assertThat(porAcesso.get("61 933330002")).isEqualByComparingTo("30.00");
+
+        JsonNode sintetico = buscar("servicos", Map.of("modo", "SINTETICO"));
+        assertThat(sintetico.get("content").get(0).get("registros").asInt()).isEqualTo(3);
+        assertThat(sintetico.get("content").get(0).get("valor").decimalValue()).isEqualByComparingTo("2589.80");
     }
 
     // ------------------------------------------------------------------ exportação
