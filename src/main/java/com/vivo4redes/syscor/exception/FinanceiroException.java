@@ -22,6 +22,11 @@ public class FinanceiroException extends BusinessException {
                 "Você não tem permissão para essa ação em contas a pagar.");
     }
 
+    public static FinanceiroException semPermissaoRelatorio() {
+        return new FinanceiroException("RELATORIO_SEM_PERMISSAO", HttpStatus.FORBIDDEN,
+                "Você não tem permissão para consultar os relatórios financeiros.");
+    }
+
     public static FinanceiroException contaDuplicada() {
         return new FinanceiroException("CONTA_DUPLICADA", HttpStatus.CONFLICT,
                 "Já existe uma conta não cancelada com esse código de barras.");
