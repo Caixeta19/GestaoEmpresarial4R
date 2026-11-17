@@ -106,7 +106,10 @@ public interface FormasPagamentoRepository extends Repository<PagamentoVenda, Lo
     long contarSemDataFinalizacao(@Param("todasFiliais") boolean todasFiliais,
                                   @Param("filialIds") Collection<Long> filialIds);
 
-    /** finalizadoEm, nº da venda, filial, caixa, forma, tipo, valor, parcelas; ordenado, para o detalhe da exportação. */
+    /**
+     * finalizadoEm, nº da venda, filial, caixa, forma, tipo, valor, parcelas: a lista da exportação, por nº da venda e,
+     * dentro da venda, pela ordem do pagamento (as formas de uma mesma venda ficam juntas).
+     */
     @Query("""
         select v.finalizadoEm, v.numeroVenda, f.nome, cs.caixaPdv, p.forma, p.tipo, p.valor, p.parcelas
         from PagamentoVenda p
@@ -117,7 +120,7 @@ public interface FormasPagamentoRepository extends Repository<PagamentoVenda, Lo
           and v.finalizadoEm >= :inicio and v.finalizadoEm < :fim
           and (:todasFiliais = true or f.id in :filialIds)
           and p.forma in :formas
-        order by v.finalizadoEm, v.id, p.id
+        order by v.numeroVenda, p.id
         """)
     List<Object[]> detalhe(@Param("inicio") Instant inicio, @Param("fim") Instant fim,
                            @Param("todasFiliais") boolean todasFiliais,
