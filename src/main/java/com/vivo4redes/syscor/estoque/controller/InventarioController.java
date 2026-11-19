@@ -1,14 +1,20 @@
 package com.vivo4redes.syscor.estoque.controller;
 
 import com.vivo4redes.syscor.estoque.dto.request.BipagemRequestDTO;
+import com.vivo4redes.syscor.estoque.dto.request.ContagemSkuRequestDTO;
 import com.vivo4redes.syscor.estoque.dto.request.JustificativaRequestDTO;
 import com.vivo4redes.syscor.estoque.dto.response.BipagemResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.ImportacaoMb52ResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.InventarioSkuResponseDTO;
+import com.vivo4redes.syscor.estoque.dto.response.PaginaSkuResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.InventarioItemResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.InventarioResumoResponseDTO;
 import com.vivo4redes.syscor.estoque.dto.response.TotaisInventarioDTO;
 import com.vivo4redes.syscor.estoque.enums.ResultadoConciliacaoInventario;
+import com.vivo4redes.syscor.estoque.enums.ResultadoSku;
 import com.vivo4redes.syscor.estoque.enums.StatusInventario;
 import com.vivo4redes.syscor.estoque.service.InventarioService;
+import com.vivo4redes.syscor.estoque.service.InventarioSkuService;
 import com.vivo4redes.syscor.estoque.service.diagnostico.InventarioDiagnosticoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -33,12 +39,56 @@ public class InventarioController {
 
     private final InventarioService inventarioService;
     private final InventarioDiagnosticoService diagnosticoService;
+    private final InventarioSkuService skuService;
 
-    /** Abre o inventário da filial com a IQ09 (multipart: filialId + arquivo). Já existe um aberto -> 409. */
+    /**
+     * Abre o inventário da filial com a IQ09 (multipart: filialId + arquivo; {@code mb52} opcional para a conferência
+     * por SKU). Já existe um aberto -> 409.
+     */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<InventarioResumoResponseDTO> abrir(@RequestParam("filialId") Long filialId,
-                                                             @RequestParam("arquivo") MultipartFile arquivo) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(inventarioService.abrir(filialId, arquivo));
+                                                             @RequestParam("arquivo") MultipartFile arquivo,
+                                                             @RequestParam(value = "mb52", required = false) MultipartFile mb52) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(inventarioService.abrir(filialId, arquivo, mb52));
+    }
+
+    /** Importa (ou substitui) a MB52 da execução ABERTO/EM_CONTAGEM e recalcula a conferência por SKU. */
+    @PostMapping(value = "/{id}/mb52", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ImportacaoMb52ResponseDTO> importarMb52(@PathVariable Long id,
+                                                                  @RequestParam("arquivo") MultipartFile arquivo) {
+        return ResponseEntity.ok(skuService.importar(id, arquivo));
+    }
+
+    /**
+     * Conferência por SKU paginada. {@code resultado} aceita vários; {@code ordenacao}: {@code valor}, {@code quantidade}
+     * ou {@code sku} (padrão).
+     */
+    @GetMapping("/{id}/skus")
+    public ResponseEntity<PaginaSkuResponseDTO> listarSkus(@PathVariable Long id,
+                                                           @RequestParam(required = false) List<ResultadoSku> resultado,
+                                                           @RequestParam(required = false) String busca,
+                                                           @RequestParam(defaultValue = "false") boolean somenteDiferenca,
+                                                           @RequestParam(defaultValue = "sku") String ordenacao,
+                                                           @RequestParam(defaultValue = "0") int pagina,
+                                                           @RequestParam(defaultValue = "50") int tamanho) {
+        return ResponseEntity.ok(skuService.listar(id, resultado, busca, somenteDiferenca, ordenacao, pagina, tamanho));
+    }
+
+    /** Contagem manual do SKU (acessório com quantidade). {@code quantidade} nula remove a contagem. */
+    @PatchMapping("/{id}/skus/{skuId}/contagem")
+    public ResponseEntity<InventarioSkuResponseDTO> contarSku(@PathVariable Long id, @PathVariable Long skuId,
+                                                              @Valid @RequestBody ContagemSkuRequestDTO dto) {
+        return ResponseEntity.ok(skuService.contar(id, skuId, dto.quantidade(), dto.justificativa()));
+    }
+
+    @GetMapping("/{id}/exportacao-sku")
+    public ResponseEntity<byte[]> exportarSku(@PathVariable Long id) {
+        byte[] csv = skuService.exportarCsv(id);
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename("inventario_" + id + "_sku.csv").build().toString())
+                .body(csv);
     }
 
     @GetMapping

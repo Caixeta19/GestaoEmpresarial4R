@@ -88,6 +88,36 @@ public class InventarioExecucao {
     @Column(name = "total_corretos", nullable = false) @Builder.Default private Integer totalCorretos = 0;
     @Column(name = "total_divergencias", nullable = false) @Builder.Default private Integer totalDivergencias = 0;
 
+    // ---- MB52 (conferência por SKU, opcional; reenviar substitui a anterior)
+    @Column(name = "mb52_nome_arquivo", length = 255)
+    private String mb52NomeArquivo;
+
+    @Column(name = "mb52_importada_em")
+    private Instant mb52ImportadaEm;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "mb52_importada_por_id")
+    private Usuario mb52ImportadaPor;
+
+    @Column(name = "mb52_total_linhas", nullable = false) @Builder.Default private Integer mb52TotalLinhas = 0;
+    @Column(name = "mb52_linhas_da_filial", nullable = false) @Builder.Default private Integer mb52LinhasDaFilial = 0;
+    @Column(name = "mb52_linhas_outro_centro", nullable = false) @Builder.Default private Integer mb52LinhasOutroCentro = 0;
+    @Column(name = "mb52_linhas_ignoradas", nullable = false) @Builder.Default private Integer mb52LinhasIgnoradas = 0;
+
+    // ---- Totais por resultado de SKU gravados no fechamento
+    @Column(name = "total_sku_conferido", nullable = false) @Builder.Default private Integer totalSkuConferido = 0;
+    @Column(name = "total_sku_mb52_difere_iq09", nullable = false) @Builder.Default private Integer totalSkuMb52DifereIq09 = 0;
+    @Column(name = "total_sku_sap_acima_sistema", nullable = false) @Builder.Default private Integer totalSkuSapAcimaSistema = 0;
+    @Column(name = "total_sku_sap_abaixo_sistema", nullable = false) @Builder.Default private Integer totalSkuSapAbaixoSistema = 0;
+    @Column(name = "total_sku_so_no_sap", nullable = false) @Builder.Default private Integer totalSkuSoNoSap = 0;
+    @Column(name = "total_sku_so_no_sistema", nullable = false) @Builder.Default private Integer totalSkuSoNoSistema = 0;
+    @Column(name = "total_sku_nao_identificado", nullable = false) @Builder.Default private Integer totalSkuNaoIdentificado = 0;
+    @Column(name = "total_sku_contagem_divergente", nullable = false) @Builder.Default private Integer totalSkuContagemDivergente = 0;
+
+    public boolean temMb52() {
+        return mb52ImportadaEm != null;
+    }
+
     // ---- Diagnóstico da IA
     @Column(name = "resumo_ia", columnDefinition = "TEXT")
     private String resumoIa;

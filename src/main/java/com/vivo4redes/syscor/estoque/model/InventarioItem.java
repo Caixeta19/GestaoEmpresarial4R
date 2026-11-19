@@ -107,6 +107,13 @@ public class InventarioItem {
     @Column(length = 300)
     private String observacao;
 
+    // ---- SKU (conferência MB52). Gravado só por SQL no InventarioSkuService; o JPA nunca sobrescreve.
+    @Column(name = "sku_normalizado", length = 40, insertable = false, updatable = false)
+    private String skuNormalizado;
+
+    @Column(name = "sku_origem", length = 20, insertable = false, updatable = false)
+    private String skuOrigem;
+
     // ---- Diagnóstico da IA
     @Column(name = "causa_provavel", length = 60)
     private String causaProvavel;
