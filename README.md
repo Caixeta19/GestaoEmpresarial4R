@@ -194,6 +194,10 @@ CANCELADA → (terminal, sem saída)
 - O parser da IQ09 lê o cabeçalho do export real (`Nº de série`, `Texto breve material`, `Status do sistema`,
   `Status usuário`, `Ctg.equipamento`…) com normalização NFKD, lê `Modificado em` como data do Excel e recusa
   seriais em notação científica (`2.20181E+14`). Execuções antigas (V5) continuam legíveis.
+- **Conferência por SKU com a MB52 (RN.82, V45)**, informativa: importe a MB52 na abertura (`mb52`) ou depois
+  (`POST /{id}/mb52`) e compare por material SAP a quantidade livre da MB52 × IQ09 × sistema × contagem. Acessório
+  com quantidade N (a bipagem do serial conta 1) recebe contagem manual por SKU. Aparelho sem material na IQ09 tem o
+  SKU estimado pela tabela de preços (modelo + cor com um único Cod_Sap) ou entra como "não identificado".
 
 ### Tabela de preços
 
@@ -755,7 +759,7 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | GET | `/estoque/consolidado` | Estoque consolidado por produto (`disponivel`, `reservado`, `defeito`; `avariado` é alias obsoleto de `defeito`) |
 | GET | `/estoque/alertas` | Produtos em nível crítico de estoque |
 | POST | `/estoque/entrada-seriais` | Dar entrada em seriais/IMEIs |
-| POST | `/estoque/inventario` | Abrir inventário da filial (multipart `filialId` + IQ09); outro aberto → 409 |
+| POST | `/estoque/inventario` | Abrir inventário da filial (multipart `filialId` + IQ09, `mb52` opcional); outro aberto → 409 |
 | GET | `/estoque/inventario?filialId=&status=` | Listar execuções |
 | GET | `/estoque/inventario/{id}?resultado=&busca=&pagina=&tamanho=` | Resumo, contadores, itens paginados e últimas 10 bipagens |
 | POST | `/estoque/inventario/{id}/bipagens` | Bipar `{ serial }` → resultado, modelo, mensagem, `jaBipado`, totais |
@@ -765,6 +769,10 @@ Todas as rotas abaixo são relativas ao `context-path` configurado em
 | POST | `/estoque/inventario/{id}/cancelar` | Cancelar |
 | POST | `/estoque/inventario/{id}/diagnostico` | Refazer o diagnóstico da IA (502 se a API falhar) |
 | GET | `/estoque/inventario/{id}/exportacao` | CSV com todas as linhas e o resultado |
+| POST | `/estoque/inventario/{id}/mb52` | Importar/substituir a MB52 da execução (conferência por SKU) |
+| GET | `/estoque/inventario/{id}/skus?resultado=&busca=&somenteDiferenca=&ordenacao=&pagina=&tamanho=` | Conferência por SKU paginada + totais |
+| PATCH | `/estoque/inventario/{id}/skus/{skuId}/contagem` | Contagem manual do SKU `{ quantidade, justificativa }` |
+| GET | `/estoque/inventario/{id}/exportacao-sku` | CSV da conferência por SKU |
 | POST | `/filiais/centros-sap` | Carga do centro SAP das filiais (CSV `ADABAS;CENTRO_SAP`) |
 | POST | `/produtos` | Cadastrar produto |
 | GET | `/produtos/{id}` | Buscar produto |

@@ -30,7 +30,8 @@ public record InventarioResumoResponseDTO(
         String resumoIa,
         Instant diagnosticadoEm,
         PaginaItens itens,
-        List<InventarioItemResponseDTO> ultimasBipagens
+        List<InventarioItemResponseDTO> ultimasBipagens,
+        ResumoMb52DTO mb52
 ) {
 
     public record PaginaItens(List<InventarioItemResponseDTO> conteudo, int pagina, int tamanho,
@@ -39,6 +40,11 @@ public record InventarioResumoResponseDTO(
 
     public static InventarioResumoResponseDTO from(InventarioExecucao e, TotaisInventarioDTO totais,
                                                    PaginaItens itens, List<InventarioItemResponseDTO> ultimasBipagens) {
+        return from(e, totais, itens, ultimasBipagens, null);
+    }
+
+    public static InventarioResumoResponseDTO from(InventarioExecucao e, TotaisInventarioDTO totais, PaginaItens itens,
+                                                   List<InventarioItemResponseDTO> ultimasBipagens, ResumoMb52DTO mb52) {
         var filial = e.getFilial();
         List<String> centros = e.getCentrosSemFilial() == null || e.getCentrosSemFilial().isBlank()
                 ? List.of()
@@ -62,6 +68,7 @@ public record InventarioResumoResponseDTO(
                 e.getResumoIa(),
                 e.getDiagnosticadoEm(),
                 itens,
-                ultimasBipagens);
+                ultimasBipagens,
+                mb52);
     }
 }

@@ -122,7 +122,7 @@ public class RelatorioSapParser {
     }
 
     /** SAP GUI exporta em Latin-1 quando há acento. Tenta UTF-8 primeiro, cai para Latin-1. */
-    private String decodificar(byte[] bytes) {
+    static String decodificar(byte[] bytes) {
         try {
             CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -133,7 +133,7 @@ public class RelatorioSapParser {
         }
     }
 
-    private char detectarDelimitador(String linhaCabecalho) {
+    static char detectarDelimitador(String linhaCabecalho) {
         char melhor = ';';
         long melhorContagem = -1;
         for (char candidato : new char[]{';', ',', '\t'}) {

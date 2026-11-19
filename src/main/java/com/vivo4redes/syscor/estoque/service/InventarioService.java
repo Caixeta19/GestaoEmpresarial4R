@@ -76,6 +76,7 @@ public class InventarioService {
     private final FilialRepository filialRepository;
     private final UsuarioService usuarioService;
     private final NamedParameterJdbcTemplate jdbc;
+    private final InventarioSkuService skuService;
 
     // ======================================================================
     // Abrir
@@ -84,9 +85,15 @@ public class InventarioService {
     /**
      * Abre o inventário da filial com a IQ09: só entram as linhas do centro (e depósito, se cadastrado) da filial.
      * Esperados = IQ09 da filial (status usuário ADEP ou vazio) ∪ estoque da filial (DISPONIVEL, RESERVADO, DEFEITO).
+     * A MB52 é opcional: se vier, a conferência por SKU já é calculada (RN.82).
      */
     @Transactional
     public InventarioResumoResponseDTO abrir(Long filialId, MultipartFile arquivo) {
+        return abrir(filialId, arquivo, null);
+    }
+
+    @Transactional
+    public InventarioResumoResponseDTO abrir(Long filialId, MultipartFile arquivo, MultipartFile mb52) {
         Filial filial = filialRepository.findById(filialId)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Filial"));
         if (filial.getCentroSap() == null || filial.getCentroSap().isBlank()) {
@@ -171,6 +178,9 @@ public class InventarioService {
         itemRepository.saveAll(itens.values());
         gravarOutrosCentros(execucao.getId(), outrosCentros);
         itemRepository.flush();
+        if (mb52 != null && !mb52.isEmpty()) {
+            skuService.importar(execucao, mb52);
+        }
 
         return detalhar(execucao, null, null, 0, 50);
     }
@@ -266,6 +276,7 @@ public class InventarioService {
             }
             InventarioClassificador.classificar(item, false);
             itemRepository.save(item);
+            skuService.aposBipagem(execucao, item.getId(), item.getSkuNormalizado(), item.getSkuOrigem() != null);
         }
 
         String bipadoPor = item.getBipadoPor() == null ? null : item.getBipadoPor().getNome();
@@ -288,6 +299,8 @@ public class InventarioService {
             throw new NegocioException("Este item não está bipado.");
         }
         boolean soDaLeitura = !item.esperado() && (item.getCentroSap() == null || item.getCentroSap().isBlank());
+        String sku = item.getSkuNormalizado();
+        boolean skuResolvido = item.getSkuOrigem() != null;
         if (soDaLeitura) {
             itemRepository.delete(item);
         } else {
@@ -297,6 +310,9 @@ public class InventarioService {
             itemRepository.save(item);
         }
         itemRepository.flush();
+        if (skuResolvido) {
+            skuService.aposBipagem(execucao, itemId, sku, true);
+        }
         return totais(execucaoId);
     }
 
@@ -339,6 +355,7 @@ public class InventarioService {
         execucao.setFechadoPor(usuarioService.usuarioLogado());
         execucao.setFechadoEm(Instant.now());
         gravarTotais(execucao, totais(execucaoId));
+        skuService.aoFechar(execucao);
         execucaoRepository.save(execucao);
     }
 
@@ -352,7 +369,7 @@ public class InventarioService {
         execucao.setFechadoEm(Instant.now());
         gravarTotais(execucao, totais(execucaoId));
         execucaoRepository.save(execucao);
-        return InventarioResumoResponseDTO.from(execucao, totais(execucaoId), null, null);
+        return InventarioResumoResponseDTO.from(execucao, totais(execucaoId), null, null, skuService.resumo(execucao, false));
     }
 
     private void gravarTotais(InventarioExecucao e, TotaisInventarioDTO t) {
@@ -377,7 +394,7 @@ public class InventarioService {
     public List<InventarioResumoResponseDTO> listar(Long filialId, StatusInventario status) {
         Collection<StatusInventario> filtro = status == null ? EnumSet.allOf(StatusInventario.class) : List.of(status);
         return execucaoRepository.listar(filialId, filtro).stream()
-                .map(e -> InventarioResumoResponseDTO.from(e, totais(e.getId()), null, null))
+                .map(e -> InventarioResumoResponseDTO.from(e, totais(e.getId()), null, null, skuService.resumo(e, false)))
                 .toList();
     }
 
@@ -407,7 +424,8 @@ public class InventarioService {
                 page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages());
         var ultimas = itemRepository.ultimasBipagens(execucao.getId(), PageRequest.of(0, 10)).stream()
                 .map(InventarioItemResponseDTO::from).toList();
-        return InventarioResumoResponseDTO.from(execucao, totais(execucao.getId()), itens, ultimas);
+        return InventarioResumoResponseDTO.from(execucao, totais(execucao.getId()), itens, ultimas,
+                skuService.resumo(execucao, true));
     }
 
     /** Contadores ao vivo (várias pessoas bipando ao mesmo tempo): sempre a partir dos itens. */
