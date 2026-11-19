@@ -37,6 +37,13 @@ public final class Iq09Sintetica {
         return this;
     }
 
+    /** Linha ADEP no estoque da loja com outro material. */
+    public Iq09Sintetica linhaMaterial(String material, String serial, String centro) {
+        linhas.add(new Object[]{material, "MATERIAL " + material, serial, centro, "RPAR", "01", "DEPS",
+                LocalDate.of(2026, 11, 3), "GOT00000001", "S", "ADEP"});
+        return this;
+    }
+
     /** Linha com o Nº de série gravado como número (o Excel faz isso com IMEI). */
     public Iq09Sintetica linhaComSerialNumerico(long serial, String centro) {
         linhas.add(new Object[]{"22018137", "APARELHO NUMERICO", serial, centro, "RPAR", "01", "DEPS",
